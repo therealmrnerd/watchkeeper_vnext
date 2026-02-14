@@ -30,6 +30,10 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
    - `POST /intent`
    - `POST /execute`
 
+Current status:
+- Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
+- `/execute` request contract is defined in `contracts/v1/execute_request.schema.json`.
+
 ## Notes
 
 - `git` was not available in this shell session, so this scaffold includes `scripts/init_repo.ps1` for repo initialization on your machine where Git is installed.

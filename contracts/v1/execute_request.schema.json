@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/execute_request.schema.json",
+  "title": "ExecuteRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "action_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "maxItems": 100,
+      "uniqueItems": true
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": true
+    },
+    "allow_high_risk": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
