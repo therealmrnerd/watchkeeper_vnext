@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/feedback_request.schema.json",
+  "title": "FeedbackRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "rating"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "rating": {
+      "type": "integer",
+      "enum": [-1, 1]
+    },
+    "correction_text": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "default": "user"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["game", "work", "standby", "tutor"]
+    }
+  }
+}

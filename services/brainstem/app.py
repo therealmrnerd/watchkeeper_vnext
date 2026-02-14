@@ -46,6 +46,31 @@ ACTION_ALLOWED_KEYS = {
     "confidence",
 }
 
+STATE_ITEM_ALLOWED_KEYS = {
+    "state_key",
+    "state_value",
+    "source",
+    "confidence",
+    "observed_at_utc",
+}
+
+STATE_INGEST_ALLOWED_KEYS = {
+    "items",
+    "emit_events",
+    "profile",
+    "session_id",
+    "correlation_id",
+}
+
+FEEDBACK_ALLOWED_KEYS = {
+    "request_id",
+    "rating",
+    "correction_text",
+    "reviewer",
+    "session_id",
+    "mode",
+}
+
 MODE_SET = {"game", "work", "standby", "tutor"}
 DOMAIN_SET = {
     "gameplay",
@@ -274,6 +299,97 @@ def validate_intent(intent: dict[str, Any]) -> None:
         raise ValueError("response_text must be a string")
 
 
+def validate_state_item(item: dict[str, Any], index: int) -> None:
+    if not isinstance(item, dict):
+        raise ValueError(f"items[{index}] must be an object")
+    _check_extra_keys(item, STATE_ITEM_ALLOWED_KEYS, f"items[{index}]")
+
+    if "state_key" not in item:
+        raise ValueError(f"items[{index}] missing required field: state_key")
+    if "state_value" not in item:
+        raise ValueError(f"items[{index}] missing required field: state_value")
+    if "source" not in item:
+        raise ValueError(f"items[{index}] missing required field: source")
+
+    state_key = item["state_key"]
+    if not isinstance(state_key, str) or not state_key.strip():
+        raise ValueError(f"items[{index}].state_key must be a non-empty string")
+
+    state_source = item["source"]
+    if not isinstance(state_source, str) or not state_source.strip():
+        raise ValueError(f"items[{index}].source must be a non-empty string")
+
+    confidence = item.get("confidence")
+    if confidence is not None:
+        if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+            raise ValueError(f"items[{index}].confidence must be number 0..1")
+
+    observed_at = item.get("observed_at_utc")
+    if observed_at is not None:
+        parse_iso8601_utc(observed_at)
+
+
+def validate_state_ingest(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    _check_extra_keys(payload, STATE_INGEST_ALLOWED_KEYS, "state_ingest")
+
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("items is required and must be a non-empty array")
+
+    for idx, item in enumerate(items):
+        validate_state_item(item, idx)
+
+    emit_events = payload.get("emit_events")
+    if emit_events is not None and not isinstance(emit_events, bool):
+        raise ValueError("emit_events must be boolean when supplied")
+
+    profile = payload.get("profile")
+    if profile is not None and (not isinstance(profile, str) or not profile.strip()):
+        raise ValueError("profile must be a non-empty string when supplied")
+
+    session_id = payload.get("session_id")
+    if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+        raise ValueError("session_id must be a non-empty string when supplied")
+
+    correlation_id = payload.get("correlation_id")
+    if correlation_id is not None and (
+        not isinstance(correlation_id, str) or not correlation_id.strip()
+    ):
+        raise ValueError("correlation_id must be a non-empty string when supplied")
+
+
+def validate_feedback(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    _check_extra_keys(payload, FEEDBACK_ALLOWED_KEYS, "feedback")
+
+    request_id = payload.get("request_id")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ValueError("request_id is required and must be a non-empty string")
+
+    rating = payload.get("rating")
+    if rating not in (-1, 1):
+        raise ValueError("rating must be -1 or 1")
+
+    correction_text = payload.get("correction_text")
+    if correction_text is not None and not isinstance(correction_text, str):
+        raise ValueError("correction_text must be a string when supplied")
+
+    reviewer = payload.get("reviewer")
+    if reviewer is not None and (not isinstance(reviewer, str) or not reviewer.strip()):
+        raise ValueError("reviewer must be a non-empty string when supplied")
+
+    session_id = payload.get("session_id")
+    if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+        raise ValueError("session_id must be a non-empty string when supplied")
+
+    mode = payload.get("mode")
+    if mode is not None and mode not in MODE_SET:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(MODE_SET))}")
+
+
 def upsert_intent(con: sqlite3.Connection, intent: dict[str, Any], source: str) -> int:
     questions = intent.get("clarification_questions", [])
     retrieval = intent.get("retrieval", {})
@@ -351,6 +467,119 @@ def upsert_intent(con: sqlite3.Connection, intent: dict[str, Any], source: str) 
     )
 
     return count
+
+
+def ingest_state(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    items = payload["items"]
+    emit_events = payload.get("emit_events", True)
+    profile = payload.get("profile")
+    session_id = payload.get("session_id")
+    correlation_id = payload.get("correlation_id")
+
+    upserted = 0
+    state_keys: list[str] = []
+
+    with connect_db() as con:
+        for item in items:
+            state_key = item["state_key"].strip()
+            state_value = item["state_value"]
+            state_source = item["source"].strip()
+            confidence = item.get("confidence")
+            observed_at_utc = item.get("observed_at_utc") or utc_now_iso()
+            updated_at_utc = utc_now_iso()
+
+            con.execute(
+                """
+                INSERT INTO state_current(
+                    state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc
+                )
+                VALUES(?,?,?,?,?,?)
+                ON CONFLICT(state_key) DO UPDATE SET
+                    state_value_json=excluded.state_value_json,
+                    source=excluded.source,
+                    confidence=excluded.confidence,
+                    observed_at_utc=excluded.observed_at_utc,
+                    updated_at_utc=excluded.updated_at_utc
+                """,
+                (
+                    state_key,
+                    json.dumps(state_value, ensure_ascii=False),
+                    state_source,
+                    confidence,
+                    observed_at_utc,
+                    updated_at_utc,
+                ),
+            )
+            upserted += 1
+            state_keys.append(state_key)
+
+            if emit_events:
+                emit_event(
+                    con,
+                    event_type="STATE_UPDATED",
+                    source=source,
+                    payload={
+                        "state_key": state_key,
+                        "source": state_source,
+                        "confidence": confidence,
+                        "observed_at_utc": observed_at_utc,
+                    },
+                    profile=profile,
+                    session_id=session_id,
+                    correlation_id=correlation_id,
+                )
+
+        con.commit()
+
+    return {"upserted": upserted, "state_keys": state_keys}
+
+
+def record_feedback(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    request_id = payload["request_id"].strip()
+    rating = payload["rating"]
+    correction_text = payload.get("correction_text")
+    reviewer = (payload.get("reviewer") or "user").strip()
+    session_id = payload.get("session_id")
+    mode = payload.get("mode")
+
+    with connect_db() as con:
+        intent = con.execute(
+            "SELECT request_id,session_id,mode FROM intent_log WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if not intent:
+            raise ValueError(f"request_id not found: {request_id}")
+
+        effective_session = session_id or intent["session_id"]
+        effective_mode = mode or intent["mode"]
+
+        cur = con.execute(
+            """
+            INSERT INTO feedback_log(request_id,rating,correction_text,reviewer)
+            VALUES(?,?,?,?)
+            """,
+            (request_id, rating, correction_text, reviewer),
+        )
+        feedback_id = cur.lastrowid
+
+        emit_event(
+            con,
+            event_type="USER_FEEDBACK",
+            source=source,
+            payload={
+                "request_id": request_id,
+                "feedback_id": feedback_id,
+                "rating": rating,
+                "has_correction": bool(correction_text),
+                "reviewer": reviewer,
+            },
+            session_id=effective_session,
+            correlation_id=request_id,
+            mode=effective_mode,
+        )
+        con.commit()
+
+    return {"feedback_id": feedback_id, "request_id": request_id, "rating": rating}
 
 
 def query_state(query: dict[str, list[str]]) -> list[dict[str, Any]]:
@@ -669,6 +898,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         source = self.headers.get("X-Source", "brainstem_api")
 
         try:
+            if parsed.path == "/state":
+                body = self._read_json_body()
+                validate_state_ingest(body)
+                result = ingest_state(body, source=source)
+                self._send_json(200, {"ok": True, **result})
+                return
+
             if parsed.path == "/intent":
                 body = self._read_json_body()
                 validate_intent(body)
@@ -688,6 +924,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             if parsed.path == "/execute":
                 body = self._read_json_body()
                 result = execute_actions(body, source=source)
+                self._send_json(200, {"ok": True, **result})
+                return
+
+            if parsed.path == "/feedback":
+                body = self._read_json_body()
+                validate_feedback(body)
+                result = record_feedback(body, source=source)
                 self._send_json(200, {"ok": True, **result})
                 return
 

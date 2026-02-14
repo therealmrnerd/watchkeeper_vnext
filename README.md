@@ -33,6 +33,9 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
 - `/execute` request contract is defined in `contracts/v1/execute_request.schema.json`.
+- `/state` ingest and `/feedback` capture contracts are defined in:
+  - `contracts/v1/state_ingest_request.schema.json`
+  - `contracts/v1/feedback_request.schema.json`
 
 ## Notes
 

@@ -11,10 +11,13 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 
 ## Required Endpoints
 
+- `GET /health`
 - `GET /state`
 - `GET /events`
+- `POST /state`
 - `POST /intent`
 - `POST /execute`
+- `POST /feedback`
 
 ## Stub Implementation
 
@@ -38,4 +41,33 @@ Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8787/health
 
 ```powershell
 Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8787/events?limit=10"
+```
+
+```powershell
+$stateBody = @{
+  items = @(
+    @{
+      state_key = "music.now_playing"
+      state_value = @{
+        title = "Example Song"
+        artist = "Example Artist"
+      }
+      source = "ytm_adapter"
+      confidence = 0.99
+    }
+  )
+  correlation_id = "demo-001"
+}
+$stateBodyJson = $stateBody | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/state -ContentType "application/json" -Body $stateBodyJson
+```
+
+```powershell
+$feedbackBody = @{
+  request_id = "req-smoke-001"
+  rating = 1
+  correction_text = "Good response"
+}
+$feedbackBodyJson = $feedbackBody | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/feedback -ContentType "application/json" -Body $feedbackBodyJson
 ```
