@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/assist_request.schema.json",
+  "title": "AssistRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_text"],
+  "properties": {
+    "user_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["game", "work", "standby", "tutor"],
+      "default": "standby"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "gameplay",
+        "lore",
+        "astrophysics",
+        "general_gaming",
+        "coding",
+        "networking",
+        "system",
+        "music",
+        "speech",
+        "general"
+      ]
+    },
+    "urgency": {
+      "type": "string",
+      "enum": ["low", "normal", "high"],
+      "default": "normal"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "auto_execute": {
+      "type": "boolean",
+      "default": true
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": true
+    },
+    "allow_high_risk": {
+      "type": "boolean",
+      "default": false
+    },
+    "use_knowledge": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

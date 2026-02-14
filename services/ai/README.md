@@ -55,6 +55,40 @@ python services/ai/knowledge_service.py
 - `POST /vector/upsert`
 - `POST /vector/query`
 
+## Assist Router Bridge
+
+`assist_router.py` receives user prompts and routes structured intent into Brainstem:
+- `POST /assist` -> Brainstem `POST /intent`
+- optional auto execute -> Brainstem `POST /execute`
+- Request contract: `contracts/v1/assist_request.schema.json`
+
+### Run
+
+- `python services/ai/assist_router.py`
+- or `services/ai/run_assist_router.ps1`
+
+### Router Environment
+
+- `WKV_ASSIST_HOST` default `127.0.0.1`
+- `WKV_ASSIST_PORT` default `8791`
+- `WKV_BRAINSTEM_URL` default `http://127.0.0.1:8787`
+- `WKV_KNOWLEDGE_URL` default `http://127.0.0.1:8790`
+- `WKV_ASSIST_DEFAULT_MODE` default `standby`
+
+### Assist Example
+
+```powershell
+$assistBody = @{
+  user_text = "Set combat lights and skip track"
+  mode = "game"
+  auto_execute = $true
+  dry_run = $true
+  use_knowledge = $true
+}
+$assistJson = $assistBody | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8791/assist -ContentType "application/json" -Body $assistJson
+```
+
 ### Example: Facts
 
 ```powershell

@@ -13,22 +13,25 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 - `contracts/v1`: JSON schemas for AI/Core contracts.
 - `schemas/sqlite`: SQLite DDL migrations for core data model.
-- `services/brainstem`: Brainstem service placeholder.
-- `services/ai`: AI orchestration service placeholder.
+- `services/brainstem`: Brainstem service.
+- `services/ai`: AI orchestration and knowledge services.
+- `services/adapters`: external collector adapters.
 - `services/speech`: STT/TTS service placeholder.
 - `docs`: architecture, migration, and lessons learned.
 - `scripts`: helper scripts for local setup.
 
 ## Quick Start
 
-1. Create the database with:
-   - `sqlite3 data/watchkeeper_vnext.db ".read schemas/sqlite/001_brainstem_core.sql"`
-2. Validate payloads against JSON schemas in `contracts/v1`.
-3. Implement Brainstem endpoints first:
-   - `GET /state`
-   - `GET /events`
-   - `POST /intent`
-   - `POST /execute`
+1. Create or migrate DB:
+   - `scripts/create_db.ps1`
+2. Start Brainstem:
+   - `python services/brainstem/app.py`
+3. Start Knowledge API:
+   - `python services/ai/knowledge_service.py`
+4. Start Assist Router:
+   - `python services/ai/assist_router.py`
+5. Start state collector:
+   - `python services/adapters/state_collector.py`
 
 Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
@@ -45,6 +48,11 @@ Current status:
     - `contracts/v1/facts_query_request.schema.json`
     - `contracts/v1/vector_upsert_request.schema.json`
     - `contracts/v1/vector_query_request.schema.json`
+- Assist Router bridge implemented in `services/ai/assist_router.py`:
+  - `POST /assist` -> Brainstem `POST /intent` and optional `POST /execute`
+  - Contract: `contracts/v1/assist_request.schema.json`
+- Adapter collector implemented in `services/adapters/state_collector.py`:
+  - ED/music/system ingest into Brainstem `POST /state`
 
 ## Notes
 
