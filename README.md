@@ -39,6 +39,7 @@ Current status:
 - Knowledge API stubs are implemented in `services/ai/knowledge_service.py`:
   - Triple facts: `/facts/upsert`, `/facts/query`
   - Vector retrieval: `/vector/upsert`, `/vector/query`
+  - Vector backend: `sqlite` (default) or `qdrant` via `WKV_VECTOR_BACKEND`
   - Contracts:
     - `contracts/v1/facts_upsert_request.schema.json`
     - `contracts/v1/facts_query_request.schema.json`

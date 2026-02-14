@@ -4,12 +4,18 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
+from vector_store import QdrantVectorStore, SQLiteVectorStore, VectorStore
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -18,6 +24,10 @@ SCHEMA_DIR = Path(os.getenv("WKV_SCHEMA_DIR", ROOT_DIR / "schemas" / "sqlite"))
 HOST = os.getenv("WKV_AI_HOST", "127.0.0.1")
 PORT = int(os.getenv("WKV_AI_PORT", "8790"))
 EMBED_DIM = int(os.getenv("WKV_EMBED_DIM", "256"))
+VECTOR_BACKEND = os.getenv("WKV_VECTOR_BACKEND", "sqlite").strip().lower()
+QDRANT_URL = os.getenv("WKV_QDRANT_URL", "http://127.0.0.1:6333").strip()
+QDRANT_COLLECTION = os.getenv("WKV_QDRANT_COLLECTION", "watchkeeper_docs").strip()
+QDRANT_API_KEY = os.getenv("WKV_QDRANT_API_KEY", "").strip()
 
 FACT_ALLOWED_KEYS = {
     "triple_id",
@@ -90,6 +100,29 @@ def parse_json(raw: Any, fallback: Any) -> Any:
         return fallback
 
 
+_VECTOR_STORE: VectorStore | None = None
+
+
+def get_vector_store() -> VectorStore:
+    global _VECTOR_STORE
+    if _VECTOR_STORE is not None:
+        return _VECTOR_STORE
+
+    if VECTOR_BACKEND == "sqlite":
+        _VECTOR_STORE = SQLiteVectorStore(connect_db=connect_db, parse_json=parse_json)
+        return _VECTOR_STORE
+    if VECTOR_BACKEND == "qdrant":
+        _VECTOR_STORE = QdrantVectorStore(
+            qdrant_url=QDRANT_URL,
+            collection=QDRANT_COLLECTION,
+            api_key=QDRANT_API_KEY,
+            embed_dim=EMBED_DIM,
+        )
+        return _VECTOR_STORE
+
+    raise RuntimeError("Unsupported WKV_VECTOR_BACKEND. Use 'sqlite' or 'qdrant'.")
+
+
 def _check_extra_keys(obj: dict[str, Any], allowed: set[str], obj_name: str) -> None:
     extra = sorted(set(obj.keys()) - allowed)
     if extra:
@@ -105,10 +138,6 @@ def _normalize_vector(values: list[float]) -> list[float]:
     if norm <= 0:
         return values
     return [v / norm for v in values]
-
-
-def _dot(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
 
 
 def hash_embed(text: str, dim: int = EMBED_DIM) -> list[float]:
@@ -137,6 +166,11 @@ def _coerce_vector(raw: Any, field_name: str) -> list[float]:
             raise ValueError(f"{field_name}[{idx}] must be numeric")
         vector.append(float(value))
     return _normalize_vector(vector)
+
+
+def _ensure_embed_dim(vector: list[float], field_name: str) -> None:
+    if len(vector) != EMBED_DIM:
+        raise ValueError(f"{field_name} dimension must be {EMBED_DIM}, got {len(vector)}")
 
 
 def validate_fact_item(item: dict[str, Any], index: int) -> None:
@@ -204,7 +238,8 @@ def validate_doc_item(item: dict[str, Any], index: int) -> None:
         raise ValueError(f"docs[{index}].metadata must be an object when supplied")
 
     if "embedding" in item and item["embedding"] is not None:
-        _coerce_vector(item["embedding"], f"docs[{index}].embedding")
+        vector = _coerce_vector(item["embedding"], f"docs[{index}].embedding")
+        _ensure_embed_dim(vector, f"docs[{index}].embedding")
 
 
 def validate_vector_upsert(payload: dict[str, Any]) -> None:
@@ -233,7 +268,8 @@ def validate_vector_query(payload: dict[str, Any]) -> None:
     if query_text is not None and (not isinstance(query_text, str) or not query_text.strip()):
         raise ValueError("query_text must be a non-empty string")
     if query_vector is not None:
-        _coerce_vector(query_vector, "query_vector")
+        vector = _coerce_vector(query_vector, "query_vector")
+        _ensure_embed_dim(vector, "query_vector")
 
     top_k = payload.get("top_k", 5)
     if not isinstance(top_k, int) or top_k < 1 or top_k > 50:
@@ -373,61 +409,41 @@ def query_facts(payload: dict[str, Any]) -> dict[str, Any]:
 
 def upsert_vectors(payload: dict[str, Any]) -> dict[str, Any]:
     docs = payload["docs"]
-    upserted = 0
+    prepared_docs: list[dict[str, Any]] = []
+    now = utc_now_iso()
+    for item in docs:
+        doc_id = (item.get("doc_id") or str(uuid.uuid4())).strip()
+        domain = item.get("domain")
+        title = item.get("title")
+        text_content = item["text_content"].strip()
+        source_id = item.get("source_id")
+        metadata = item.get("metadata", {})
+        embedding_model = item.get("embedding_model") or "hash-v1"
 
-    with connect_db() as con:
-        for item in docs:
-            doc_id = (item.get("doc_id") or str(uuid.uuid4())).strip()
-            domain = item.get("domain")
-            title = item.get("title")
-            text_content = item["text_content"].strip()
-            source_id = item.get("source_id")
-            metadata = item.get("metadata", {})
-            embedding_model = item.get("embedding_model") or "hash-v1"
+        raw_embedding = item.get("embedding")
+        if raw_embedding is None:
+            vector = hash_embed(text_content, EMBED_DIM)
+        else:
+            vector = _coerce_vector(raw_embedding, "embedding")
+        _ensure_embed_dim(vector, "embedding")
 
-            raw_embedding = item.get("embedding")
-            if raw_embedding is None:
-                vector = hash_embed(text_content, EMBED_DIM)
-            else:
-                vector = _coerce_vector(raw_embedding, "embedding")
-            dimension = len(vector)
-            now = utc_now_iso()
+        prepared_docs.append(
+            {
+                "doc_id": doc_id,
+                "domain": domain,
+                "title": title,
+                "text_content": text_content,
+                "source_id": source_id,
+                "metadata": metadata,
+                "embedding_model": embedding_model,
+                "vector": vector,
+                "created_at_utc": now,
+                "updated_at_utc": now,
+            }
+        )
 
-            con.execute(
-                """
-                INSERT INTO vector_documents(
-                    doc_id,domain,title,text_content,source_id,metadata_json,embedding_json,embedding_model,dimension,created_at_utc,updated_at_utc
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(doc_id) DO UPDATE SET
-                    domain=excluded.domain,
-                    title=excluded.title,
-                    text_content=excluded.text_content,
-                    source_id=excluded.source_id,
-                    metadata_json=excluded.metadata_json,
-                    embedding_json=excluded.embedding_json,
-                    embedding_model=excluded.embedding_model,
-                    dimension=excluded.dimension,
-                    updated_at_utc=excluded.updated_at_utc
-                """,
-                (
-                    doc_id,
-                    domain,
-                    title,
-                    text_content,
-                    source_id,
-                    json.dumps(metadata, ensure_ascii=False),
-                    json.dumps(vector, ensure_ascii=False),
-                    embedding_model,
-                    dimension,
-                    now,
-                    now,
-                ),
-            )
-            upserted += 1
-        con.commit()
-
-    return {"upserted": upserted}
+    store = get_vector_store()
+    return store.upsert(prepared_docs)
 
 
 def query_vectors(payload: dict[str, Any]) -> dict[str, Any]:
@@ -442,63 +458,19 @@ def query_vectors(payload: dict[str, Any]) -> dict[str, Any]:
 
     if query_vector is not None:
         q_vec = _coerce_vector(query_vector, "query_vector")
+        _ensure_embed_dim(q_vec, "query_vector")
     else:
         q_vec = hash_embed(str(query_text), EMBED_DIM)
-    q_dim = len(q_vec)
-
-    clauses = []
-    args: list[Any] = []
-    if domain:
-        clauses.append("domain = ?")
-        args.append(domain)
-    if source_id:
-        clauses.append("source_id = ?")
-        args.append(source_id)
-
-    where = ""
-    if clauses:
-        where = "WHERE " + " AND ".join(clauses)
-
-    sql = (
-        "SELECT doc_id,domain,title,text_content,source_id,metadata_json,embedding_json,embedding_model,dimension,updated_at_utc "
-        f"FROM vector_documents {where} ORDER BY updated_at_utc DESC LIMIT 5000"
+    store = get_vector_store()
+    return store.query(
+        query_vector=q_vec,
+        domain=domain,
+        source_id=source_id,
+        top_k=top_k,
+        min_score=min_score,
+        include_text=include_text,
+        include_embedding=include_embedding,
     )
-
-    with connect_db() as con:
-        rows = con.execute(sql, args).fetchall()
-
-    scored: list[dict[str, Any]] = []
-    for row in rows:
-        if row["dimension"] != q_dim:
-            continue
-        emb = parse_json(row["embedding_json"], [])
-        if not isinstance(emb, list) or not emb:
-            continue
-        try:
-            emb_vec = [float(v) for v in emb]
-        except Exception:
-            continue
-        score = _dot(q_vec, emb_vec)
-        if score < min_score:
-            continue
-        result = {
-            "doc_id": row["doc_id"],
-            "score": score,
-            "domain": row["domain"],
-            "title": row["title"],
-            "source_id": row["source_id"],
-            "metadata": parse_json(row["metadata_json"], {}),
-            "embedding_model": row["embedding_model"],
-            "updated_at_utc": row["updated_at_utc"],
-        }
-        if include_text:
-            result["text_content"] = row["text_content"]
-        if include_embedding:
-            result["embedding"] = emb_vec
-        scored.append(result)
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return {"count": min(len(scored), top_k), "items": scored[:top_k]}
 
 
 class KnowledgeHandler(BaseHTTPRequestHandler):
@@ -533,6 +505,7 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if parsed.path == "/health":
+                store = get_vector_store()
                 self._send_json(
                     200,
                     {
@@ -540,6 +513,8 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
                         "service": "knowledge",
                         "ts": utc_now_iso(),
                         "embed_dim": EMBED_DIM,
+                        "vector_backend": store.name,
+                        "qdrant_collection": QDRANT_COLLECTION if store.name == "qdrant" else None,
                     },
                 )
                 return
@@ -599,6 +574,7 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     ensure_db()
+    get_vector_store().ensure()
     server = ThreadingHTTPServer((HOST, PORT), KnowledgeHandler)
     print(f"Knowledge API listening on http://{HOST}:{PORT}")
     try:

@@ -15,6 +15,10 @@ Local dependency-free service for:
 - Fact triples (`facts_triples` table)
 - Vector retrieval (`vector_documents` table)
 
+Vector backend is pluggable:
+- Default: `sqlite`
+- Optional: `qdrant`
+
 ### Run
 
 1. Initialize DB schemas:
@@ -24,6 +28,23 @@ Local dependency-free service for:
    - or `services/ai/run_knowledge.ps1`
 3. Optional function-level smoke test (no HTTP server required):
    - `python scripts/smoke_test_knowledge.py`
+
+### Backend Config
+
+- `WKV_VECTOR_BACKEND=sqlite|qdrant` (default `sqlite`)
+- `WKV_EMBED_DIM=256` (must match stored vectors; for Qdrant this is collection size)
+- `WKV_QDRANT_URL=http://127.0.0.1:6333`
+- `WKV_QDRANT_COLLECTION=watchkeeper_docs`
+- `WKV_QDRANT_API_KEY=` (optional)
+
+Example Qdrant startup:
+
+```powershell
+$env:WKV_VECTOR_BACKEND = "qdrant"
+$env:WKV_QDRANT_URL = "http://127.0.0.1:6333"
+$env:WKV_QDRANT_COLLECTION = "watchkeeper_docs"
+python services/ai/knowledge_service.py
+```
 
 ### Endpoints
 
