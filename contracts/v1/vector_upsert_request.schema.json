@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/vector_upsert_request.schema.json",
+  "title": "VectorUpsertRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["docs"],
+  "properties": {
+    "docs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text_content"],
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "text_content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          },
+          "source_id": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "embedding_model": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "embedding": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4096,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}

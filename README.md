@@ -36,6 +36,14 @@ Current status:
 - `/state` ingest and `/feedback` capture contracts are defined in:
   - `contracts/v1/state_ingest_request.schema.json`
   - `contracts/v1/feedback_request.schema.json`
+- Knowledge API stubs are implemented in `services/ai/knowledge_service.py`:
+  - Triple facts: `/facts/upsert`, `/facts/query`
+  - Vector retrieval: `/vector/upsert`, `/vector/query`
+  - Contracts:
+    - `contracts/v1/facts_upsert_request.schema.json`
+    - `contracts/v1/facts_query_request.schema.json`
+    - `contracts/v1/vector_upsert_request.schema.json`
+    - `contracts/v1/vector_query_request.schema.json`
 
 ## Notes
 

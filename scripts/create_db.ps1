@@ -1,26 +1,38 @@
 param(
   [string]$DbPath = "data/watchkeeper_vnext.db",
-  [string]$SchemaPath = "schemas/sqlite/001_brainstem_core.sql"
+  [string]$SchemaPath = ""
 )
-
-if (-not (Test-Path $SchemaPath)) {
-  Write-Error "Schema file not found: $SchemaPath"
-  exit 1
-}
 
 $dbDir = Split-Path -Parent $DbPath
 if ($dbDir -and -not (Test-Path $dbDir)) {
   New-Item -ItemType Directory -Path $dbDir -Force | Out-Null
 }
 
-$sqliteCmd = Get-Command sqlite3 -ErrorAction SilentlyContinue
-if ($sqliteCmd) {
-  sqlite3 $DbPath ".read $SchemaPath"
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "sqlite3 failed applying schema."
+$schemaFiles = @()
+if ($SchemaPath -and $SchemaPath.Trim()) {
+  if (-not (Test-Path $SchemaPath)) {
+    Write-Error "Schema file not found: $SchemaPath"
     exit 1
   }
-  Write-Host "Database initialized at $DbPath (via sqlite3.exe)"
+  $schemaFiles = @((Resolve-Path $SchemaPath).Path)
+} else {
+  $schemaFiles = Get-ChildItem -Path "schemas/sqlite" -Filter "*.sql" -File | Sort-Object Name | ForEach-Object { $_.FullName }
+  if (-not $schemaFiles -or $schemaFiles.Count -eq 0) {
+    Write-Error "No schema files found in schemas/sqlite"
+    exit 1
+  }
+}
+
+$sqliteCmd = Get-Command sqlite3 -ErrorAction SilentlyContinue
+if ($sqliteCmd) {
+  foreach ($schema in $schemaFiles) {
+    sqlite3 $DbPath ".read $schema"
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "sqlite3 failed applying schema: $schema"
+      exit 1
+    }
+  }
+  Write-Host "Database initialized at $DbPath (via sqlite3.exe) using $($schemaFiles.Count) schema file(s)"
   exit 0
 }
 
@@ -30,7 +42,11 @@ if (-not $pythonCmd) {
   exit 1
 }
 
-$schemaSql = Get-Content -Raw $SchemaPath
+$schemaChunks = @()
+foreach ($schema in $schemaFiles) {
+  $schemaChunks += (Get-Content -Raw $schema)
+}
+$schemaSql = ($schemaChunks -join "`n`n")
 $py = @"
 import sqlite3
 from pathlib import Path
@@ -52,4 +68,4 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
-Write-Host "Database initialized at $DbPath (via python sqlite3 fallback)"
+Write-Host "Database initialized at $DbPath (via python sqlite3 fallback) using $($schemaFiles.Count) schema file(s)"

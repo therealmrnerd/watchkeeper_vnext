@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/facts_query_request.schema.json",
+  "title": "FactsQueryRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "predicate": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "object": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "q": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 20
+    }
+  }
+}
