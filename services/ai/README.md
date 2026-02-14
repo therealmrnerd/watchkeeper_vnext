@@ -83,6 +83,8 @@ $assistBody = @{
   mode = "game"
   auto_execute = $true
   dry_run = $true
+  allow_high_risk = $false
+  user_confirmed = $false
   use_knowledge = $true
 }
 $assistJson = $assistBody | ConvertTo-Json -Depth 6

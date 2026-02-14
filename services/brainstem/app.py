@@ -1,12 +1,15 @@
 import json
 import os
 import sqlite3
+import subprocess
 import uuid
+from ctypes import windll
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib import error, request
+from urllib.parse import parse_qs, quote, urlparse
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -16,6 +19,19 @@ SCHEMA_PATH = Path(
 )
 HOST = os.getenv("WKV_HOST", "127.0.0.1")
 PORT = int(os.getenv("WKV_PORT", "8787"))
+ENABLE_ACTUATORS = os.getenv("WKV_ENABLE_ACTUATORS", "1").strip().lower() in {"1", "true", "yes"}
+ENABLE_KEYPRESS = os.getenv("WKV_ENABLE_KEYPRESS", "0").strip().lower() in {"1", "true", "yes"}
+LIGHTS_WEBHOOK_URL = os.getenv("WKV_LIGHTS_WEBHOOK_URL", "").strip()
+LIGHTS_WEBHOOK_URL_TEMPLATE = os.getenv("WKV_LIGHTS_WEBHOOK_URL_TEMPLATE", "").strip()
+LIGHTS_WEBHOOK_TIMEOUT_SEC = float(os.getenv("WKV_LIGHTS_WEBHOOK_TIMEOUT_SEC", "5"))
+KEYPRESS_ALLOWED_PROCESSES = [
+    p.strip().lower()
+    for p in os.getenv(
+        "WKV_KEYPRESS_ALLOWED_PROCESSES",
+        "EliteDangerous64.exe,EliteDangerous.exe",
+    ).split(",")
+    if p.strip()
+]
 
 INTENT_ALLOWED_KEYS = {
     "schema_version",
@@ -131,6 +147,206 @@ def parse_json(raw: Any, fallback: Any) -> Any:
         return json.loads(raw)
     except Exception:
         return fallback
+
+
+VK_MEDIA_NEXT_TRACK = 0xB0
+VK_MEDIA_PLAY_PAUSE = 0xB3
+KEYEVENTF_KEYUP = 0x0002
+
+SPECIAL_VK_MAP = {
+    "space": 0x20,
+    "enter": 0x0D,
+    "tab": 0x09,
+    "esc": 0x1B,
+    "escape": 0x1B,
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+}
+for i in range(1, 13):
+    SPECIAL_VK_MAP[f"f{i}"] = 0x6F + i
+
+
+def _list_process_names() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        names: set[str] = set()
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith('"'):
+                parts = [p.strip('"') for p in line.split('","')]
+                if parts:
+                    names.add(parts[0].lower())
+        return names
+    except Exception:
+        return set()
+
+
+def _any_process_running(process_names: list[str]) -> bool:
+    if not process_names:
+        return True
+    running = _list_process_names()
+    return any(name in running for name in process_names)
+
+
+def _key_to_vk(key_name: str) -> int:
+    key = key_name.strip().lower()
+    if not key:
+        raise ValueError("keypress key parameter is required")
+    if key in SPECIAL_VK_MAP:
+        return SPECIAL_VK_MAP[key]
+    if len(key) == 1 and "a" <= key <= "z":
+        return ord(key.upper())
+    if len(key) == 1 and "0" <= key <= "9":
+        return ord(key)
+    raise ValueError(f"Unsupported keypress key: {key_name}")
+
+
+def _send_virtual_key(vk_code: int) -> None:
+    windll.user32.keybd_event(vk_code, 0, 0, 0)
+    windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+
+
+def _build_lights_url(scene: str) -> str:
+    if LIGHTS_WEBHOOK_URL_TEMPLATE:
+        return LIGHTS_WEBHOOK_URL_TEMPLATE.replace("{scene}", quote(scene))
+    if LIGHTS_WEBHOOK_URL:
+        return LIGHTS_WEBHOOK_URL
+    raise ValueError("set_lights is not configured (set WKV_LIGHTS_WEBHOOK_URL[_TEMPLATE])")
+
+
+def _execute_set_lights(parameters: dict[str, Any], request_id: str, action_id: str) -> dict[str, Any]:
+    scene = str(parameters.get("scene", "default")).strip() or "default"
+    url = _build_lights_url(scene)
+    payload = {
+        "scene": scene,
+        "request_id": request_id,
+        "action_id": action_id,
+        "timestamp_utc": utc_now_iso(),
+    }
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = request.Request(
+        url,
+        data=raw,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with request.urlopen(req, timeout=LIGHTS_WEBHOOK_TIMEOUT_SEC) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            status = getattr(resp, "status", 200)
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"set_lights webhook HTTP {exc.code}: {body}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"set_lights webhook request failed: {exc}") from exc
+    return {
+        "scene": scene,
+        "webhook_url": url,
+        "http_status": status,
+        "response_body": body[:500],
+    }
+
+
+def _execute_music(tool_name: str) -> dict[str, Any]:
+    if tool_name == "music_next":
+        vk_code = VK_MEDIA_NEXT_TRACK
+        vk_name = "VK_MEDIA_NEXT_TRACK"
+    elif tool_name in {"music_pause", "music_resume"}:
+        vk_code = VK_MEDIA_PLAY_PAUSE
+        vk_name = "VK_MEDIA_PLAY_PAUSE"
+    else:
+        raise ValueError(f"Unsupported music tool: {tool_name}")
+    _send_virtual_key(vk_code)
+    return {"virtual_key": vk_name, "vk_code": vk_code}
+
+
+def _execute_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
+    if not ENABLE_KEYPRESS:
+        raise ValueError("keypress actuator is disabled (set WKV_ENABLE_KEYPRESS=1)")
+    if not _any_process_running(KEYPRESS_ALLOWED_PROCESSES):
+        raise ValueError("keypress denied: no allowed process is currently running")
+    key_name = str(parameters.get("key", "")).strip()
+    vk_code = _key_to_vk(key_name)
+    _send_virtual_key(vk_code)
+    return {"key": key_name, "vk_code": vk_code}
+
+
+def execute_tool(
+    *,
+    tool_name: str,
+    parameters: dict[str, Any],
+    request_id: str,
+    action_id: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    if not ENABLE_ACTUATORS:
+        return {
+            "stub_execution": True,
+            "dry_run": True,
+            "tool_name": tool_name,
+            "action_id": action_id,
+            "parameters": parameters,
+            "result": "Actuators disabled by configuration (WKV_ENABLE_ACTUATORS=0).",
+        }
+
+    if dry_run:
+        return {
+            "stub_execution": True,
+            "dry_run": True,
+            "tool_name": tool_name,
+            "action_id": action_id,
+            "parameters": parameters,
+            "result": "Dry run only. No actuator call executed.",
+        }
+
+    if tool_name == "set_lights":
+        output = _execute_set_lights(parameters, request_id=request_id, action_id=action_id)
+    elif tool_name in {"music_next", "music_pause", "music_resume"}:
+        output = _execute_music(tool_name)
+    elif tool_name == "keypress":
+        output = _execute_keypress(parameters)
+    else:
+        raise ValueError(f"Unsupported tool: {tool_name}")
+
+    return {
+        "stub_execution": False,
+        "dry_run": False,
+        "tool_name": tool_name,
+        "action_id": action_id,
+        "parameters": parameters,
+        "result": "Actuator executed.",
+        "details": output,
+    }
+
+
+def _policy_denial_reason(
+    *,
+    tool_name: str,
+    safety_level: str,
+    allow_high_risk: bool,
+    intent_mode: str,
+    mode_constraints: list[str],
+    requires_confirmation: bool,
+    user_confirmed: bool,
+) -> str | None:
+    if safety_level == "high_risk" and not allow_high_risk:
+        return "high_risk action requires allow_high_risk=true"
+    if mode_constraints and intent_mode not in mode_constraints:
+        return f"mode '{intent_mode}' is not allowed for this action"
+    if requires_confirmation and not user_confirmed:
+        return "action requires explicit confirmation (user_confirmed=true)"
+    if tool_name == "keypress" and not ENABLE_KEYPRESS:
+        return "keypress actuator is disabled (set WKV_ENABLE_KEYPRESS=1)"
+    return None
 
 
 def emit_event(
@@ -699,6 +915,10 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
     if not isinstance(allow_high_risk, bool):
         raise ValueError("allow_high_risk must be boolean")
 
+    user_confirmed = payload.get("user_confirmed", False)
+    if not isinstance(user_confirmed, bool):
+        raise ValueError("user_confirmed must be boolean")
+
     with connect_db() as con:
         intent = con.execute(
             "SELECT request_id,mode,session_id FROM intent_log WHERE request_id=?",
@@ -733,9 +953,24 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 )
                 continue
 
-            denied_reason = None
-            if row["safety_level"] == "high_risk" and not allow_high_risk:
-                denied_reason = "high_risk action requires allow_high_risk=true"
+            action_meta = parse_json(row["parameters_json"], {})
+            action_parameters = action_meta.get("parameters", {})
+            mode_constraints = action_meta.get("mode_constraints") or []
+            requires_confirmation = bool(action_meta.get("requires_confirmation", False))
+            if not isinstance(action_parameters, dict):
+                action_parameters = {}
+            if not isinstance(mode_constraints, list):
+                mode_constraints = []
+
+            denied_reason = _policy_denial_reason(
+                tool_name=row["tool_name"],
+                safety_level=row["safety_level"],
+                allow_high_risk=allow_high_risk,
+                intent_mode=intent["mode"],
+                mode_constraints=[str(m) for m in mode_constraints if isinstance(m, str)],
+                requires_confirmation=requires_confirmation,
+                user_confirmed=user_confirmed,
+            )
 
             if denied_reason:
                 con.execute(
@@ -794,47 +1029,83 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 mode=intent["mode"],
             )
 
-            log_params = parse_json(row["parameters_json"], {})
-            output = {
-                "stub_execution": True,
-                "dry_run": dry_run,
-                "tool_name": row["tool_name"],
-                "action_id": row["action_id"],
-                "parameters": log_params,
-                "result": "No adapter attached. Action simulated.",
-            }
+            try:
+                output = execute_tool(
+                    tool_name=row["tool_name"],
+                    parameters=action_parameters,
+                    request_id=request_id,
+                    action_id=row["action_id"],
+                    dry_run=dry_run,
+                )
+                status_after = "success"
+                error_code = None
+                error_message = None
+            except Exception as exc:
+                output = {}
+                status_after = "error"
+                error_code = "execution_error"
+                error_message = str(exc)
+
             ended_at = utc_now_iso()
             con.execute(
                 """
                 UPDATE action_log
-                SET status='success', output_json=?, ended_at_utc=?
+                SET status=?, output_json=?, error_code=?, error_message=?, ended_at_utc=?
                 WHERE id=?
                 """,
-                (json.dumps(output, ensure_ascii=False), ended_at, row["id"]),
+                (
+                    status_after,
+                    json.dumps(output, ensure_ascii=False),
+                    error_code,
+                    error_message,
+                    ended_at,
+                    row["id"],
+                ),
             )
-            emit_event(
-                con,
-                event_type="ACTION_EXECUTED",
-                source=source,
-                payload={
-                    "request_id": request_id,
-                    "action_id": row["action_id"],
-                    "tool_name": row["tool_name"],
-                    "dry_run": dry_run,
-                    "result": "simulated",
-                },
-                session_id=intent["session_id"],
-                correlation_id=request_id,
-                mode=intent["mode"],
-            )
-            results.append(
-                {
-                    "action_id": row["action_id"],
-                    "tool_name": row["tool_name"],
-                    "status": "success",
-                    "output": output,
-                }
-            )
+            if status_after == "success":
+                emit_event(
+                    con,
+                    event_type="ACTION_EXECUTED",
+                    source=source,
+                    payload={
+                        "request_id": request_id,
+                        "action_id": row["action_id"],
+                        "tool_name": row["tool_name"],
+                        "dry_run": dry_run,
+                        "stub_execution": bool(output.get("stub_execution")),
+                        "result": output.get("result"),
+                    },
+                    session_id=intent["session_id"],
+                    correlation_id=request_id,
+                    mode=intent["mode"],
+                )
+            else:
+                emit_event(
+                    con,
+                    event_type="ACTION_FAILED",
+                    source=source,
+                    payload={
+                        "request_id": request_id,
+                        "action_id": row["action_id"],
+                        "tool_name": row["tool_name"],
+                        "error_code": error_code,
+                        "error_message": error_message,
+                    },
+                    session_id=intent["session_id"],
+                    correlation_id=request_id,
+                    mode=intent["mode"],
+                    severity="error",
+                )
+            result_row = {
+                "action_id": row["action_id"],
+                "tool_name": row["tool_name"],
+                "status": status_after,
+            }
+            if status_after == "success":
+                result_row["output"] = output
+            else:
+                result_row["error"] = error_message
+            results.append(result_row)
 
         con.commit()
 

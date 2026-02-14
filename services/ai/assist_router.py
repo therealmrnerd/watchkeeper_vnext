@@ -40,6 +40,7 @@ ASSIST_ALLOWED_KEYS = {
     "auto_execute",
     "dry_run",
     "allow_high_risk",
+    "user_confirmed",
     "use_knowledge",
 }
 
@@ -97,7 +98,7 @@ def validate_assist_request(payload: dict[str, Any]) -> None:
     if urgency not in URGENCY_SET:
         raise ValueError(f"urgency must be one of: {', '.join(sorted(URGENCY_SET))}")
 
-    for key in ("auto_execute", "dry_run", "allow_high_risk", "use_knowledge"):
+    for key in ("auto_execute", "dry_run", "allow_high_risk", "user_confirmed", "use_knowledge"):
         if key in payload and not isinstance(payload[key], bool):
             raise ValueError(f"{key} must be boolean when supplied")
 
@@ -318,6 +319,7 @@ def route_assist(payload: dict[str, Any]) -> dict[str, Any]:
     auto_execute = payload.get("auto_execute", True)
     dry_run = payload.get("dry_run", True)
     allow_high_risk = payload.get("allow_high_risk", False)
+    user_confirmed = payload.get("user_confirmed", False)
 
     intent, retrieval_meta = build_intent(payload)
     intent_result = post_json(
@@ -334,6 +336,7 @@ def route_assist(payload: dict[str, Any]) -> dict[str, Any]:
                 "request_id": intent["request_id"],
                 "dry_run": dry_run,
                 "allow_high_risk": allow_high_risk,
+                "user_confirmed": user_confirmed,
             },
             source=ASSIST_SOURCE,
         )

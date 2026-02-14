@@ -53,6 +53,10 @@
       "type": "boolean",
       "default": false
     },
+    "user_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
     "use_knowledge": {
       "type": "boolean",
       "default": true

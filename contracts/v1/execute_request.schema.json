@@ -28,6 +28,10 @@
     "allow_high_risk": {
       "type": "boolean",
       "default": false
+    },
+    "user_confirmed": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

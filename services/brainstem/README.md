@@ -25,6 +25,19 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - Entry point: `services/brainstem/app.py`
 - Default bind: `127.0.0.1:8787`
 - Default DB: `data/watchkeeper_vnext.db`
+- Actuation:
+  - `set_lights` via webhook
+  - `music_next` / `music_pause` / `music_resume` via media keys
+  - `keypress` via virtual key event (disabled by default)
+
+## Actuator Config
+
+- `WKV_ENABLE_ACTUATORS=1` global actuator on/off
+- `WKV_ENABLE_KEYPRESS=0` extra guard for `keypress` tool
+- `WKV_LIGHTS_WEBHOOK_URL=` fixed endpoint for `set_lights`
+- `WKV_LIGHTS_WEBHOOK_URL_TEMPLATE=` optional template with `{scene}`
+- `WKV_LIGHTS_WEBHOOK_TIMEOUT_SEC=5`
+- `WKV_KEYPRESS_ALLOWED_PROCESSES=EliteDangerous64.exe,EliteDangerous.exe`
 
 ## Run
 
@@ -70,4 +83,15 @@ $feedbackBody = @{
 }
 $feedbackBodyJson = $feedbackBody | ConvertTo-Json -Depth 4
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/feedback -ContentType "application/json" -Body $feedbackBodyJson
+```
+
+```powershell
+$executeBody = @{
+  request_id = "req-smoke-001"
+  dry_run = $false
+  allow_high_risk = $true
+  user_confirmed = $true
+}
+$executeBodyJson = $executeBody | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/execute -ContentType "application/json" -Body $executeBodyJson
 ```
