@@ -13,6 +13,7 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 - `contracts/v1`: JSON schemas for AI/Core contracts.
 - `schemas/sqlite`: SQLite DDL migrations for core data model.
+- `config`: policy and runtime configuration (including standing orders).
 - `services/brainstem`: Brainstem service.
 - `services/ai`: AI orchestration and knowledge services.
 - `services/adapters`: external collector adapters.
@@ -37,6 +38,9 @@ Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
 - Brainstem DB contract layer implemented in `services/brainstem/db_service.py`:
   - `set_state`, `get_state`, `batch_set_state`, `append_event`
+- Standing Orders policy layer implemented in `services/brainstem/standing_orders.py`:
+  - config file: `config/standing_orders.json`
+  - watch-condition gating + tool policy checks + incident logging
 - Brainstem execution now supports real actuators for:
   - `set_lights` (webhook)
   - `music_next`, `music_pause`, `music_resume` (media keys)
@@ -63,6 +67,7 @@ Current status:
   - Hardware probe cadence + threshold events
   - ED on/off cadence + minimal telemetry states
   - YTM now playing cadence + track change events
+  - watch-condition transitions + handover notes logbook events
 
 ## Notes
 

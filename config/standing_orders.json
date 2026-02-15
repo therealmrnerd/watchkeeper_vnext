@@ -1,0 +1,95 @@
+{
+  "version": "1.0",
+  "defaults": {
+    "require_incident_id": true,
+    "log_all_denies": true,
+    "log_all_executes": true,
+    "confirm_window_seconds": 12,
+    "stt_min_confidence": 0.82,
+    "ui_foreground_required_for_input": true
+  },
+  "watch_conditions": {
+    "STANDBY": {
+      "allowed_tools": ["state.read", "state.write", "log.append", "tts.speak"],
+      "deny_tools": ["input.keypress", "twitch.*", "jinx.*", "sammi.*", "web.search"],
+      "confirmation": {
+        "always": ["input.keypress", "twitch.*", "sammi.*"]
+      }
+    },
+    "GAME": {
+      "allowed_tools": [
+        "state.read",
+        "state.write",
+        "log.append",
+        "jinx.*",
+        "sammi.*",
+        "tts.speak",
+        "vector.search",
+        "docs.read"
+      ],
+      "guardrails": {
+        "foreground_process_must_be": ["EliteDangerous64.exe"],
+        "max_keypress_per_minute": 30,
+        "stt_requires_confidence_for_input": true
+      },
+      "confirmation": {
+        "always": ["twitch.*", "files.write"],
+        "when_low_confidence": ["input.keypress", "sammi.*"]
+      }
+    },
+    "WORK": {
+      "allowed_tools": [
+        "state.read",
+        "state.write",
+        "log.append",
+        "docs.*",
+        "excel.*",
+        "web.search",
+        "tts.speak"
+      ],
+      "deny_tools": ["input.keypress", "jinx.*", "sammi.*", "twitch.*"],
+      "confirmation": {
+        "always": ["files.write", "email.send"]
+      }
+    },
+    "TUTOR": {
+      "allowed_tools": ["state.read", "log.append", "docs.read", "vector.search", "tts.speak"],
+      "deny_tools": ["input.keypress", "files.write", "twitch.*", "sammi.*", "jinx.*"]
+    },
+    "RESTRICTED": {
+      "inherits": "GAME",
+      "guardrails": {
+        "max_keypress_per_minute": 10,
+        "require_confirmation_for_all_actions": true
+      }
+    },
+    "DEGRADED": {
+      "allowed_tools": ["state.read", "state.write", "log.append", "tts.speak"],
+      "deny_tools": ["web.search", "vector.search", "input.keypress", "twitch.*", "sammi.*", "jinx.*"],
+      "notes": "Used when dependencies are failing (vector DB down, rate-limits, repeated errors)."
+    }
+  },
+  "tool_policies": {
+    "input.keypress": {
+      "risk": "HIGH",
+      "requires": ["foreground_ok", "recent_user_confirm"],
+      "deny_if": ["stt_confidence_low"]
+    },
+    "files.write": {
+      "risk": "HIGH",
+      "requires": ["recent_user_confirm"]
+    },
+    "twitch.*": {
+      "risk": "HIGH",
+      "requires": ["recent_user_confirm"]
+    },
+    "web.search": {
+      "risk": "MED",
+      "rate_limit_per_minute": 12
+    },
+    "vector.search": {
+      "risk": "LOW",
+      "fallback": "docs.keyword_search"
+    }
+  }
+}

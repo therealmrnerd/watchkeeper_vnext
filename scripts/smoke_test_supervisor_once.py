@@ -62,6 +62,9 @@ def main() -> None:
     print("HAS_ED_RUNNING", "ed.running" in state_keys)
     print("HAS_MUSIC_TITLE", "music.track.title" in state_keys)
     print("HAS_THRESHOLD_EVENT", "HARDWARE_THRESHOLD" in event_types)
+    print("HAS_WATCH_CONDITION", "system.watch_condition" in state_keys)
+    print("HAS_WATCH_CHANGE_EVENT", "WATCH_CONDITION_CHANGED" in event_types)
+    print("HAS_HANDOVER_NOTE", "HANDOVER_NOTE" in event_types)
 
 
 if __name__ == "__main__":

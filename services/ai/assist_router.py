@@ -32,21 +32,30 @@ DOMAIN_SET = {
 }
 
 ASSIST_ALLOWED_KEYS = {
+    "incident_id",
     "user_text",
     "mode",
     "domain",
     "urgency",
+    "watch_condition",
+    "stt_confidence",
     "session_id",
     "auto_execute",
     "dry_run",
     "allow_high_risk",
     "user_confirmed",
+    "confirmed_at_utc",
     "use_knowledge",
 }
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def parse_iso8601_utc(value: str) -> None:
+    normalized = value.replace("Z", "+00:00")
+    datetime.fromisoformat(normalized)
 
 
 def _check_extra_keys(obj: dict[str, Any], allowed: set[str], obj_name: str) -> None:
@@ -98,6 +107,23 @@ def validate_assist_request(payload: dict[str, Any]) -> None:
     if urgency not in URGENCY_SET:
         raise ValueError(f"urgency must be one of: {', '.join(sorted(URGENCY_SET))}")
 
+    incident_id = payload.get("incident_id")
+    if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
+        raise ValueError("incident_id must be a non-empty string when supplied")
+
+    watch_condition = payload.get("watch_condition")
+    if watch_condition is not None:
+        if not isinstance(watch_condition, str) or not watch_condition.strip():
+            raise ValueError("watch_condition must be a non-empty string when supplied")
+        allowed = {"STANDBY", "GAME", "WORK", "TUTOR", "RESTRICTED", "DEGRADED"}
+        if watch_condition.strip().upper() not in allowed:
+            raise ValueError(f"watch_condition must be one of: {', '.join(sorted(allowed))}")
+
+    stt_confidence = payload.get("stt_confidence")
+    if stt_confidence is not None:
+        if not isinstance(stt_confidence, (int, float)) or stt_confidence < 0 or stt_confidence > 1:
+            raise ValueError("stt_confidence must be number 0..1 when supplied")
+
     for key in ("auto_execute", "dry_run", "allow_high_risk", "user_confirmed", "use_knowledge"):
         if key in payload and not isinstance(payload[key], bool):
             raise ValueError(f"{key} must be boolean when supplied")
@@ -105,6 +131,15 @@ def validate_assist_request(payload: dict[str, Any]) -> None:
     session_id = payload.get("session_id")
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
         raise ValueError("session_id must be a non-empty string when supplied")
+
+    confirmed_at_utc = payload.get("confirmed_at_utc")
+    if confirmed_at_utc is not None:
+        if not isinstance(confirmed_at_utc, str) or not confirmed_at_utc.strip():
+            raise ValueError("confirmed_at_utc must be a non-empty string when supplied")
+        try:
+            parse_iso8601_utc(confirmed_at_utc)
+        except Exception as exc:
+            raise ValueError("confirmed_at_utc must be ISO-8601") from exc
 
 
 def infer_domain(user_text: str) -> str:
@@ -320,6 +355,14 @@ def route_assist(payload: dict[str, Any]) -> dict[str, Any]:
     dry_run = payload.get("dry_run", True)
     allow_high_risk = payload.get("allow_high_risk", False)
     user_confirmed = payload.get("user_confirmed", False)
+    watch_condition = (
+        str(payload.get("watch_condition")).strip().upper() if payload.get("watch_condition") else None
+    )
+    incident_id = (payload.get("incident_id") or str(uuid.uuid4())).strip()
+    stt_confidence = payload.get("stt_confidence")
+    confirmed_at_utc = payload.get("confirmed_at_utc")
+    if user_confirmed and not confirmed_at_utc:
+        confirmed_at_utc = utc_now_iso()
 
     intent, retrieval_meta = build_intent(payload)
     intent_result = post_json(
@@ -334,9 +377,13 @@ def route_assist(payload: dict[str, Any]) -> dict[str, Any]:
             f"{BRAINSTEM_BASE_URL}/execute",
             {
                 "request_id": intent["request_id"],
+                "incident_id": incident_id,
                 "dry_run": dry_run,
                 "allow_high_risk": allow_high_risk,
                 "user_confirmed": user_confirmed,
+                "confirmed_at_utc": confirmed_at_utc,
+                "watch_condition": watch_condition,
+                "stt_confidence": stt_confidence,
             },
             source=ASSIST_SOURCE,
         )
@@ -344,6 +391,7 @@ def route_assist(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": True,
         "request_id": intent["request_id"],
+        "incident_id": incident_id,
         "mode": intent["mode"],
         "domain": intent["domain"],
         "urgency": intent["urgency"],

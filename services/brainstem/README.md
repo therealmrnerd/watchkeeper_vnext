@@ -44,6 +44,16 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `WKV_LIGHTS_WEBHOOK_TIMEOUT_SEC=5`
 - `WKV_KEYPRESS_ALLOWED_PROCESSES=EliteDangerous64.exe,EliteDangerous.exe`
 
+## Standing Orders
+
+- Policy file: `config/standing_orders.json`
+- Override path: `WKV_STANDING_ORDERS_PATH`
+- Execute pipeline enforces:
+  - watch condition allow/deny tool lists (wildcards)
+  - tool policy guards (foreground, confidence, confirmation, rate limits)
+  - incident ID requirement (`incident_id`)
+  - deny/execute logging with reason payloads
+
 ## Run
 
 1. Initialize DB (once): `scripts/create_db.ps1`
@@ -73,6 +83,9 @@ Minimum viable DB-validation ingest sources:
   - `music.track.artist`
   - `music.playing`
   - track/lifecycle events (`TRACK_CHANGED`, `MUSIC_STARTED`, `MUSIC_STOPPED`)
+  - watch-condition change logbook:
+    - `WATCH_CONDITION_CHANGED`
+    - `HANDOVER_NOTE` (equipment, alarms, ED/music/AI status)
 
 Loop cadence knobs:
 - `WKV_SUP_HARDWARE_SEC`
@@ -121,9 +134,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/feedback -ContentType 
 ```powershell
 $executeBody = @{
   request_id = "req-smoke-001"
+  incident_id = "inc-demo-001"
+  watch_condition = "GAME"
+  stt_confidence = 0.95
   dry_run = $false
   allow_high_risk = $true
   user_confirmed = $true
+  confirmed_at_utc = "2026-02-15T12:00:00Z"
 }
 $executeBodyJson = $executeBody | ConvertTo-Json -Depth 4
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/execute -ContentType "application/json" -Body $executeBodyJson

@@ -51,6 +51,7 @@ MUSIC_ACTIVE_SEC = float(os.getenv("WKV_SUP_MUSIC_ACTIVE_SEC", "2"))
 MUSIC_IDLE_SEC = float(os.getenv("WKV_SUP_MUSIC_IDLE_SEC", "10"))
 
 LOOP_SLEEP_SEC = float(os.getenv("WKV_SUP_LOOP_SLEEP_SEC", "0.3"))
+FORCE_WATCH_CONDITION = os.getenv("WKV_FORCE_WATCH_CONDITION", "").strip().upper()
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -332,6 +333,131 @@ def process_music(
     return playing, track
 
 
+def determine_watch_condition(db: BrainstemDB, ed_running: bool) -> str:
+    if FORCE_WATCH_CONDITION:
+        return FORCE_WATCH_CONDITION
+
+    degraded = db.get_state("system.degraded")
+    restricted = db.get_state("system.restricted_mode")
+    if degraded and bool(degraded.get("state_value")):
+        return "DEGRADED"
+    if restricted and bool(restricted.get("state_value")):
+        return "RESTRICTED"
+    if ed_running:
+        return "GAME"
+    return "STANDBY"
+
+
+def handover_snapshot(db: BrainstemDB) -> dict[str, Any]:
+    hardware_mem = db.get_state("hardware.memory_used_percent")
+    ed_running = db.get_state("ed.running")
+    ed_system = db.get_state("ed.telemetry.system_name")
+    music_playing = db.get_state("music.playing")
+    music_title = db.get_state("music.track.title")
+    music_artist = db.get_state("music.track.artist")
+    ai_local = db.get_state("ai.local.available")
+    ai_cloud = db.get_state("ai.cloud.available")
+    ai_degraded = db.get_state("ai.degraded")
+
+    alarms: list[str] = []
+    mem_value = hardware_mem.get("state_value") if hardware_mem else None
+    if isinstance(mem_value, (int, float)) and mem_value >= HARDWARE_MEMORY_THRESHOLD:
+        alarms.append("hardware.memory_used_percent_high")
+
+    ai_status = "unknown"
+    if ai_degraded and bool(ai_degraded.get("state_value")):
+        ai_status = "degraded"
+    else:
+        local_on = bool(ai_local and ai_local.get("state_value"))
+        cloud_on = bool(ai_cloud and ai_cloud.get("state_value"))
+        if local_on and cloud_on:
+            ai_status = "local+cloud"
+        elif local_on:
+            ai_status = "local_only"
+        elif cloud_on:
+            ai_status = "cloud_only"
+
+    return {
+        "equipment": {
+            "hardware_probe": bool(hardware_mem),
+            "ed_probe": bool(ed_running),
+            "music_probe": bool(music_playing),
+        },
+        "current_alarms": alarms,
+        "ed_status": {
+            "running": ed_running.get("state_value") if ed_running else None,
+            "system_name": ed_system.get("state_value") if ed_system else None,
+        },
+        "music_status": {
+            "playing": music_playing.get("state_value") if music_playing else None,
+            "title": music_title.get("state_value") if music_title else None,
+            "artist": music_artist.get("state_value") if music_artist else None,
+        },
+        "ai_status": ai_status,
+    }
+
+
+def process_watch_condition(
+    db: BrainstemDB,
+    previous_condition: str | None,
+    ed_running: bool,
+) -> str:
+    condition = determine_watch_condition(db, ed_running)
+    now = utc_now_iso()
+    db.set_state(
+        state_key="system.watch_condition",
+        state_value=condition,
+        source="watch_condition_supervisor",
+        observed_at_utc=now,
+        confidence=1.0,
+        emit_event=True,
+        event_meta={
+            "event_id": str(uuid.uuid4()),
+            "timestamp_utc": now,
+            "event_type": "STATE_UPDATED",
+            "event_source": "watch_condition_supervisor",
+            "profile": PROFILE,
+            "session_id": SESSION_ID,
+            "mode": condition.lower() if condition.lower() in {"game", "work", "standby", "tutor"} else "standby",
+            "payload": {"state_key": "system.watch_condition", "value": condition},
+            "tags": ["watch_condition"],
+        },
+    )
+
+    if previous_condition == condition:
+        return condition
+
+    correlation_id = str(uuid.uuid4())
+    db.append_event(
+        event_id=str(uuid.uuid4()),
+        timestamp_utc=now,
+        event_type="WATCH_CONDITION_CHANGED",
+        source="watch_condition_supervisor",
+        payload={"from": previous_condition, "to": condition},
+        profile=PROFILE,
+        session_id=SESSION_ID,
+        correlation_id=correlation_id,
+        mode=condition.lower() if condition.lower() in {"game", "work", "standby", "tutor"} else "standby",
+        severity="info",
+        tags=["watch_condition", "handover"],
+    )
+    db.append_event(
+        event_id=str(uuid.uuid4()),
+        timestamp_utc=now,
+        event_type="HANDOVER_NOTE",
+        source="watch_condition_supervisor",
+        payload=handover_snapshot(db),
+        profile=PROFILE,
+        session_id=SESSION_ID,
+        correlation_id=correlation_id,
+        mode=condition.lower() if condition.lower() in {"game", "work", "standby", "tutor"} else "standby",
+        severity="info",
+        tags=["handover"],
+    )
+
+    return condition
+
+
 def run_supervisor_loop() -> None:
     db = BrainstemDB(DB_PATH, SCHEMA_PATH)
     db.ensure_schema()
@@ -340,6 +466,7 @@ def run_supervisor_loop() -> None:
     previous_ed_running: bool | None = None
     previous_music_playing: bool | None = None
     previous_track: tuple[str, str] | None = None
+    previous_watch_condition: str | None = None
 
     next_hardware = 0.0
     next_ed = 0.0
@@ -364,6 +491,13 @@ def run_supervisor_loop() -> None:
             )
             next_music = now + (MUSIC_ACTIVE_SEC if previous_music_playing else MUSIC_IDLE_SEC)
 
+        if previous_ed_running is not None:
+            previous_watch_condition = process_watch_condition(
+                db,
+                previous_watch_condition,
+                previous_ed_running,
+            )
+
         time.sleep(max(0.05, LOOP_SLEEP_SEC))
 
 
@@ -371,8 +505,9 @@ def run_supervisor_once() -> None:
     db = BrainstemDB(DB_PATH, SCHEMA_PATH)
     db.ensure_schema()
     process_hardware(db)
-    process_ed(db, previous_running=None)
+    ed_running = process_ed(db, previous_running=None)
     process_music(db, previous_playing=None, previous_track=None)
+    process_watch_condition(db, previous_condition=None, ed_running=ed_running)
 
 
 def main() -> None:

@@ -79,8 +79,11 @@ python services/ai/knowledge_service.py
 
 ```powershell
 $assistBody = @{
+  incident_id = "inc-demo-001"
   user_text = "Set combat lights and skip track"
   mode = "game"
+  watch_condition = "GAME"
+  stt_confidence = 0.95
   auto_execute = $true
   dry_run = $true
   allow_high_risk = $false

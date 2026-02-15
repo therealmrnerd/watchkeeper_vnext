@@ -15,8 +15,11 @@ def main() -> None:
     mod = load_module(root / "services" / "ai" / "assist_router.py")
 
     sample = {
+        "incident_id": "inc-router-smoke-001",
         "user_text": "Set combat lights and skip track",
         "mode": "game",
+        "watch_condition": "GAME",
+        "stt_confidence": 0.95,
         "auto_execute": True,
         "dry_run": True,
         "use_knowledge": False,

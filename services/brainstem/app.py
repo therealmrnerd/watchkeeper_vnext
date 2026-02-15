@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import sqlite3
@@ -16,6 +17,7 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 from db_service import BrainstemDB
+from standing_orders import StandingOrders
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -38,7 +40,12 @@ KEYPRESS_ALLOWED_PROCESSES = [
     ).split(",")
     if p.strip()
 ]
+STANDING_ORDERS_PATH = Path(
+    os.getenv("WKV_STANDING_ORDERS_PATH", ROOT_DIR / "config" / "standing_orders.json")
+)
+DEFAULT_WATCH_CONDITION = os.getenv("WKV_DEFAULT_WATCH_CONDITION", "STANDBY").strip().upper()
 DB_SERVICE = BrainstemDB(DB_PATH, SCHEMA_PATH)
+STANDING_ORDERS = StandingOrders(STANDING_ORDERS_PATH)
 
 INTENT_ALLOWED_KEYS = {
     "schema_version",
@@ -194,6 +201,32 @@ def _any_process_running(process_names: list[str]) -> bool:
     return any(name in running for name in process_names)
 
 
+def _get_foreground_process_name() -> str | None:
+    try:
+        hwnd = windll.user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        pid = ctypes.c_ulong(0)
+        windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return None
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH", "/FI", f"PID eq {pid.value}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if line.startswith('"'):
+                parts = [p.strip('"') for p in line.split('","')]
+                if parts and parts[0]:
+                    return parts[0]
+        return None
+    except Exception:
+        return None
+
+
 def _key_to_vk(key_name: str) -> int:
     key = key_name.strip().lower()
     if not key:
@@ -325,25 +358,23 @@ def execute_tool(
     }
 
 
-def _policy_denial_reason(
-    *,
-    tool_name: str,
-    safety_level: str,
-    allow_high_risk: bool,
-    intent_mode: str,
-    mode_constraints: list[str],
-    requires_confirmation: bool,
-    user_confirmed: bool,
-) -> str | None:
-    if safety_level == "high_risk" and not allow_high_risk:
-        return "high_risk action requires allow_high_risk=true"
-    if mode_constraints and intent_mode not in mode_constraints:
-        return f"mode '{intent_mode}' is not allowed for this action"
-    if requires_confirmation and not user_confirmed:
-        return "action requires explicit confirmation (user_confirmed=true)"
-    if tool_name == "keypress" and not ENABLE_KEYPRESS:
-        return "keypress actuator is disabled (set WKV_ENABLE_KEYPRESS=1)"
-    return None
+def _mode_to_watch_condition(intent_mode: str) -> str:
+    mapping = {
+        "standby": "STANDBY",
+        "game": "GAME",
+        "work": "WORK",
+        "tutor": "TUTOR",
+    }
+    return mapping.get(intent_mode.lower(), DEFAULT_WATCH_CONDITION)
+
+
+def _resolve_watch_condition(requested: str | None, intent_mode: str) -> str:
+    if requested:
+        return requested.strip().upper()
+    state = DB_SERVICE.get_state("system.watch_condition")
+    if state and isinstance(state.get("state_value"), str):
+        return str(state["state_value"]).strip().upper()
+    return _mode_to_watch_condition(intent_mode)
 
 
 def emit_event(
@@ -851,6 +882,28 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
     if not isinstance(user_confirmed, bool):
         raise ValueError("user_confirmed must be boolean")
 
+    incident_id = payload.get("incident_id")
+    if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
+        raise ValueError("incident_id must be a non-empty string when supplied")
+
+    watch_condition_input = payload.get("watch_condition")
+    if watch_condition_input is not None and (
+        not isinstance(watch_condition_input, str) or not watch_condition_input.strip()
+    ):
+        raise ValueError("watch_condition must be a non-empty string when supplied")
+
+    stt_confidence = payload.get("stt_confidence")
+    if stt_confidence is not None:
+        if not isinstance(stt_confidence, (int, float)) or stt_confidence < 0 or stt_confidence > 1:
+            raise ValueError("stt_confidence must be number 0..1 when supplied")
+        stt_confidence = float(stt_confidence)
+
+    confirmed_at_utc = payload.get("confirmed_at_utc")
+    if confirmed_at_utc is not None:
+        if not isinstance(confirmed_at_utc, str) or not confirmed_at_utc.strip():
+            raise ValueError("confirmed_at_utc must be non-empty string when supplied")
+        parse_iso8601_utc(confirmed_at_utc)
+
     with connect_db() as con:
         intent = con.execute(
             "SELECT request_id,mode,session_id FROM intent_log WHERE request_id=?",
@@ -858,6 +911,7 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
         ).fetchone()
         if not intent:
             raise ValueError(f"request_id not found: {request_id}")
+        watch_condition = _resolve_watch_condition(watch_condition_input, intent["mode"])
 
         sql = (
             "SELECT id,request_id,action_id,tool_name,status,safety_level,parameters_json,created_at_utc "
@@ -893,16 +947,35 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 action_parameters = {}
             if not isinstance(mode_constraints, list):
                 mode_constraints = []
-
-            denied_reason = _policy_denial_reason(
-                tool_name=row["tool_name"],
-                safety_level=row["safety_level"],
-                allow_high_risk=allow_high_risk,
-                intent_mode=intent["mode"],
-                mode_constraints=[str(m) for m in mode_constraints if isinstance(m, str)],
-                requires_confirmation=requires_confirmation,
-                user_confirmed=user_confirmed,
-            )
+            if row["safety_level"] == "high_risk" and not allow_high_risk:
+                denied_reason = "high_risk action requires allow_high_risk=true"
+                standing_decision = {
+                    "allowed": False,
+                    "reasons": [denied_reason],
+                    "watch_condition": watch_condition,
+                    "incident_id": incident_id,
+                    "tool_key": row["tool_name"],
+                }
+            else:
+                foreground_process = _get_foreground_process_name()
+                standing_decision = STANDING_ORDERS.evaluate(
+                    tool_name=row["tool_name"],
+                    watch_condition=watch_condition,
+                    incident_id=(incident_id or ""),
+                    intent_mode=intent["mode"],
+                    user_confirmed=user_confirmed,
+                    confirmed_at_utc=confirmed_at_utc,
+                    stt_confidence=stt_confidence,
+                    foreground_process=foreground_process,
+                    action_meta={
+                        "mode_constraints": [str(m) for m in mode_constraints if isinstance(m, str)],
+                        "requires_confirmation": requires_confirmation,
+                    },
+                )
+                denied_reason = None
+                if not standing_decision.get("allowed", False):
+                    reasons = standing_decision.get("reasons", [])
+                    denied_reason = reasons[0] if reasons else "denied by standing orders"
 
             if denied_reason:
                 con.execute(
@@ -922,6 +995,9 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         "action_id": row["action_id"],
                         "tool_name": row["tool_name"],
                         "reason": denied_reason,
+                        "incident_id": incident_id,
+                        "watch_condition": watch_condition,
+                        "standing_decision": standing_decision,
                     },
                     session_id=intent["session_id"],
                     correlation_id=request_id,
@@ -955,6 +1031,8 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     "request_id": request_id,
                     "action_id": row["action_id"],
                     "tool_name": row["tool_name"],
+                    "incident_id": incident_id,
+                    "watch_condition": watch_condition,
                 },
                 session_id=intent["session_id"],
                 correlation_id=request_id,
@@ -1004,6 +1082,8 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         "action_id": row["action_id"],
                         "tool_name": row["tool_name"],
                         "dry_run": dry_run,
+                        "incident_id": incident_id,
+                        "watch_condition": watch_condition,
                         "stub_execution": bool(output.get("stub_execution")),
                         "result": output.get("result"),
                     },
@@ -1020,6 +1100,8 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         "request_id": request_id,
                         "action_id": row["action_id"],
                         "tool_name": row["tool_name"],
+                        "incident_id": incident_id,
+                        "watch_condition": watch_condition,
                         "error_code": error_code,
                         "error_message": error_message,
                     },
@@ -1030,18 +1112,26 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 )
             result_row = {
                 "action_id": row["action_id"],
-                "tool_name": row["tool_name"],
-                "status": status_after,
-            }
+                    "tool_name": row["tool_name"],
+                    "status": status_after,
+                }
             if status_after == "success":
                 result_row["output"] = output
             else:
                 result_row["error"] = error_message
+            result_row["incident_id"] = incident_id
+            result_row["watch_condition"] = watch_condition
             results.append(result_row)
 
         con.commit()
 
-    return {"request_id": request_id, "dry_run": dry_run, "results": results}
+    return {
+        "request_id": request_id,
+        "incident_id": incident_id,
+        "watch_condition": watch_condition,
+        "dry_run": dry_run,
+        "results": results,
+    }
 
 
 class BrainstemHandler(BaseHTTPRequestHandler):
@@ -1077,7 +1167,15 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/health":
-                self._send_json(200, {"ok": True, "service": "brainstem", "ts": utc_now_iso()})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "service": "brainstem",
+                        "ts": utc_now_iso(),
+                        "standing_orders_path": str(STANDING_ORDERS_PATH),
+                    },
+                )
                 return
 
             if parsed.path == "/state":

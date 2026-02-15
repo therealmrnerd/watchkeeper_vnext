@@ -57,7 +57,14 @@ def main() -> None:
         con.commit()
 
     execute_result = brain.execute_actions(
-        {"request_id": intent["request_id"], "dry_run": True, "allow_high_risk": False},
+        {
+            "request_id": intent["request_id"],
+            "incident_id": "inc-smoke-001",
+            "watch_condition": "GAME",
+            "stt_confidence": 0.95,
+            "dry_run": True,
+            "allow_high_risk": False,
+        },
         source="integration_test",
     )
 

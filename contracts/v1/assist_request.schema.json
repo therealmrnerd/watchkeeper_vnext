@@ -6,6 +6,11 @@
   "additionalProperties": false,
   "required": ["user_text"],
   "properties": {
+    "incident_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
     "user_text": {
       "type": "string",
       "minLength": 1,
@@ -36,6 +41,15 @@
       "enum": ["low", "normal", "high"],
       "default": "normal"
     },
+    "watch_condition": {
+      "type": "string",
+      "enum": ["STANDBY", "GAME", "WORK", "TUTOR", "RESTRICTED", "DEGRADED"]
+    },
+    "stt_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
     "session_id": {
       "type": "string",
       "minLength": 1,
@@ -56,6 +70,10 @@
     "user_confirmed": {
       "type": "boolean",
       "default": false
+    },
+    "confirmed_at_utc": {
+      "type": "string",
+      "format": "date-time"
     },
     "use_knowledge": {
       "type": "boolean",

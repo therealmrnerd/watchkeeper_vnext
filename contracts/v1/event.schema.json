@@ -33,6 +33,8 @@
         "MUSIC_STOPPED",
         "TRACK_CHANGED",
         "HARDWARE_THRESHOLD",
+        "WATCH_CONDITION_CHANGED",
+        "HANDOVER_NOTE",
         "STT_HEARD",
         "INTENT_PROPOSED",
         "ACTION_APPROVED",
