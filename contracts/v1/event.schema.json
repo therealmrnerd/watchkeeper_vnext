@@ -32,6 +32,7 @@
         "MUSIC_STARTED",
         "MUSIC_STOPPED",
         "TRACK_CHANGED",
+        "HARDWARE_THRESHOLD",
         "STT_HEARD",
         "INTENT_PROPOSED",
         "ACTION_APPROVED",

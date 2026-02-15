@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import uuid
 from ctypes import windll
 from datetime import datetime, timezone
@@ -10,6 +11,11 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 from urllib.parse import parse_qs, quote, urlparse
+
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
+from db_service import BrainstemDB
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -32,6 +38,7 @@ KEYPRESS_ALLOWED_PROCESSES = [
     ).split(",")
     if p.strip()
 ]
+DB_SERVICE = BrainstemDB(DB_PATH, SCHEMA_PATH)
 
 INTENT_ALLOWED_KEYS = {
     "schema_version",
@@ -127,17 +134,7 @@ def connect_db() -> sqlite3.Connection:
 
 
 def ensure_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with connect_db() as con:
-        con.execute("PRAGMA journal_mode=WAL;")
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_log'"
-        ).fetchone()
-        if exists:
-            return
-        schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
-        con.executescript(schema_sql)
-        con.commit()
+    DB_SERVICE.ensure_schema()
 
 
 def parse_json(raw: Any, fallback: Any) -> Any:
@@ -350,7 +347,7 @@ def _policy_denial_reason(
 
 
 def emit_event(
-    con: sqlite3.Connection,
+    con: sqlite3.Connection | None,
     event_type: str,
     source: str,
     payload: dict[str, Any],
@@ -362,28 +359,43 @@ def emit_event(
     tags: list[str] | None = None,
 ) -> str:
     event_id = str(uuid.uuid4())
-    con.execute(
-        """
-        INSERT INTO event_log(
-            event_id,timestamp_utc,event_type,source,profile,session_id,correlation_id,
-            mode,severity,payload_json,tags_json
+    if con is not None:
+        con.execute(
+            """
+            INSERT INTO event_log(
+                event_id,timestamp_utc,event_type,source,profile,session_id,correlation_id,
+                mode,severity,payload_json,tags_json
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                event_id,
+                utc_now_iso(),
+                event_type,
+                source,
+                profile,
+                session_id,
+                correlation_id,
+                mode,
+                severity,
+                json.dumps(payload, ensure_ascii=False),
+                json.dumps(tags or [], ensure_ascii=False),
+            ),
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)
-        """,
-        (
-            event_id,
-            utc_now_iso(),
-            event_type,
-            source,
-            profile,
-            session_id,
-            correlation_id,
-            mode,
-            severity,
-            json.dumps(payload, ensure_ascii=False),
-            json.dumps(tags or [], ensure_ascii=False),
-        ),
-    )
+    else:
+        DB_SERVICE.append_event(
+            event_id=event_id,
+            timestamp_utc=utc_now_iso(),
+            event_type=event_type,
+            source=source,
+            payload=payload,
+            profile=profile,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            mode=mode,
+            severity=severity,
+            tags=tags or [],
+        )
     return event_id
 
 
@@ -691,63 +703,46 @@ def ingest_state(payload: dict[str, Any], source: str) -> dict[str, Any]:
     profile = payload.get("profile")
     session_id = payload.get("session_id")
     correlation_id = payload.get("correlation_id")
+    prepared_items = []
+    for item in items:
+        state_key = item["state_key"].strip()
+        state_value = item["state_value"]
+        state_source = item["source"].strip()
+        confidence = item.get("confidence")
+        observed_at_utc = item.get("observed_at_utc") or utc_now_iso()
 
-    upserted = 0
-    state_keys: list[str] = []
+        prepared_items.append(
+            {
+                "state_key": state_key,
+                "state_value": state_value,
+                "source": state_source,
+                "confidence": confidence,
+                "observed_at_utc": observed_at_utc,
+                "updated_at_utc": utc_now_iso(),
+                "event_id": str(uuid.uuid4()),
+                "event_type": "STATE_UPDATED",
+                "event_source": source,
+                "profile": profile,
+                "session_id": session_id,
+                "correlation_id": correlation_id,
+                "event_payload": {
+                    "state_key": state_key,
+                    "source": state_source,
+                    "confidence": confidence,
+                    "observed_at_utc": observed_at_utc,
+                },
+            }
+        )
 
-    with connect_db() as con:
-        for item in items:
-            state_key = item["state_key"].strip()
-            state_value = item["state_value"]
-            state_source = item["source"].strip()
-            confidence = item.get("confidence")
-            observed_at_utc = item.get("observed_at_utc") or utc_now_iso()
-            updated_at_utc = utc_now_iso()
-
-            con.execute(
-                """
-                INSERT INTO state_current(
-                    state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc
-                )
-                VALUES(?,?,?,?,?,?)
-                ON CONFLICT(state_key) DO UPDATE SET
-                    state_value_json=excluded.state_value_json,
-                    source=excluded.source,
-                    confidence=excluded.confidence,
-                    observed_at_utc=excluded.observed_at_utc,
-                    updated_at_utc=excluded.updated_at_utc
-                """,
-                (
-                    state_key,
-                    json.dumps(state_value, ensure_ascii=False),
-                    state_source,
-                    confidence,
-                    observed_at_utc,
-                    updated_at_utc,
-                ),
-            )
-            upserted += 1
-            state_keys.append(state_key)
-
-            if emit_events:
-                emit_event(
-                    con,
-                    event_type="STATE_UPDATED",
-                    source=source,
-                    payload={
-                        "state_key": state_key,
-                        "source": state_source,
-                        "confidence": confidence,
-                        "observed_at_utc": observed_at_utc,
-                    },
-                    profile=profile,
-                    session_id=session_id,
-                    correlation_id=correlation_id,
-                )
-
-        con.commit()
-
-    return {"upserted": upserted, "state_keys": state_keys}
+    result = DB_SERVICE.batch_set_state(
+        items=prepared_items,
+        emit_events=emit_events,
+    )
+    return {
+        "upserted": result["upserted"],
+        "changed": result["changed"],
+        "state_keys": [item["state_key"] for item in prepared_items],
+    }
 
 
 def record_feedback(payload: dict[str, Any], source: str) -> dict[str, Any]:
@@ -800,36 +795,10 @@ def record_feedback(payload: dict[str, Any], source: str) -> dict[str, Any]:
 
 def query_state(query: dict[str, list[str]]) -> list[dict[str, Any]]:
     key = (query.get("key", [None])[0] or "").strip()
-    with connect_db() as con:
-        if key:
-            rows = con.execute(
-                """
-                SELECT state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc
-                FROM state_current
-                WHERE state_key=?
-                """,
-                (key,),
-            ).fetchall()
-        else:
-            rows = con.execute(
-                """
-                SELECT state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc
-                FROM state_current
-                ORDER BY updated_at_utc DESC
-                """
-            ).fetchall()
-
-    return [
-        {
-            "state_key": row["state_key"],
-            "state_value": parse_json(row["state_value_json"], row["state_value_json"]),
-            "source": row["source"],
-            "confidence": row["confidence"],
-            "observed_at_utc": row["observed_at_utc"],
-            "updated_at_utc": row["updated_at_utc"],
-        }
-        for row in rows
-    ]
+    if key:
+        item = DB_SERVICE.get_state(key)
+        return [item] if item else []
+    return DB_SERVICE.list_state(state_key=None)
 
 
 def query_events(query: dict[str, list[str]]) -> list[dict[str, Any]]:
@@ -844,52 +813,15 @@ def query_events(query: dict[str, list[str]]) -> list[dict[str, Any]]:
     except ValueError:
         raise ValueError("limit must be an integer")
 
-    clauses = []
-    args: list[Any] = []
-    if event_type:
-        clauses.append("event_type=?")
-        args.append(event_type)
-    if session_id:
-        clauses.append("session_id=?")
-        args.append(session_id)
-    if correlation_id:
-        clauses.append("correlation_id=?")
-        args.append(correlation_id)
     if since:
         parse_iso8601_utc(since)
-        clauses.append("timestamp_utc>=?")
-        args.append(since)
-
-    where = ""
-    if clauses:
-        where = "WHERE " + " AND ".join(clauses)
-
-    sql = (
-        "SELECT event_id,timestamp_utc,event_type,source,profile,session_id,correlation_id,"
-        "mode,severity,payload_json,tags_json "
-        f"FROM event_log {where} ORDER BY timestamp_utc DESC LIMIT ?"
+    return DB_SERVICE.list_events(
+        limit=limit,
+        event_type=event_type or None,
+        session_id=session_id or None,
+        correlation_id=correlation_id or None,
+        since=since or None,
     )
-    args.append(limit)
-
-    with connect_db() as con:
-        rows = con.execute(sql, args).fetchall()
-
-    return [
-        {
-            "event_id": row["event_id"],
-            "timestamp_utc": row["timestamp_utc"],
-            "event_type": row["event_type"],
-            "source": row["source"],
-            "profile": row["profile"],
-            "session_id": row["session_id"],
-            "correlation_id": row["correlation_id"],
-            "mode": row["mode"],
-            "severity": row["severity"],
-            "payload": parse_json(row["payload_json"], {}),
-            "tags": parse_json(row["tags_json"], []),
-        }
-        for row in rows
-    ]
 
 
 def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:

@@ -35,6 +35,8 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
+- Brainstem DB contract layer implemented in `services/brainstem/db_service.py`:
+  - `set_state`, `get_state`, `batch_set_state`, `append_event`
 - Brainstem execution now supports real actuators for:
   - `set_lights` (webhook)
   - `music_next`, `music_pause`, `music_resume` (media keys)
@@ -57,6 +59,10 @@ Current status:
   - Contract: `contracts/v1/assist_request.schema.json`
 - Adapter collector implemented in `services/adapters/state_collector.py`:
   - ED/music/system ingest into Brainstem `POST /state`
+- Brainstem supervisor loops implemented in `services/brainstem/supervisor.py`:
+  - Hardware probe cadence + threshold events
+  - ED on/off cadence + minimal telemetry states
+  - YTM now playing cadence + track change events
 
 ## Notes
 

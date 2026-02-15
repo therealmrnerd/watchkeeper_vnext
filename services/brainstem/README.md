@@ -25,6 +25,11 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - Entry point: `services/brainstem/app.py`
 - Default bind: `127.0.0.1:8787`
 - Default DB: `data/watchkeeper_vnext.db`
+- DB service layer: `services/brainstem/db_service.py`
+  - `set_state`
+  - `get_state`
+  - `batch_set_state`
+  - `append_event`
 - Actuation:
   - `set_lights` via webhook
   - `music_next` / `music_pause` / `music_resume` via media keys
@@ -45,6 +50,34 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 2. Start service:
    - `python services/brainstem/app.py`
    - or `services/brainstem/run.ps1`
+3. Start supervisor loops:
+   - `python services/brainstem/supervisor.py`
+   - or `services/brainstem/run_supervisor.ps1`
+4. Optional smoke tests:
+   - `python scripts/smoke_test_brainstem_db_layer.py`
+   - `python scripts/smoke_test_supervisor_once.py`
+
+## Supervisor Loops
+
+Minimum viable DB-validation ingest sources:
+- Hardware probe:
+  - `hardware.*` state updates
+  - threshold events (`HARDWARE_THRESHOLD`) when memory usage crosses configured threshold
+- ED:
+  - `ed.running`
+  - `ed.telemetry.system_name`
+  - `ed.telemetry.hull_percent`
+  - lifecycle events (`ED_STARTED`, `ED_STOPPED`)
+- YTM now playing:
+  - `music.track.title`
+  - `music.track.artist`
+  - `music.playing`
+  - track/lifecycle events (`TRACK_CHANGED`, `MUSIC_STARTED`, `MUSIC_STOPPED`)
+
+Loop cadence knobs:
+- `WKV_SUP_HARDWARE_SEC`
+- `WKV_SUP_ED_ACTIVE_SEC`, `WKV_SUP_ED_IDLE_SEC`
+- `WKV_SUP_MUSIC_ACTIVE_SEC`, `WKV_SUP_MUSIC_IDLE_SEC`
 
 ## Example Calls
 
