@@ -10,7 +10,15 @@
   },
   "watch_conditions": {
     "STANDBY": {
-      "allowed_tools": ["state.read", "state.write", "log.append", "tts.speak"],
+      "allowed_tools": [
+        "state.read",
+        "state.write",
+        "log.append",
+        "tts.speak",
+        "edparser.start",
+        "edparser.status",
+        "edparser.stop"
+      ],
       "deny_tools": ["input.keypress", "twitch.*", "jinx.*", "sammi.*", "web.search"],
       "confirmation": {
         "always": ["input.keypress", "twitch.*", "sammi.*"]
@@ -21,8 +29,11 @@
         "state.read",
         "state.write",
         "log.append",
+        "input.keypress",
+        "edparser.*",
         "jinx.*",
         "sammi.*",
+        "twitch.*",
         "tts.speak",
         "vector.search",
         "docs.read"
@@ -72,7 +83,7 @@
   "tool_policies": {
     "input.keypress": {
       "risk": "HIGH",
-      "requires": ["foreground_ok", "recent_user_confirm"],
+      "requires": ["foreground_ok"],
       "deny_if": ["stt_confidence_low"]
     },
     "files.write": {
@@ -86,6 +97,18 @@
     "web.search": {
       "risk": "MED",
       "rate_limit_per_minute": 12
+    },
+    "edparser.start": {
+      "risk": "LOW",
+      "rate_limit_per_minute": 12
+    },
+    "edparser.stop": {
+      "risk": "LOW",
+      "rate_limit_per_minute": 12
+    },
+    "edparser.status": {
+      "risk": "LOW",
+      "rate_limit_per_minute": 30
     },
     "vector.search": {
       "risk": "LOW",

@@ -4,6 +4,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 import uuid
 from ctypes import windll
 from datetime import datetime, timezone
@@ -14,13 +15,17 @@ from urllib import error, request
 from urllib.parse import parse_qs, quote, urlparse
 
 THIS_DIR = Path(__file__).resolve().parent
-if str(THIS_DIR) not in sys.path:
-    sys.path.insert(0, str(THIS_DIR))
-from db_service import BrainstemDB
-from standing_orders import StandingOrders
-
-
 ROOT_DIR = Path(__file__).resolve().parents[2]
+for p in (THIS_DIR, ROOT_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+from db_service import BrainstemDB
+from edparser_tool import EDParserTool
+from core.policy_engine import PolicyEngine
+from core.tool_router import ToolRouter
+from db.logbook import Logbook
+
 DB_PATH = Path(os.getenv("WKV_DB_PATH", ROOT_DIR / "data" / "watchkeeper_vnext.db"))
 SCHEMA_PATH = Path(
     os.getenv("WKV_SCHEMA_PATH", ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
@@ -45,7 +50,10 @@ STANDING_ORDERS_PATH = Path(
 )
 DEFAULT_WATCH_CONDITION = os.getenv("WKV_DEFAULT_WATCH_CONDITION", "STANDBY").strip().upper()
 DB_SERVICE = BrainstemDB(DB_PATH, SCHEMA_PATH)
-STANDING_ORDERS = StandingOrders(STANDING_ORDERS_PATH)
+EDPARSER_TOOL = EDParserTool(db_service=DB_SERVICE)
+POLICY_ENGINE = PolicyEngine(STANDING_ORDERS_PATH)
+LOGBOOK = Logbook(db_service=DB_SERVICE, source="brainstem_policy")
+TOOL_ROUTER = ToolRouter(policy_engine=POLICY_ENGINE, logbook=LOGBOOK)
 
 INTENT_ALLOWED_KEYS = {
     "schema_version",
@@ -101,6 +109,16 @@ FEEDBACK_ALLOWED_KEYS = {
     "mode",
 }
 
+CONFIRM_ALLOWED_KEYS = {
+    "incident_id",
+    "tool_name",
+    "user_confirm_token",
+    "confirmed_at_utc",
+    "request_id",
+    "session_id",
+    "mode",
+}
+
 MODE_SET = {"game", "work", "standby", "tutor"}
 DOMAIN_SET = {
     "gameplay",
@@ -132,6 +150,11 @@ def parse_iso8601_utc(value: str) -> None:
         datetime.fromisoformat(normalized)
     except ValueError as exc:
         raise ValueError("timestamp_utc must be ISO-8601") from exc
+
+
+def iso8601_utc_to_epoch(value: str) -> float:
+    normalized = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized).timestamp()
 
 
 def connect_db() -> sqlite3.Connection:
@@ -310,6 +333,21 @@ def _execute_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
     return {"key": key_name, "vk_code": vk_code}
 
 
+def _execute_edparser(tool_name: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    canonical = tool_name.strip().lower()
+    reason = str(parameters.get("reason", "execute_tool")).strip() or "execute_tool"
+    force = bool(parameters.get("force", False))
+    force_restart = bool(parameters.get("force_restart", False))
+
+    if canonical in {"edparser", "edparser.start", "edparser_start"}:
+        return EDPARSER_TOOL.start(reason=reason, force_restart=force_restart)
+    if canonical in {"edparser.stop", "edparser_stop"}:
+        return EDPARSER_TOOL.stop(reason=reason, force=force)
+    if canonical in {"edparser.status", "edparser_status"}:
+        return EDPARSER_TOOL.status() | {"ok": True, "reason": reason}
+    raise ValueError(f"Unsupported edparser tool: {tool_name}")
+
+
 def execute_tool(
     *,
     tool_name: str,
@@ -344,6 +382,12 @@ def execute_tool(
         output = _execute_music(tool_name)
     elif tool_name == "keypress":
         output = _execute_keypress(parameters)
+    elif tool_name.startswith("edparser") or tool_name in {
+        "edparser_start",
+        "edparser_stop",
+        "edparser_status",
+    }:
+        output = _execute_edparser(tool_name, parameters)
     else:
         raise ValueError(f"Unsupported tool: {tool_name}")
 
@@ -649,6 +693,44 @@ def validate_feedback(payload: dict[str, Any]) -> None:
         raise ValueError(f"mode must be one of: {', '.join(sorted(MODE_SET))}")
 
 
+def validate_confirm(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    _check_extra_keys(payload, CONFIRM_ALLOWED_KEYS, "confirm")
+
+    incident_id = payload.get("incident_id")
+    if not isinstance(incident_id, str) or not incident_id.strip():
+        raise ValueError("incident_id is required and must be a non-empty string")
+
+    tool_name = payload.get("tool_name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("tool_name is required and must be a non-empty string")
+
+    user_confirm_token = payload.get("user_confirm_token")
+    if user_confirm_token is not None and (
+        not isinstance(user_confirm_token, str) or not user_confirm_token.strip()
+    ):
+        raise ValueError("user_confirm_token must be a non-empty string when supplied")
+
+    confirmed_at_utc = payload.get("confirmed_at_utc")
+    if confirmed_at_utc is not None:
+        if not isinstance(confirmed_at_utc, str) or not confirmed_at_utc.strip():
+            raise ValueError("confirmed_at_utc must be a non-empty string when supplied")
+        parse_iso8601_utc(confirmed_at_utc)
+
+    request_id = payload.get("request_id")
+    if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
+        raise ValueError("request_id must be a non-empty string when supplied")
+
+    session_id = payload.get("session_id")
+    if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+        raise ValueError("session_id must be a non-empty string when supplied")
+
+    mode = payload.get("mode")
+    if mode is not None and mode not in MODE_SET:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(MODE_SET))}")
+
+
 def upsert_intent(con: sqlite3.Connection, intent: dict[str, Any], source: str) -> int:
     questions = intent.get("clarification_questions", [])
     retrieval = intent.get("retrieval", {})
@@ -824,6 +906,67 @@ def record_feedback(payload: dict[str, Any], source: str) -> dict[str, Any]:
     return {"feedback_id": feedback_id, "request_id": request_id, "rating": rating}
 
 
+def record_confirmation(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    incident_id = payload["incident_id"].strip()
+    tool_name = payload["tool_name"].strip()
+    tool_key = POLICY_ENGINE.canonical_tool_name(tool_name)
+    confirm_token = (payload.get("user_confirm_token") or "").strip()
+    if not confirm_token:
+        confirm_token = TOOL_ROUTER.build_confirmation_token(incident_id, tool_key)
+
+    confirmed_at_utc = payload.get("confirmed_at_utc") or utc_now_iso()
+    confirmed_at_epoch = iso8601_utc_to_epoch(confirmed_at_utc)
+    POLICY_ENGINE.record_confirmation(
+        incident_id=incident_id,
+        tool_name=tool_key,
+        token=confirm_token,
+        ts=confirmed_at_epoch,
+    )
+
+    req_context = {
+        "request_id": payload.get("request_id"),
+        "session_id": payload.get("session_id"),
+        "mode": payload.get("mode"),
+        "incident_id": incident_id,
+    }
+    LOGBOOK.log_decision(
+        incident_id=incident_id,
+        tool_name=tool_key,
+        decision={
+            "allowed": True,
+            "requires_confirmation": False,
+            "deny_reason_code": "ALLOW",
+            "deny_reason_text": None,
+            "constraints": {
+                "recorded_confirmation": True,
+                "confirmed_at_utc": confirmed_at_utc,
+            },
+        },
+        req_context=req_context,
+    )
+    emit_event(
+        con=None,
+        event_type="USER_CONFIRMATION_RECORDED",
+        source=source,
+        payload={
+            "incident_id": incident_id,
+            "tool_name": tool_key,
+            "confirm_token": confirm_token,
+            "confirmed_at_utc": confirmed_at_utc,
+            "request_id": payload.get("request_id"),
+        },
+        session_id=payload.get("session_id"),
+        correlation_id=payload.get("request_id") or incident_id,
+        mode=payload.get("mode"),
+    )
+    return {
+        "incident_id": incident_id,
+        "tool_name": tool_key,
+        "confirm_token": confirm_token,
+        "confirmed_at_utc": confirmed_at_utc,
+    }
+
+
 def query_state(query: dict[str, list[str]]) -> list[dict[str, Any]]:
     key = (query.get("key", [None])[0] or "").strip()
     if key:
@@ -882,6 +1025,14 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
     if not isinstance(user_confirmed, bool):
         raise ValueError("user_confirmed must be boolean")
 
+    user_confirm_token = payload.get("user_confirm_token")
+    if user_confirm_token is None:
+        user_confirm_token = payload.get("confirm_token")
+    if user_confirm_token is not None and (
+        not isinstance(user_confirm_token, str) or not user_confirm_token.strip()
+    ):
+        raise ValueError("user_confirm_token must be a non-empty string when supplied")
+
     incident_id = payload.get("incident_id")
     if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
         raise ValueError("incident_id must be a non-empty string when supplied")
@@ -899,10 +1050,14 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
         stt_confidence = float(stt_confidence)
 
     confirmed_at_utc = payload.get("confirmed_at_utc")
+    confirmed_at_epoch: float | None = None
     if confirmed_at_utc is not None:
         if not isinstance(confirmed_at_utc, str) or not confirmed_at_utc.strip():
             raise ValueError("confirmed_at_utc must be non-empty string when supplied")
         parse_iso8601_utc(confirmed_at_utc)
+        confirmed_at_epoch = iso8601_utc_to_epoch(confirmed_at_utc)
+
+    incident_id_value = (incident_id or "").strip()
 
     with connect_db() as con:
         intent = con.execute(
@@ -947,44 +1102,102 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 action_parameters = {}
             if not isinstance(mode_constraints, list):
                 mode_constraints = []
-            if row["safety_level"] == "high_risk" and not allow_high_risk:
-                denied_reason = "high_risk action requires allow_high_risk=true"
-                standing_decision = {
+            allowed_modes = [str(m) for m in mode_constraints if isinstance(m, str)]
+            if allowed_modes and intent["mode"] not in allowed_modes:
+                denied_reason = f"mode '{intent['mode']}' not in action mode_constraints"
+                denied_reason_code = "DENY_MODE_CONSTRAINT"
+                policy_decision = {
                     "allowed": False,
-                    "reasons": [denied_reason],
-                    "watch_condition": watch_condition,
-                    "incident_id": incident_id,
-                    "tool_key": row["tool_name"],
+                    "requires_confirmation": False,
+                    "deny_reason_code": denied_reason_code,
+                    "deny_reason_text": denied_reason,
+                    "constraints": {},
+                }
+            elif row["safety_level"] == "high_risk" and not allow_high_risk:
+                denied_reason = "high_risk action requires allow_high_risk=true"
+                denied_reason_code = "DENY_HIGH_RISK_NOT_ALLOWED"
+                policy_decision = {
+                    "allowed": False,
+                    "requires_confirmation": False,
+                    "deny_reason_code": denied_reason_code,
+                    "deny_reason_text": denied_reason,
+                    "constraints": {},
                 }
             else:
                 foreground_process = _get_foreground_process_name()
-                standing_decision = STANDING_ORDERS.evaluate(
-                    tool_name=row["tool_name"],
+                routed = TOOL_ROUTER.evaluate_action(
+                    incident_id=incident_id_value,
                     watch_condition=watch_condition,
-                    incident_id=(incident_id or ""),
-                    intent_mode=intent["mode"],
-                    user_confirmed=user_confirmed,
-                    confirmed_at_utc=confirmed_at_utc,
+                    tool_name=row["tool_name"],
+                    args=action_parameters,
+                    source=source,
                     stt_confidence=stt_confidence,
                     foreground_process=foreground_process,
-                    action_meta={
-                        "mode_constraints": [str(m) for m in mode_constraints if isinstance(m, str)],
-                        "requires_confirmation": requires_confirmation,
+                    user_confirmed=user_confirmed,
+                    user_confirm_token=user_confirm_token,
+                    action_requires_confirmation=requires_confirmation,
+                    now_ts=time.time(),
+                    confirmation_ts=confirmed_at_epoch,
+                    req_context={
+                        "request_id": request_id,
+                        "action_id": row["action_id"],
+                        "session_id": intent["session_id"],
+                        "mode": intent["mode"],
                     },
                 )
-                denied_reason = None
-                if not standing_decision.get("allowed", False):
-                    reasons = standing_decision.get("reasons", [])
-                    denied_reason = reasons[0] if reasons else "denied by standing orders"
+                policy_decision = routed["decision"]
+                denied_reason = policy_decision.get("deny_reason_text")
+                denied_reason_code = policy_decision.get("deny_reason_code")
+                if policy_decision.get("requires_confirmation", False):
+                    con.execute(
+                        """
+                        UPDATE action_log
+                        SET status='pending_confirmation', error_code=?, error_message=?, ended_at_utc=?
+                        WHERE id=?
+                        """,
+                        (denied_reason_code, denied_reason, utc_now_iso(), row["id"]),
+                    )
+                    emit_event(
+                        con,
+                        event_type="ACTION_CONFIRMATION_REQUIRED",
+                        source=source,
+                        payload={
+                            "request_id": request_id,
+                            "action_id": row["action_id"],
+                            "tool_name": row["tool_name"],
+                            "incident_id": incident_id,
+                            "watch_condition": watch_condition,
+                            "policy_decision": policy_decision,
+                            "confirm_token": routed.get("confirm_token"),
+                        },
+                        session_id=intent["session_id"],
+                        correlation_id=request_id,
+                        mode=intent["mode"],
+                        severity="warn",
+                    )
+                    results.append(
+                        {
+                            "action_id": row["action_id"],
+                            "tool_name": row["tool_name"],
+                            "status": "requires_confirmation",
+                            "reason_code": denied_reason_code,
+                            "reason": denied_reason,
+                            "confirm_token": routed.get("confirm_token"),
+                            "constraints": policy_decision.get("constraints", {}),
+                            "incident_id": incident_id,
+                            "watch_condition": watch_condition,
+                        }
+                    )
+                    continue
 
             if denied_reason:
                 con.execute(
                     """
                     UPDATE action_log
-                    SET status='denied', error_message=?, ended_at_utc=?
+                    SET status='denied', error_code=?, error_message=?, ended_at_utc=?
                     WHERE id=?
                     """,
-                    (denied_reason, utc_now_iso(), row["id"]),
+                    (denied_reason_code, denied_reason, utc_now_iso(), row["id"]),
                 )
                 emit_event(
                     con,
@@ -995,9 +1208,10 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         "action_id": row["action_id"],
                         "tool_name": row["tool_name"],
                         "reason": denied_reason,
+                        "reason_code": denied_reason_code,
                         "incident_id": incident_id,
                         "watch_condition": watch_condition,
-                        "standing_decision": standing_decision,
+                        "policy_decision": policy_decision,
                     },
                     session_id=intent["session_id"],
                     correlation_id=request_id,
@@ -1009,6 +1223,7 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         "action_id": row["action_id"],
                         "tool_name": row["tool_name"],
                         "status": "denied",
+                        "reason_code": denied_reason_code,
                         "reason": denied_reason,
                     }
                 )
@@ -1033,6 +1248,7 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     "tool_name": row["tool_name"],
                     "incident_id": incident_id,
                     "watch_condition": watch_condition,
+                    "policy_decision": policy_decision,
                 },
                 session_id=intent["session_id"],
                 correlation_id=request_id,
@@ -1071,8 +1287,20 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     ended_at,
                     row["id"],
                 ),
-            )
+                )
             if status_after == "success":
+                LOGBOOK.log_execute_result(
+                    incident_id=incident_id_value,
+                    tool_name=row["tool_name"],
+                    ok=True,
+                    result_or_error=output,
+                    req_context={
+                        "request_id": request_id,
+                        "action_id": row["action_id"],
+                        "session_id": intent["session_id"],
+                        "mode": intent["mode"],
+                    },
+                )
                 emit_event(
                     con,
                     event_type="ACTION_EXECUTED",
@@ -1092,6 +1320,18 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     mode=intent["mode"],
                 )
             else:
+                LOGBOOK.log_execute_result(
+                    incident_id=incident_id_value,
+                    tool_name=row["tool_name"],
+                    ok=False,
+                    result_or_error=error_message,
+                    req_context={
+                        "request_id": request_id,
+                        "action_id": row["action_id"],
+                        "session_id": intent["session_id"],
+                        "mode": intent["mode"],
+                    },
+                )
                 emit_event(
                     con,
                     event_type="ACTION_FAILED",
@@ -1112,13 +1352,14 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 )
             result_row = {
                 "action_id": row["action_id"],
-                    "tool_name": row["tool_name"],
-                    "status": status_after,
-                }
+                "tool_name": row["tool_name"],
+                "status": status_after,
+            }
             if status_after == "success":
                 result_row["output"] = output
             else:
                 result_row["error"] = error_message
+                result_row["error_code"] = error_code
             result_row["incident_id"] = incident_id
             result_row["watch_condition"] = watch_condition
             results.append(result_row)
@@ -1174,6 +1415,7 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                         "service": "brainstem",
                         "ts": utc_now_iso(),
                         "standing_orders_path": str(STANDING_ORDERS_PATH),
+                        "edparser": EDPARSER_TOOL.status(),
                     },
                 )
                 return
@@ -1225,6 +1467,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             if parsed.path == "/execute":
                 body = self._read_json_body()
                 result = execute_actions(body, source=source)
+                self._send_json(200, {"ok": True, **result})
+                return
+
+            if parsed.path == "/confirm":
+                body = self._read_json_body()
+                validate_confirm(body)
+                result = record_confirmation(body, source=source)
                 self._send_json(200, {"ok": True, **result})
                 return
 

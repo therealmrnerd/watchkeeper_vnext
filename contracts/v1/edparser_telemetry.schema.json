@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/edparser_telemetry.schema.json",
+  "title": "EDParserTelemetry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "parser_version",
+    "timestamp_utc",
+    "ed_running"
+  ],
+  "properties": {
+    "parser_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ed_running": {
+      "type": "boolean"
+    },
+    "process_name": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "system_name": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "hull_percent": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "dock_state": {
+      "type": ["boolean", "null"]
+    },
+    "supercruise": {
+      "type": ["boolean", "null"]
+    },
+    "landed": {
+      "type": ["boolean", "null"]
+    },
+    "status_source_mtime": {
+      "type": ["number", "null"]
+    },
+    "journal_source": {
+      "type": ["string", "null"],
+      "maxLength": 400
+    },
+    "last_event": {
+      "type": ["string", "null"],
+      "maxLength": 80
+    }
+  }
+}

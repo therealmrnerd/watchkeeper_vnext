@@ -47,6 +47,11 @@
       "type": "boolean",
       "default": false
     },
+    "user_confirm_token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
     "confirmed_at_utc": {
       "type": "string",
       "format": "date-time"

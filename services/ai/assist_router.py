@@ -170,6 +170,51 @@ def propose_actions(user_text: str) -> list[dict[str, Any]]:
     text = user_text.lower()
     actions: list[dict[str, Any]] = []
 
+    if any(p in text for p in ["ed parser status", "edparser status", "parser status"]):
+        actions.append(
+            {
+                "action_id": "action_edparser_status",
+                "tool_name": "edparser.status",
+                "parameters": {},
+                "safety_level": "read_only",
+                "mode_constraints": ["game", "standby", "work", "tutor"],
+                "requires_confirmation": False,
+                "timeout_ms": 1200,
+                "reason": "User requested ED parser status.",
+                "confidence": 0.95,
+            }
+        )
+
+    if any(p in text for p in ["start ed parser", "start edparser", "enable ed parser"]):
+        actions.append(
+            {
+                "action_id": "action_edparser_start",
+                "tool_name": "edparser.start",
+                "parameters": {},
+                "safety_level": "low_risk",
+                "mode_constraints": ["game", "standby"],
+                "requires_confirmation": False,
+                "timeout_ms": 1500,
+                "reason": "User requested ED parser start.",
+                "confidence": 0.9,
+            }
+        )
+
+    if any(p in text for p in ["stop ed parser", "stop edparser", "disable ed parser"]):
+        actions.append(
+            {
+                "action_id": "action_edparser_stop",
+                "tool_name": "edparser.stop",
+                "parameters": {},
+                "safety_level": "low_risk",
+                "mode_constraints": ["game", "standby"],
+                "requires_confirmation": False,
+                "timeout_ms": 1500,
+                "reason": "User requested ED parser stop.",
+                "confidence": 0.9,
+            }
+        )
+
     if "light" in text:
         scene = "default"
         if "combat" in text:

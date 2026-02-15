@@ -17,6 +17,7 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `POST /state`
 - `POST /intent`
 - `POST /execute`
+- `POST /confirm`
 - `POST /feedback`
 
 ## Stub Implementation
@@ -34,6 +35,7 @@ Deterministic core runtime. No LLM dependency for baseline operation.
   - `set_lights` via webhook
   - `music_next` / `music_pause` / `music_resume` via media keys
   - `keypress` via virtual key event (disabled by default)
+  - `edparser.start` / `edparser.stop` / `edparser.status` via local tool runner
 
 ## Actuator Config
 
@@ -43,11 +45,26 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `WKV_LIGHTS_WEBHOOK_URL_TEMPLATE=` optional template with `{scene}`
 - `WKV_LIGHTS_WEBHOOK_TIMEOUT_SEC=5`
 - `WKV_KEYPRESS_ALLOWED_PROCESSES=EliteDangerous64.exe,EliteDangerous.exe`
+- `WKV_EDPARSER_ENABLED=1`
+- `WKV_EDPARSER_COMMAND=` optional full command override (highest priority)
+- `WKV_EDPARSER_PYTHON=` default current Python executable
+- `WKV_EDPARSER_NODE=node`
+- `WKV_EDPARSER_SCRIPT=` default `services/adapters/edparser_compat.mjs`
+- `WKV_EDPARSER_ARGS=` optional args appended to script command
+- direct vNext adapter option:
+  - `WKV_EDPARSER_SCRIPT="services/adapters/edparser_vnext.py"`
+- `WKV_EDPARSER_STOP_TIMEOUT_SEC=4`
+- `WKV_EDPARSER_KILL_EXTERNAL_PID=1`
 
 ## Standing Orders
 
 - Policy file: `config/standing_orders.json`
 - Override path: `WKV_STANDING_ORDERS_PATH`
+- Policy engine/contracts:
+  - `core/policy_types.py`
+  - `core/policy_engine.py`
+  - `core/tool_router.py`
+  - `db/logbook.py`
 - Execute pipeline enforces:
   - watch condition allow/deny tool lists (wildcards)
   - tool policy guards (foreground, confidence, confirmation, rate limits)
@@ -66,6 +83,9 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 4. Optional smoke tests:
    - `python scripts/smoke_test_brainstem_db_layer.py`
    - `python scripts/smoke_test_supervisor_once.py`
+   - `python scripts/smoke_test_edparser_vnext_once.py`
+   - `python -m unittest tests/test_policy_engine.py`
+   - `python tools/policy_sim.py --condition GAME --tool input.keypress --foreground EliteDangerous64.exe --stt 0.93`
 
 ## Supervisor Loops
 
@@ -91,6 +111,7 @@ Loop cadence knobs:
 - `WKV_SUP_HARDWARE_SEC`
 - `WKV_SUP_ED_ACTIVE_SEC`, `WKV_SUP_ED_IDLE_SEC`
 - `WKV_SUP_MUSIC_ACTIVE_SEC`, `WKV_SUP_MUSIC_IDLE_SEC`
+- `WKV_SUP_EDPARSER_AUTORUN` (default `1`; start parser when ED is running, stop when not)
 
 ## Example Calls
 
@@ -144,4 +165,14 @@ $executeBody = @{
 }
 $executeBodyJson = $executeBody | ConvertTo-Json -Depth 4
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/execute -ContentType "application/json" -Body $executeBodyJson
+```
+
+```powershell
+$confirmBody = @{
+  incident_id = "inc-demo-001"
+  tool_name = "twitch.redeem"
+  request_id = "req-smoke-001"
+}
+$confirmBodyJson = $confirmBody | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/confirm -ContentType "application/json" -Body $confirmBodyJson
 ```

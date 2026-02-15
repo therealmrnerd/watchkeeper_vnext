@@ -13,6 +13,7 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 from db_service import BrainstemDB
+from edparser_tool import EDParserTool
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -52,6 +53,12 @@ MUSIC_IDLE_SEC = float(os.getenv("WKV_SUP_MUSIC_IDLE_SEC", "10"))
 
 LOOP_SLEEP_SEC = float(os.getenv("WKV_SUP_LOOP_SLEEP_SEC", "0.3"))
 FORCE_WATCH_CONDITION = os.getenv("WKV_FORCE_WATCH_CONDITION", "").strip().upper()
+EDPARSER_AUTORUN = os.getenv("WKV_SUP_EDPARSER_AUTORUN", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+EDPARSER_TOOL = EDParserTool(db_service=None)
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -274,6 +281,110 @@ def process_ed(db: BrainstemDB, previous_running: bool | None) -> bool:
     return running
 
 
+def process_edparser(
+    db: BrainstemDB,
+    ed_running: bool,
+    previous_running: bool | None,
+    previous_error: str | None,
+) -> tuple[bool, str | None]:
+    correlation_id = str(uuid.uuid4())
+
+    status = EDPARSER_TOOL.status()
+    action = "status"
+    if EDPARSER_AUTORUN:
+        if ed_running and not bool(status.get("running")):
+            status = EDPARSER_TOOL.start(reason="supervisor_ed_running")
+            action = "start"
+        elif not ed_running and bool(status.get("running")):
+            status = EDPARSER_TOOL.stop(reason="supervisor_ed_stopped")
+            action = "stop"
+    running = bool(status.get("running"))
+    current_error = status.get("last_error")
+    if current_error is not None:
+        current_error = str(current_error)
+
+    values = {
+        "capability.edparser.available": bool(status.get("enabled", False))
+        and bool(status.get("script_exists", False)),
+        "ed.parser.autorun": EDPARSER_AUTORUN,
+        "ed.parser.enabled": bool(status.get("enabled", False)),
+        "ed.parser.running": running,
+        "ed.parser.pid": status.get("pid"),
+        "ed.parser.managed_by": status.get("managed_by"),
+        "ed.parser.last_error": current_error,
+        "ed.parser.last_exit_code": status.get("last_exit_code"),
+    }
+    items = make_state_items(
+        values=values,
+        source="edparser_supervisor",
+        correlation_id=correlation_id,
+        mode="game" if ed_running else "standby",
+    )
+    db.batch_set_state(items=items, emit_events=True)
+
+    if previous_running is not None and previous_running != running:
+        db.append_event(
+            event_id=str(uuid.uuid4()),
+            timestamp_utc=utc_now_iso(),
+            event_type="EDPARSER_STARTED" if running else "EDPARSER_STOPPED",
+            source="edparser_supervisor",
+            payload={
+                "running": running,
+                "pid": status.get("pid"),
+                "managed_by": status.get("managed_by"),
+                "autorun": EDPARSER_AUTORUN,
+                "action": action,
+            },
+            profile=PROFILE,
+            session_id=SESSION_ID,
+            correlation_id=correlation_id,
+            mode="game" if ed_running else "standby",
+            severity="info",
+            tags=["edparser", "tool"],
+        )
+
+    if current_error and current_error != previous_error:
+        db.append_event(
+            event_id=str(uuid.uuid4()),
+            timestamp_utc=utc_now_iso(),
+            event_type="EDPARSER_ERROR",
+            source="edparser_supervisor",
+            payload={
+                "error": current_error,
+                "running": running,
+                "action": action,
+                "enabled": bool(status.get("enabled", False)),
+                "script_path": status.get("script_path"),
+            },
+            profile=PROFILE,
+            session_id=SESSION_ID,
+            correlation_id=correlation_id,
+            mode="game" if ed_running else "standby",
+            severity="warn",
+            tags=["edparser", "tool", "error"],
+        )
+    elif previous_error and not current_error:
+        db.append_event(
+            event_id=str(uuid.uuid4()),
+            timestamp_utc=utc_now_iso(),
+            event_type="EDPARSER_RECOVERED",
+            source="edparser_supervisor",
+            payload={
+                "running": running,
+                "pid": status.get("pid"),
+                "action": action,
+            },
+            profile=PROFILE,
+            session_id=SESSION_ID,
+            correlation_id=correlation_id,
+            mode="game" if ed_running else "standby",
+            severity="info",
+            tags=["edparser", "tool"],
+        )
+
+    return running, current_error
+
+
 def process_music(
     db: BrainstemDB,
     previous_playing: bool | None,
@@ -358,6 +469,8 @@ def handover_snapshot(db: BrainstemDB) -> dict[str, Any]:
     ai_local = db.get_state("ai.local.available")
     ai_cloud = db.get_state("ai.cloud.available")
     ai_degraded = db.get_state("ai.degraded")
+    ed_parser_running = db.get_state("ed.parser.running")
+    ed_parser_error = db.get_state("ed.parser.last_error")
 
     alarms: list[str] = []
     mem_value = hardware_mem.get("state_value") if hardware_mem else None
@@ -387,6 +500,8 @@ def handover_snapshot(db: BrainstemDB) -> dict[str, Any]:
         "ed_status": {
             "running": ed_running.get("state_value") if ed_running else None,
             "system_name": ed_system.get("state_value") if ed_system else None,
+            "parser_running": ed_parser_running.get("state_value") if ed_parser_running else None,
+            "parser_error": ed_parser_error.get("state_value") if ed_parser_error else None,
         },
         "music_status": {
             "playing": music_playing.get("state_value") if music_playing else None,
@@ -464,13 +579,16 @@ def run_supervisor_loop() -> None:
     print(f"Supervisor started. DB: {DB_PATH}")
 
     previous_ed_running: bool | None = None
+    previous_edparser_running: bool | None = None
+    previous_edparser_error: str | None = None
     previous_music_playing: bool | None = None
     previous_track: tuple[str, str] | None = None
     previous_watch_condition: str | None = None
 
-    next_hardware = 0.0
-    next_ed = 0.0
-    next_music = 0.0
+    now = time.monotonic()
+    next_hardware = now
+    next_ed = now
+    next_music = now
 
     while True:
         now = time.monotonic()
@@ -481,6 +599,12 @@ def run_supervisor_loop() -> None:
 
         if now >= next_ed:
             previous_ed_running = process_ed(db, previous_ed_running)
+            previous_edparser_running, previous_edparser_error = process_edparser(
+                db=db,
+                ed_running=previous_ed_running,
+                previous_running=previous_edparser_running,
+                previous_error=previous_edparser_error,
+            )
             next_ed = now + (ED_ACTIVE_SEC if previous_ed_running else ED_IDLE_SEC)
 
         if now >= next_music:
@@ -498,7 +622,9 @@ def run_supervisor_loop() -> None:
                 previous_ed_running,
             )
 
-        time.sleep(max(0.05, LOOP_SLEEP_SEC))
+        next_due = min(next_hardware, next_ed, next_music)
+        sleep_for = max(0.05, min(LOOP_SLEEP_SEC, next_due - time.monotonic()))
+        time.sleep(sleep_for)
 
 
 def run_supervisor_once() -> None:
@@ -506,6 +632,12 @@ def run_supervisor_once() -> None:
     db.ensure_schema()
     process_hardware(db)
     ed_running = process_ed(db, previous_running=None)
+    process_edparser(
+        db,
+        ed_running=ed_running,
+        previous_running=None,
+        previous_error=None,
+    )
     process_music(db, previous_playing=None, previous_track=None)
     process_watch_condition(db, previous_condition=None, ed_running=ed_running)
 
