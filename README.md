@@ -27,6 +27,12 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 ## Quick Start
 
+Unified stack control:
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action start`
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action status`
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action stop`
+
+Manual service start sequence:
 1. Create or migrate DB:
    - `scripts/create_db.ps1`
    - or let service launchers auto-wire env + DB via `scripts/set_runtime_env.ps1`
@@ -41,6 +47,7 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 Launcher scripts (`services/*/run*.ps1`) now auto-load `scripts/set_runtime_env.ps1`
 so model paths, DB paths, and repo-local runtime directories are wired by default.
+Operational runbook: `docs/operations.md`.
 
 Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.
