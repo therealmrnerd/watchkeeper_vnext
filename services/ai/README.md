@@ -29,6 +29,18 @@ Vector backend is pluggable:
 3. Optional function-level smoke test (no HTTP server required):
    - `python scripts/smoke_test_knowledge.py`
 
+### Bulk Ingest
+
+Use the unified importer to load `Ingest Data` into facts and vectors:
+
+- `python scripts/import_ingest_knowledge.py`
+- include additional legacy dictionary seed:
+  - `python scripts/import_ingest_knowledge.py --include-elite-dictionary-seed`
+- dry run only:
+  - `python scripts/import_ingest_knowledge.py --dry-run`
+- import vectors to Qdrant backend:
+  - `python scripts/import_ingest_knowledge.py --vector-backend qdrant`
+
 ### Backend Config
 
 - `WKV_VECTOR_BACKEND=sqlite|qdrant` (default `sqlite`)
@@ -36,6 +48,11 @@ Vector backend is pluggable:
 - `WKV_QDRANT_URL=http://127.0.0.1:6333`
 - `WKV_QDRANT_COLLECTION=watchkeeper_docs`
 - `WKV_QDRANT_API_KEY=` (optional)
+- `WKV_QDRANT_AUTOSTART=1` auto-start local Qdrant when backend is `qdrant`
+- `WKV_QDRANT_AUTOSTOP=1` stop managed Qdrant when service exits
+- `WKV_QDRANT_BIN=C:/ai/tools/qdrant/qdrant.exe`
+- `WKV_QDRANT_WORKDIR=C:/ai/tools/qdrant`
+- `WKV_QDRANT_PID_FILE=data/qdrant_runtime.pid.json`
 
 Example Qdrant startup:
 
@@ -45,6 +62,15 @@ $env:WKV_QDRANT_URL = "http://127.0.0.1:6333"
 $env:WKV_QDRANT_COLLECTION = "watchkeeper_docs"
 python services/ai/knowledge_service.py
 ```
+
+### Qdrant Runtime Scripts
+
+- Start managed local Qdrant: `scripts/start_qdrant.ps1`
+- Check status: `scripts/qdrant_status.ps1`
+- Stop managed local Qdrant: `scripts/stop_qdrant.ps1`
+
+If `WKV_VECTOR_BACKEND=qdrant`, `knowledge_service.py` starts Qdrant automatically
+by default and cleanly stops it on service shutdown (managed/local runtime only).
 
 ### Endpoints
 

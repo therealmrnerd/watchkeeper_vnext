@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
+from qdrant_runtime import QdrantRuntimeManager, env_bool
 from vector_store import QdrantVectorStore, SQLiteVectorStore, VectorStore
 
 
@@ -28,6 +29,8 @@ VECTOR_BACKEND = os.getenv("WKV_VECTOR_BACKEND", "sqlite").strip().lower()
 QDRANT_URL = os.getenv("WKV_QDRANT_URL", "http://127.0.0.1:6333").strip()
 QDRANT_COLLECTION = os.getenv("WKV_QDRANT_COLLECTION", "watchkeeper_docs").strip()
 QDRANT_API_KEY = os.getenv("WKV_QDRANT_API_KEY", "").strip()
+QDRANT_AUTOSTART = env_bool("WKV_QDRANT_AUTOSTART", "1")
+QDRANT_AUTOSTOP = env_bool("WKV_QDRANT_AUTOSTOP", "1")
 
 FACT_ALLOWED_KEYS = {
     "triple_id",
@@ -101,6 +104,30 @@ def parse_json(raw: Any, fallback: Any) -> Any:
 
 
 _VECTOR_STORE: VectorStore | None = None
+_QDRANT_RUNTIME: QdrantRuntimeManager | None = None
+
+
+def get_qdrant_runtime() -> QdrantRuntimeManager:
+    global _QDRANT_RUNTIME
+    if _QDRANT_RUNTIME is None:
+        _QDRANT_RUNTIME = QdrantRuntimeManager(qdrant_url=QDRANT_URL)
+    return _QDRANT_RUNTIME
+
+
+def autostart_qdrant_if_needed() -> dict[str, Any] | None:
+    if VECTOR_BACKEND != "qdrant":
+        return None
+    if not QDRANT_AUTOSTART:
+        return get_qdrant_runtime().status() | {"ok": True, "autostart": False}
+    return get_qdrant_runtime().ensure_started()
+
+
+def autostop_qdrant_if_needed() -> dict[str, Any] | None:
+    if VECTOR_BACKEND != "qdrant":
+        return None
+    if not QDRANT_AUTOSTOP:
+        return get_qdrant_runtime().status() | {"ok": True, "autostop": False}
+    return get_qdrant_runtime().stop(force=True, managed_only=True)
 
 
 def get_vector_store() -> VectorStore:
@@ -506,6 +533,9 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/health":
                 store = get_vector_store()
+                qdrant_runtime = None
+                if store.name == "qdrant":
+                    qdrant_runtime = get_qdrant_runtime().status()
                 self._send_json(
                     200,
                     {
@@ -515,6 +545,7 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
                         "embed_dim": EMBED_DIM,
                         "vector_backend": store.name,
                         "qdrant_collection": QDRANT_COLLECTION if store.name == "qdrant" else None,
+                        "qdrant_runtime": qdrant_runtime,
                     },
                 )
                 return
@@ -574,15 +605,48 @@ class KnowledgeHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     ensure_db()
+    qdrant_runtime_result = autostart_qdrant_if_needed()
+    if VECTOR_BACKEND == "qdrant" and qdrant_runtime_result and not qdrant_runtime_result.get("ok", False):
+        raise RuntimeError(
+            f"Qdrant autostart failed: {qdrant_runtime_result.get('last_error') or qdrant_runtime_result}"
+        )
     get_vector_store().ensure()
     server = ThreadingHTTPServer((HOST, PORT), KnowledgeHandler)
     print(f"Knowledge API listening on http://{HOST}:{PORT}")
+    if qdrant_runtime_result is not None:
+        print(
+            "Qdrant runtime:",
+            json.dumps(
+                {
+                    "autostart": QDRANT_AUTOSTART,
+                    "autostop": QDRANT_AUTOSTOP,
+                    "started": qdrant_runtime_result.get("started", False),
+                    "already_running": qdrant_runtime_result.get("already_running", False),
+                    "url": qdrant_runtime_result.get("url"),
+                },
+                ensure_ascii=False,
+            ),
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        stop_result = autostop_qdrant_if_needed()
+        if stop_result is not None:
+            print(
+                "Qdrant shutdown:",
+                json.dumps(
+                    {
+                        "autostop": QDRANT_AUTOSTOP,
+                        "stopped": stop_result.get("stopped"),
+                        "ping_ok": stop_result.get("ping_ok"),
+                        "url": stop_result.get("url"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -64,6 +64,8 @@ Current status:
   - Triple facts: `/facts/upsert`, `/facts/query`
   - Vector retrieval: `/vector/upsert`, `/vector/query`
   - Vector backend: `sqlite` (default) or `qdrant` via `WKV_VECTOR_BACKEND`
+  - Qdrant runtime lifecycle: auto-start/auto-stop for managed local dependency
+  - Qdrant scripts: `scripts/start_qdrant.ps1`, `scripts/qdrant_status.ps1`, `scripts/stop_qdrant.ps1`
   - Contracts:
     - `contracts/v1/facts_upsert_request.schema.json`
     - `contracts/v1/facts_query_request.schema.json`
