@@ -46,7 +46,7 @@ ED_ACTIVE_SEC = float(os.getenv("WKV_SUP_ED_ACTIVE_SEC", "2"))
 ED_IDLE_SEC = float(os.getenv("WKV_SUP_ED_IDLE_SEC", "8"))
 
 NOW_PLAYING_DIR = Path(
-    os.getenv("WKV_NOW_PLAYING_DIR", str(Path("C:/ai/Watchkeeper/now-playing")))
+    os.getenv("WKV_NOW_PLAYING_DIR", str(ROOT_DIR / "data" / "now-playing"))
 )
 MUSIC_ACTIVE_SEC = float(os.getenv("WKV_SUP_MUSIC_ACTIVE_SEC", "2"))
 MUSIC_IDLE_SEC = float(os.getenv("WKV_SUP_MUSIC_IDLE_SEC", "10"))

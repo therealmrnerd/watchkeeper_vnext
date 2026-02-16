@@ -50,8 +50,8 @@ Use the unified importer to load `Ingest Data` into facts and vectors:
 - `WKV_QDRANT_API_KEY=` (optional)
 - `WKV_QDRANT_AUTOSTART=1` auto-start local Qdrant when backend is `qdrant`
 - `WKV_QDRANT_AUTOSTOP=1` stop managed Qdrant when service exits
-- `WKV_QDRANT_BIN=C:/ai/tools/qdrant/qdrant.exe`
-- `WKV_QDRANT_WORKDIR=C:/ai/tools/qdrant`
+- `WKV_QDRANT_BIN=tools/qdrant/qdrant.exe` (preferred, repo-local; fallback `C:/ai/tools/qdrant/qdrant.exe`)
+- `WKV_QDRANT_WORKDIR=tools/qdrant`
 - `WKV_QDRANT_PID_FILE=data/qdrant_runtime.pid.json`
 
 Example Qdrant startup:

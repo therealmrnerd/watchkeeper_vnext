@@ -13,9 +13,23 @@ from urllib.parse import urlparse
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_QDRANT_URL = os.getenv("WKV_QDRANT_URL", "http://127.0.0.1:6333").strip()
-DEFAULT_QDRANT_BIN = Path(
-    os.getenv("WKV_QDRANT_BIN", str(Path("C:/ai/tools/qdrant/qdrant.exe")))
-)
+
+
+def _resolve_default_qdrant_bin() -> Path:
+    explicit = os.getenv("WKV_QDRANT_BIN", "").strip()
+    if explicit:
+        return Path(explicit)
+    candidates = [
+        ROOT_DIR / "tools" / "qdrant" / "qdrant.exe",
+        Path("C:/ai/tools/qdrant/qdrant.exe"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+DEFAULT_QDRANT_BIN = _resolve_default_qdrant_bin()
 DEFAULT_QDRANT_WORKDIR = Path(
     os.getenv("WKV_QDRANT_WORKDIR", str(DEFAULT_QDRANT_BIN.parent))
 )

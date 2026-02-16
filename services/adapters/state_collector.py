@@ -10,11 +10,12 @@ from typing import Any
 from urllib import error, request
 
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
 BRAINSTEM_BASE_URL = os.getenv("WKV_BRAINSTEM_URL", "http://127.0.0.1:8787").rstrip("/")
 PROFILE = os.getenv("WKV_PROFILE", "watchkeeper")
 SESSION_ID = os.getenv("WKV_COLLECTOR_SESSION", "collector-main")
 NOW_PLAYING_DIR = Path(
-    os.getenv("WKV_NOW_PLAYING_DIR", str(Path("C:/ai/Watchkeeper/now-playing")))
+    os.getenv("WKV_NOW_PLAYING_DIR", str(ROOT_DIR / "data" / "now-playing"))
 )
 ED_PROCESS_NAMES = [
     p.strip()

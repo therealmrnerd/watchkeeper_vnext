@@ -29,6 +29,7 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
 
 1. Create or migrate DB:
    - `scripts/create_db.ps1`
+   - or let service launchers auto-wire env + DB via `scripts/set_runtime_env.ps1`
 2. Start Brainstem:
    - `python services/brainstem/app.py`
 3. Start Knowledge API:
@@ -37,6 +38,9 @@ Fresh repository scaffold for the rebuild, based on lessons learned from the cur
    - `python services/ai/assist_router.py`
 5. Start state collector:
    - `python services/adapters/state_collector.py`
+
+Launcher scripts (`services/*/run*.ps1`) now auto-load `scripts/set_runtime_env.ps1`
+so model paths, DB paths, and repo-local runtime directories are wired by default.
 
 Current status:
 - Brainstem API stubs are implemented in `services/brainstem/app.py` with SQLite-backed intent/action/event logging.

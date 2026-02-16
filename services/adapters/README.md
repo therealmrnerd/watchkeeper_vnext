@@ -16,7 +16,7 @@ Runtime collectors and bridges that connect external signals into Brainstem.
 - `WKV_BRAINSTEM_URL` default `http://127.0.0.1:8787`
 - `WKV_PROFILE` default `watchkeeper`
 - `WKV_COLLECTOR_SESSION` default `collector-main`
-- `WKV_NOW_PLAYING_DIR` default `C:/ai/Watchkeeper/now-playing`
+- `WKV_NOW_PLAYING_DIR` default `data/now-playing` (repo-local)
 - `WKV_ED_PROCESS_NAMES` default `EliteDangerous64.exe,EliteDangerous.exe`
 - `WKV_SYSTEM_INTERVAL_SEC` default `15`
 - `WKV_ED_ACTIVE_INTERVAL_SEC` default `2`
