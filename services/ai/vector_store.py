@@ -3,6 +3,7 @@ import sqlite3
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Callable
 
 
@@ -187,6 +188,11 @@ class QdrantVectorStore(VectorStore):
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Qdrant connection failed: {exc}") from exc
 
+    @staticmethod
+    def _point_id_for_doc(doc_id: str) -> str:
+        # Qdrant point ids must be uint64 or UUID.
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"watchkeeper:{doc_id}"))
+
     def ensure(self) -> None:
         collection_escaped = urllib.parse.quote(self._collection, safe="")
         try:
@@ -195,21 +201,28 @@ class QdrantVectorStore(VectorStore):
         except RuntimeError as exc:
             if "HTTP 404" not in str(exc):
                 raise
-        self._request(
-            "PUT",
-            f"/collections/{collection_escaped}",
-            {
-                "vectors": {
-                    "size": self._embed_dim,
-                    "distance": "Cosine",
-                }
-            },
-        )
+        try:
+            self._request(
+                "PUT",
+                f"/collections/{collection_escaped}",
+                {
+                    "vectors": {
+                        "size": self._embed_dim,
+                        "distance": "Cosine",
+                    }
+                },
+            )
+        except RuntimeError as exc:
+            # Benign race: collection created by another process between GET and PUT.
+            if "HTTP 409" in str(exc):
+                return
+            raise
 
     def upsert(self, docs: list[dict[str, Any]]) -> dict[str, Any]:
         points: list[dict[str, Any]] = []
         for item in docs:
             payload = {
+                "doc_id": item["doc_id"],
                 "domain": item["domain"],
                 "title": item["title"],
                 "text_content": item["text_content"],
@@ -220,18 +233,30 @@ class QdrantVectorStore(VectorStore):
             }
             points.append(
                 {
-                    "id": item["doc_id"],
+                    "id": self._point_id_for_doc(item["doc_id"]),
                     "vector": item["vector"],
                     "payload": payload,
                 }
             )
 
         collection_escaped = urllib.parse.quote(self._collection, safe="")
-        self._request(
-            "PUT",
-            f"/collections/{collection_escaped}/points?wait=true",
-            {"points": points},
-        )
+        try:
+            self._request(
+                "PUT",
+                f"/collections/{collection_escaped}/points?wait=true",
+                {"points": points},
+            )
+        except RuntimeError as exc:
+            if "HTTP 404" in str(exc):
+                # Collection may be absent due cold-start or async drop race.
+                self.ensure()
+                self._request(
+                    "PUT",
+                    f"/collections/{collection_escaped}/points?wait=true",
+                    {"points": points},
+                )
+            else:
+                raise
         return {"upserted": len(points), "backend": self.name}
 
     def query(
@@ -273,7 +298,7 @@ class QdrantVectorStore(VectorStore):
         for row in rows:
             row_payload = row.get("payload", {}) or {}
             item = {
-                "doc_id": str(row.get("id")),
+                "doc_id": str(row_payload.get("doc_id") or row.get("id")),
                 "score": float(row.get("score", 0.0)),
                 "domain": row_payload.get("domain"),
                 "title": row_payload.get("title"),
