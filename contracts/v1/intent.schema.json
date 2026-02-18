@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/intent.schema.json",
+  "title": "IntentEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "timestamp_utc",
+    "mode",
+    "domain",
+    "urgency",
+    "user_text",
+    "needs_tools",
+    "needs_clarification",
+    "proposed_actions",
+    "response_text"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["game", "work", "standby", "tutor"]
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "gameplay",
+        "lore",
+        "astrophysics",
+        "general_gaming",
+        "coding",
+        "networking",
+        "system",
+        "music",
+        "speech",
+        "general"
+      ]
+    },
+    "urgency": {
+      "type": "string",
+      "enum": ["low", "normal", "high"]
+    },
+    "user_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "needs_tools": {
+      "type": "boolean"
+    },
+    "needs_clarification": {
+      "type": "boolean"
+    },
+    "clarification_questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "maxItems": 3
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "citation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "uniqueItems": true
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "proposed_actions": {
+      "type": "array",
+      "items": {
+        "$ref": "./proposed_action.schema.json"
+      },
+      "maxItems": 10
+    },
+    "response_text": {
+      "type": "string",
+      "maxLength": 6000
+    }
+  }
+}

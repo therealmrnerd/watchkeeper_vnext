@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/tool_result.schema.json",
+  "title": "ToolResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "action_id",
+    "tool_name",
+    "status",
+    "started_at_utc",
+    "ended_at_utc",
+    "executed_by",
+    "output"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "tool_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "denied", "error", "timeout"]
+    },
+    "denial_reason": {
+      "type": "string",
+      "maxLength": 1200
+    },
+    "error_code": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "error_message": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "started_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "executed_by": {
+      "type": "string",
+      "enum": ["core", "adapter"]
+    },
+    "output": {
+      "type": "object"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/proposed_action.schema.json",
+  "title": "ProposedAction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action_id",
+    "tool_name",
+    "parameters",
+    "safety_level",
+    "timeout_ms",
+    "confidence"
+  ],
+  "properties": {
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "tool_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "safety_level": {
+      "type": "string",
+      "enum": ["read_only", "low_risk", "high_risk"]
+    },
+    "mode_constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["game", "work", "standby", "tutor"]
+      },
+      "uniqueItems": true
+    },
+    "requires_confirmation": {
+      "type": "boolean",
+      "default": false
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 120000
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 800
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

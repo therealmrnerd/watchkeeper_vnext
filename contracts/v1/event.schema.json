@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/event.schema.json",
+  "title": "EventEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "timestamp_utc",
+    "event_type",
+    "source",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "SYSTEM_HEARTBEAT",
+        "CAPABILITY_CHANGED",
+        "STATE_UPDATED",
+        "ED_STARTED",
+        "ED_STOPPED",
+        "MUSIC_STARTED",
+        "MUSIC_STOPPED",
+        "TRACK_CHANGED",
+        "STT_HEARD",
+        "INTENT_PROPOSED",
+        "ACTION_APPROVED",
+        "ACTION_DENIED",
+        "ACTION_EXECUTED",
+        "ACTION_FAILED",
+        "USER_FEEDBACK"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "profile": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "correlation_id": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["game", "work", "standby", "tutor"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"],
+      "default": "info"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 40
+      },
+      "uniqueItems": true
+    }
+  }
+}
