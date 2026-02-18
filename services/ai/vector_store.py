@@ -37,9 +37,16 @@ class SQLiteVectorStore(VectorStore):
         self,
         connect_db: Callable[[], sqlite3.Connection],
         parse_json: Callable[[Any, Any], Any],
+        *,
+        candidate_limit: int = 5000,
+        prefilter_threshold: int = 50000,
+        require_prefilter: bool = True,
     ) -> None:
         self._connect_db = connect_db
         self._parse_json = parse_json
+        self._candidate_limit = max(1, int(candidate_limit))
+        self._prefilter_threshold = max(1, int(prefilter_threshold))
+        self._require_prefilter = bool(require_prefilter)
 
     @staticmethod
     def _dot(a: list[float], b: list[float]) -> float:
@@ -109,9 +116,22 @@ class SQLiteVectorStore(VectorStore):
         if clauses:
             where = "WHERE " + " AND ".join(clauses)
 
+        with self._connect_db() as con:
+            corpus_size = int(con.execute("SELECT COUNT(*) FROM vector_documents").fetchone()[0])
+            if (
+                self._require_prefilter
+                and corpus_size > self._prefilter_threshold
+                and not domain
+                and not source_id
+            ):
+                raise ValueError(
+                    "vector query requires domain or source_id prefilter "
+                    f"when corpus size {corpus_size} exceeds {self._prefilter_threshold}"
+                )
+
         sql = (
             "SELECT doc_id,domain,title,text_content,source_id,metadata_json,embedding_json,embedding_model,dimension,updated_at_utc "
-            f"FROM vector_documents {where} ORDER BY updated_at_utc DESC LIMIT 5000"
+            f"FROM vector_documents {where} ORDER BY updated_at_utc DESC LIMIT {self._candidate_limit}"
         )
 
         with self._connect_db() as con:
@@ -148,7 +168,14 @@ class SQLiteVectorStore(VectorStore):
             scored.append(result)
 
         scored.sort(key=lambda x: x["score"], reverse=True)
-        return {"count": min(len(scored), top_k), "items": scored[:top_k], "backend": self.name}
+        return {
+            "count": min(len(scored), top_k),
+            "items": scored[:top_k],
+            "backend": self.name,
+            "candidate_limit": self._candidate_limit,
+            "candidates_scanned": len(rows),
+            "corpus_size": corpus_size,
+        }
 
 
 class QdrantVectorStore(VectorStore):

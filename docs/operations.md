@@ -49,6 +49,13 @@ Optional flags:
 Managed process metadata is stored at:
 - `data/stack_processes.json`
 
+Service logs are written to:
+- `logs/brainstem.out.log`, `logs/brainstem.err.log`
+- `logs/knowledge.out.log`, `logs/knowledge.err.log`
+- `logs/assist_router.out.log`, `logs/assist_router.err.log`
+- `logs/supervisor.out.log`, `logs/supervisor.err.log`
+- `logs/state_collector.out.log`, `logs/state_collector.err.log`
+
 If the state file is missing but services are still up, they are treated as
 external and are not stopped until managed again by `run_stack.ps1`.
 
@@ -65,3 +72,17 @@ external and are not stopped until managed again by `run_stack.ps1`.
 2. Verify with `run_stack.ps1 -Action status`.
 3. Run smoke tests or gameplay/work sessions.
 4. Stop stack with `run_stack.ps1 -Action stop`.
+
+## Diagnostics Report
+
+Generate a local report with config, schema versions, policy summary, and latest events:
+
+```powershell
+python tools/diag_report.py --pretty
+```
+
+Use custom sources if required:
+
+```powershell
+python tools/diag_report.py --db-path data/watchkeeper_vnext.db --policy-path config/standing_orders.json --events-limit 50 --pretty
+```

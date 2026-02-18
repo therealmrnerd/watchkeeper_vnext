@@ -17,6 +17,10 @@ if (-not (Test-Path $dataDir)) {
   New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 }
 $stateFile = Join-Path $dataDir "stack_processes.json"
+$logsDir = Join-Path $root "logs"
+if (-not (Test-Path $logsDir)) {
+  New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+}
 
 $services = @(
   [pscustomobject]@{
@@ -117,6 +121,8 @@ function Write-StackState {
       pid = [int]$StateTable[$name].pid
       script = [string]$StateTable[$name].script
       started_at_utc = [string]$StateTable[$name].started_at_utc
+      stdout_log = [string]$StateTable[$name].stdout_log
+      stderr_log = [string]$StateTable[$name].stderr_log
       managed = $true
     }
   }
@@ -157,18 +163,24 @@ function Start-ServiceProcess {
   if (-not (Test-Path $scriptPath)) {
     throw "Missing startup script for $($Service.Name): $scriptPath"
   }
+  $stdoutLog = Join-Path $logsDir ("{0}.out.log" -f $Service.Name)
+  $stderrLog = Join-Path $logsDir ("{0}.err.log" -f $Service.Name)
 
   $proc = Start-Process `
     -FilePath "powershell" `
     -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath) `
     -WorkingDirectory $root `
     -WindowStyle Hidden `
+    -RedirectStandardOutput $stdoutLog `
+    -RedirectStandardError $stderrLog `
     -PassThru
 
   $StateTable[$Service.Name] = [pscustomobject]@{
     pid = [int]$proc.Id
     script = $Service.Script
     started_at_utc = UtcNowIso
+    stdout_log = $stdoutLog
+    stderr_log = $stderrLog
   }
   [void]$StartedThisRun.Add($Service.Name)
   Write-Host ("[start] {0} pid={1}" -f $Service.Name, $proc.Id)
@@ -258,8 +270,14 @@ function Show-Status {
     if ($svc.Kind -eq "http") {
       $health = Test-HealthEndpoint -Url $svc.HealthUrl -TimeoutSec 2
       Write-Host (" - {0}: managed={1} pid={2} running={3} health={4}" -f $svc.Name, $managed, $procId, $running, $health)
+      if ($entry) {
+        Write-Host ("   logs: out={0} err={1}" -f $entry.stdout_log, $entry.stderr_log)
+      }
     } else {
       Write-Host (" - {0}: managed={1} pid={2} running={3}" -f $svc.Name, $managed, $procId, $running)
+      if ($entry) {
+        Write-Host ("   logs: out={0} err={1}" -f $entry.stdout_log, $entry.stderr_log)
+      }
     }
   }
 }

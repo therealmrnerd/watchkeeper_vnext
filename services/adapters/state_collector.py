@@ -1,4 +1,5 @@
 import ctypes
+import hashlib
 import json
 import os
 import subprocess
@@ -127,35 +128,35 @@ def collect_system_state() -> dict[str, Any]:
     memory_pct = (memory_used / memory_total) if memory_total > 0 else 0.0
 
     return {
-        "system.cpu.logical_cores": os.cpu_count(),
-        "system.memory": {
+        "hw.cpu.logical_cores": os.cpu_count(),
+        "hw.memory": {
             "total_bytes": memory_total,
             "available_bytes": memory_avail,
             "used_bytes": memory_used,
             "used_percent": memory_pct,
         },
-        "system.uptime_sec": int(uptime_ms // 1000),
+        "hw.uptime_sec": int(uptime_ms // 1000),
     }
 
 
-def _state_equal(a: Any, b: Any) -> bool:
+def _state_hash(value: Any) -> str:
     try:
-        return json.dumps(a, sort_keys=True, ensure_ascii=False) == json.dumps(
-            b, sort_keys=True, ensure_ascii=False
-        )
+        payload = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     except Exception:
-        return a == b
+        payload = repr(value)
+    return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()
 
 
 def _build_changed_items(
     latest_values: dict[str, Any],
-    previous_values: dict[str, Any],
+    last_sent_hashes: dict[str, str],
     source: str,
 ) -> list[dict[str, Any]]:
     observed_at = utc_now_iso()
     items: list[dict[str, Any]] = []
     for key, value in latest_values.items():
-        if key in previous_values and _state_equal(previous_values[key], value):
+        value_hash = _state_hash(value)
+        if last_sent_hashes.get(key) == value_hash:
             continue
         items.append(
             {
@@ -166,7 +167,7 @@ def _build_changed_items(
                 "observed_at_utc": observed_at,
             }
         )
-        previous_values[key] = value
+        last_sent_hashes[key] = value_hash
     return items
 
 
@@ -203,7 +204,7 @@ def post_state(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 def run_loop() -> None:
     print(f"State collector started -> {BRAINSTEM_BASE_URL}/state")
-    previous_values: dict[str, Any] = {}
+    last_sent_hashes: dict[str, str] = {}
     next_ed = 0.0
     next_music = 0.0
     next_system = 0.0
@@ -214,13 +215,13 @@ def run_loop() -> None:
 
         if now >= next_ed:
             ed_state = collect_ed_state()
-            pending_items.extend(_build_changed_items(ed_state, previous_values, "ed_probe"))
+            pending_items.extend(_build_changed_items(ed_state, last_sent_hashes, "ed_probe"))
             ed_running = bool(ed_state.get("ed.running"))
             next_ed = now + (ED_ACTIVE_INTERVAL_SEC if ed_running else ED_IDLE_INTERVAL_SEC)
 
         if now >= next_music:
             music_state = collect_music_state()
-            pending_items.extend(_build_changed_items(music_state, previous_values, "music_probe"))
+            pending_items.extend(_build_changed_items(music_state, last_sent_hashes, "music_probe"))
             music_playing = bool(music_state.get("music.playing"))
             next_music = now + (
                 MUSIC_ACTIVE_INTERVAL_SEC if music_playing else MUSIC_IDLE_INTERVAL_SEC
@@ -228,7 +229,7 @@ def run_loop() -> None:
 
         if now >= next_system:
             system_state = collect_system_state()
-            pending_items.extend(_build_changed_items(system_state, previous_values, "system_probe"))
+            pending_items.extend(_build_changed_items(system_state, last_sent_hashes, "system_probe"))
             next_system = now + SYSTEM_INTERVAL_SEC
 
         if pending_items:

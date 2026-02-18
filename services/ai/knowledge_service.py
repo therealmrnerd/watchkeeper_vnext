@@ -26,6 +26,9 @@ HOST = os.getenv("WKV_AI_HOST", "127.0.0.1")
 PORT = int(os.getenv("WKV_AI_PORT", "8790"))
 EMBED_DIM = int(os.getenv("WKV_EMBED_DIM", "256"))
 VECTOR_BACKEND = os.getenv("WKV_VECTOR_BACKEND", "sqlite").strip().lower()
+SQLITE_VECTOR_CANDIDATE_LIMIT = int(os.getenv("WKV_SQLITE_VECTOR_CANDIDATE_LIMIT", "5000"))
+SQLITE_VECTOR_PREFILTER_THRESHOLD = int(os.getenv("WKV_SQLITE_VECTOR_PREFILTER_THRESHOLD", "50000"))
+SQLITE_VECTOR_REQUIRE_PREFILTER = env_bool("WKV_SQLITE_VECTOR_REQUIRE_PREFILTER", "1")
 QDRANT_URL = os.getenv("WKV_QDRANT_URL", "http://127.0.0.1:6333").strip()
 QDRANT_COLLECTION = os.getenv("WKV_QDRANT_COLLECTION", "watchkeeper_docs").strip()
 QDRANT_API_KEY = os.getenv("WKV_QDRANT_API_KEY", "").strip()
@@ -136,7 +139,13 @@ def get_vector_store() -> VectorStore:
         return _VECTOR_STORE
 
     if VECTOR_BACKEND == "sqlite":
-        _VECTOR_STORE = SQLiteVectorStore(connect_db=connect_db, parse_json=parse_json)
+        _VECTOR_STORE = SQLiteVectorStore(
+            connect_db=connect_db,
+            parse_json=parse_json,
+            candidate_limit=SQLITE_VECTOR_CANDIDATE_LIMIT,
+            prefilter_threshold=SQLITE_VECTOR_PREFILTER_THRESHOLD,
+            require_prefilter=SQLITE_VECTOR_REQUIRE_PREFILTER,
+        )
         return _VECTOR_STORE
     if VECTOR_BACKEND == "qdrant":
         _VECTOR_STORE = QdrantVectorStore(
