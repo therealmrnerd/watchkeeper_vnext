@@ -3,6 +3,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from migrations import apply_migrations
+
 
 class BrainstemDB:
     def __init__(self, db_path: Path, schema_path: Path) -> None:
@@ -18,13 +20,8 @@ class BrainstemDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as con:
             con.execute("PRAGMA journal_mode=WAL;")
-            exists = con.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_log'"
-            ).fetchone()
-            if exists:
-                return
-            schema_sql = self.schema_path.read_text(encoding="utf-8")
-            con.executescript(schema_sql)
+            schema_dir = self.schema_path if self.schema_path.is_dir() else self.schema_path.parent
+            apply_migrations(con, schema_dir)
             con.commit()
 
     @staticmethod

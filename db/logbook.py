@@ -29,6 +29,12 @@ class Logbook:
         mode = req_context.get("mode")
         tags = ["policy", "standing_orders"]
 
+        envelope = {
+            "payload": payload,
+            "context": req_context,
+        }
+        db_error = None
+
         if self.db_service is not None and hasattr(self.db_service, "append_event"):
             try:
                 self.db_service.append_event(
@@ -36,7 +42,7 @@ class Logbook:
                     timestamp_utc=timestamp_utc,
                     event_type=event_type,
                     source=self.source,
-                    payload=payload,
+                    payload=envelope,
                     session_id=session_id,
                     correlation_id=correlation_id,
                     mode=mode,
@@ -44,8 +50,8 @@ class Logbook:
                     tags=tags,
                 )
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                db_error = str(exc)
 
         entry = {
             "event_id": event_id,
@@ -53,8 +59,9 @@ class Logbook:
             "event_type": event_type,
             "source": self.source,
             "severity": severity,
-            "payload": payload,
+            "payload": envelope,
             "context": req_context,
+            "db_write_error": db_error,
         }
         print(json.dumps(entry, ensure_ascii=False))
 
