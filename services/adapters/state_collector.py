@@ -2,6 +2,8 @@ import ctypes
 import hashlib
 import json
 import os
+import re
+import socket
 import subprocess
 import time
 import uuid
@@ -18,6 +20,29 @@ SESSION_ID = os.getenv("WKV_COLLECTOR_SESSION", "collector-main")
 NOW_PLAYING_DIR = Path(
     os.getenv("WKV_NOW_PLAYING_DIR", str(ROOT_DIR / "data" / "now-playing"))
 )
+NOW_PLAYING_FALLBACK_DIR_RAW = os.getenv("WKV_NOW_PLAYING_FALLBACK_DIR", "").strip()
+NOW_PLAYING_FALLBACK_DIR = (
+    Path(NOW_PLAYING_FALLBACK_DIR_RAW).expanduser() if NOW_PLAYING_FALLBACK_DIR_RAW else None
+)
+YTMD_ENABLED = os.getenv("WKV_YTMD_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+YTMD_HOST = os.getenv("WKV_YTMD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+YTMD_PORT = int(os.getenv("WKV_YTMD_PORT", "9863"))
+YTMD_TIMEOUT_SEC = float(os.getenv("WKV_YTMD_TIMEOUT_SEC", "2.0"))
+YTMD_REST_POLL_MS = int(os.getenv("WKV_YTMD_REST_POLL_MS", "5000"))
+YTMD_TOKEN_FILE = Path(os.getenv("WKV_YTMD_TOKEN_FILE", str(ROOT_DIR / "ytm-token.json")))
+YTMD_LEGACY_TOKEN_FILE = Path(
+    os.getenv("WKV_YTMD_LEGACY_TOKEN_FILE", r"C:\ai\Watchkeeper\ytm-token.json")
+)
+YTMD_RATE_LIMIT_BACKOFF_SEC_DEFAULT = int(os.getenv("WKV_YTMD_BACKOFF_SEC", "30"))
+YTMD_PROCESS_NAMES = [
+    p.strip().lower()
+    for p in os.getenv(
+        "WKV_YTMD_PROCESS_NAMES",
+        "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe",
+    ).split(",")
+    if p.strip()
+]
+_ytmd_next_allowed_at = 0.0
 ED_PROCESS_NAMES = [
     p.strip()
     for p in os.getenv(
@@ -59,6 +84,121 @@ def _read_text(path: Path) -> str:
         return ""
 
 
+def _port_open(host: str, port: int, timeout_sec: float) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_sec):
+            return True
+    except Exception:
+        return False
+
+
+def _read_ytmd_token() -> str | None:
+    for candidate in (YTMD_TOKEN_FILE, YTMD_LEGACY_TOKEN_FILE):
+        if not candidate or not candidate.exists():
+            continue
+        raw = _read_text(candidate)
+        if not raw:
+            continue
+        token = raw
+        if token.startswith("{"):
+            try:
+                obj = json.loads(token)
+                token = str(obj.get("token", "")).strip()
+            except Exception:
+                token = ""
+        token = token.strip()
+        if token:
+            return token
+    return None
+
+
+def _fetch_ytmd_track() -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    global _ytmd_next_allowed_at
+    status = {
+        "music.api_endpoint": f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
+        "music.api_reachable": False,
+        "music.api_authorized": False,
+    }
+    if not YTMD_ENABLED:
+        return None, status
+
+    now = time.time()
+    if now < _ytmd_next_allowed_at:
+        return None, status
+
+    if not _port_open(YTMD_HOST, YTMD_PORT, YTMD_TIMEOUT_SEC):
+        _ytmd_next_allowed_at = now + max(1.0, YTMD_REST_POLL_MS / 1000.0)
+        return None, status
+    status["music.api_reachable"] = True
+
+    headers: dict[str, str] = {}
+    token = _read_ytmd_token()
+    if token:
+        headers["Authorization"] = token
+
+    req = request.Request(
+        f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
+        method="GET",
+        headers=headers,
+    )
+    try:
+        with request.urlopen(req, timeout=YTMD_TIMEOUT_SEC) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            _ytmd_next_allowed_at = now + max(1.0, YTMD_REST_POLL_MS / 1000.0)
+    except error.HTTPError as exc:
+        backoff_sec = max(1.0, YTMD_REST_POLL_MS / 1000.0)
+        if int(exc.code) == 429:
+            retry_after = str(exc.headers.get("Retry-After", "")).strip()
+            if retry_after.isdigit():
+                backoff_sec = float(int(retry_after))
+            else:
+                body = exc.read().decode("utf-8", errors="replace")
+                match = re.search(r"retry in\s+(\d+)\s+seconds", body, flags=re.IGNORECASE)
+                if match:
+                    backoff_sec = float(int(match.group(1)))
+                else:
+                    backoff_sec = float(YTMD_RATE_LIMIT_BACKOFF_SEC_DEFAULT)
+        _ytmd_next_allowed_at = now + backoff_sec
+        if int(exc.code) not in (401, 403):
+            status["music.api_authorized"] = bool(token)
+        return None, status
+    except Exception:
+        _ytmd_next_allowed_at = now + max(1.0, YTMD_REST_POLL_MS / 1000.0)
+        return None, status
+
+    status["music.api_authorized"] = True
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None, status
+
+    video = payload.get("video") if isinstance(payload, dict) else None
+    if not isinstance(video, dict):
+        return None, status
+
+    title = str(video.get("title") or "").strip()
+    artist = str(video.get("author") or "").strip()
+    album = str(video.get("album") or "").strip()
+    thumbs = video.get("thumbnails") if isinstance(video.get("thumbnails"), list) else []
+    thumb_url = ""
+    if thumbs and isinstance(thumbs[0], dict):
+        thumb_url = str(thumbs[0].get("url") or "").strip()
+    now_playing = " - ".join([part for part in (title, artist) if part]).strip()
+    if not title and not artist:
+        return None, status
+
+    return (
+        {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "now_playing": now_playing,
+            "artwork_path": thumb_url or None,
+        },
+        status,
+    )
+
+
 def _list_process_names() -> set[str]:
     try:
         result = subprocess.run(
@@ -81,9 +221,16 @@ def _list_process_names() -> set[str]:
         return set()
 
 
-def collect_ed_state() -> dict[str, Any]:
+def _process_running_by_names(process_names: set[str], configured_names: list[str]) -> bool:
+    if not configured_names:
+        return False
+    return any(name in process_names for name in configured_names)
+
+
+def collect_ed_state(process_names: set[str] | None = None) -> dict[str, Any]:
     running_name = ""
-    process_names = _list_process_names()
+    if process_names is None:
+        process_names = _list_process_names()
     for candidate in ED_PROCESS_NAMES:
         if candidate.lower() in process_names:
             running_name = candidate
@@ -95,24 +242,85 @@ def collect_ed_state() -> dict[str, Any]:
     }
 
 
-def collect_music_state() -> dict[str, Any]:
-    title = _read_text(NOW_PLAYING_DIR / "ytm-title.txt")
-    artist = _read_text(NOW_PLAYING_DIR / "ytm-artist.txt")
-    album = _read_text(NOW_PLAYING_DIR / "ytm-album.txt")
-    now_playing = _read_text(NOW_PLAYING_DIR / "ytm-nowplaying.txt")
-    artwork = NOW_PLAYING_DIR / "album.jpg"
-    artwork_exists = artwork.exists()
+def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]:
+    if process_names is None:
+        process_names = _list_process_names()
+    ytmd_running = _process_running_by_names(process_names, YTMD_PROCESS_NAMES)
+    if not ytmd_running:
+        return {
+            "music.app_running": False,
+            "music.playing": False,
+            "music.source_path": None,
+            "music.api_endpoint": f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
+            "music.api_reachable": False,
+            "music.api_authorized": False,
+            "music.now_playing": {
+                "title": "",
+                "artist": "",
+                "album": "",
+                "now_playing": "",
+                "artwork_path": None,
+            },
+        }
 
-    playing = any([title, artist, now_playing])
-    return {
-        "music.playing": playing,
-        "music.now_playing": {
+    track_payload, api_status = _fetch_ytmd_track()
+    if track_payload:
+        return {
+            "music.app_running": True,
+            "music.playing": True,
+            "music.source_path": f"ytmd_api://{YTMD_HOST}:{YTMD_PORT}",
+            **api_status,
+            "music.now_playing": track_payload,
+        }
+    if api_status.get("music.api_reachable") and api_status.get("music.api_authorized"):
+        # API path is healthy but no usable track payload (e.g. transient rate-limit window).
+        # Keep prior now-playing state instead of overwriting with empty file values.
+        return {
+            "music.app_running": True,
+            "music.source_path": f"ytmd_api://{YTMD_HOST}:{YTMD_PORT}",
+            **api_status,
+        }
+
+    def _read_music_from_dir(base_dir: Path) -> dict[str, Any]:
+        title = _read_text(base_dir / "ytm-title.txt")
+        artist = _read_text(base_dir / "ytm-artist.txt")
+        album = _read_text(base_dir / "ytm-album.txt")
+        now_playing = _read_text(base_dir / "ytm-nowplaying.txt")
+        artwork = base_dir / "album.jpg"
+        return {
             "title": title,
             "artist": artist,
             "album": album,
             "now_playing": now_playing,
-            "artwork_path": str(artwork) if artwork_exists else None,
-        },
+            "artwork_path": str(artwork) if artwork.exists() else None,
+        }
+
+    primary_payload = _read_music_from_dir(NOW_PLAYING_DIR)
+    source_dir = NOW_PLAYING_DIR
+
+    has_primary_music = any(
+        [primary_payload["title"], primary_payload["artist"], primary_payload["now_playing"]]
+    )
+    if (
+        not has_primary_music
+        and NOW_PLAYING_FALLBACK_DIR is not None
+        and NOW_PLAYING_FALLBACK_DIR != NOW_PLAYING_DIR
+    ):
+        fallback_payload = _read_music_from_dir(NOW_PLAYING_FALLBACK_DIR)
+        has_fallback_music = any(
+            [fallback_payload["title"], fallback_payload["artist"], fallback_payload["now_playing"]]
+        )
+        if has_fallback_music:
+            primary_payload = fallback_payload
+            source_dir = NOW_PLAYING_FALLBACK_DIR
+
+    playing = any([primary_payload["title"], primary_payload["artist"], primary_payload["now_playing"]])
+    return {
+        "music.app_running": True,
+        "music.playing": playing,
+        "music.source_path": str(source_dir),
+        **api_status,
+        "music.now_playing": primary_payload,
     }
 
 
@@ -212,15 +420,18 @@ def run_loop() -> None:
     while True:
         now = time.monotonic()
         pending_items: list[dict[str, Any]] = []
+        process_names: set[str] | None = None
+        if now >= next_ed or now >= next_music:
+            process_names = _list_process_names()
 
         if now >= next_ed:
-            ed_state = collect_ed_state()
+            ed_state = collect_ed_state(process_names=process_names)
             pending_items.extend(_build_changed_items(ed_state, last_sent_hashes, "ed_probe"))
             ed_running = bool(ed_state.get("ed.running"))
             next_ed = now + (ED_ACTIVE_INTERVAL_SEC if ed_running else ED_IDLE_INTERVAL_SEC)
 
         if now >= next_music:
-            music_state = collect_music_state()
+            music_state = collect_music_state(process_names=process_names)
             pending_items.extend(_build_changed_items(music_state, last_sent_hashes, "music_probe"))
             music_playing = bool(music_state.get("music.playing"))
             next_music = now + (

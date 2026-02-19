@@ -105,6 +105,24 @@ NOW_PLAYING_DIR = Path(
 )
 MUSIC_ACTIVE_SEC = float(os.getenv("WKV_SUP_MUSIC_ACTIVE_SEC", "2"))
 MUSIC_IDLE_SEC = float(os.getenv("WKV_SUP_MUSIC_IDLE_SEC", "10"))
+MUSIC_PROCESS_NAMES = [
+    p.strip().lower()
+    for p in os.getenv(
+        "WKV_SUP_MUSIC_PROCESS_NAMES",
+        "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe",
+    ).split(",")
+    if p.strip()
+]
+SUP_MUSIC_REQUIRES_PROCESS = os.getenv("WKV_SUP_MUSIC_REQUIRES_PROCESS", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+SUP_HARDWARE_REQUIRES_JINX = os.getenv("WKV_SUP_HARDWARE_REQUIRES_JINX", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 LOOP_SLEEP_SEC = float(os.getenv("WKV_SUP_LOOP_SLEEP_SEC", "0.1"))
 FORCE_WATCH_CONDITION = os.getenv("WKV_FORCE_WATCH_CONDITION", "").strip().upper()
@@ -883,6 +901,10 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
     global _jinx_last_manual_request
 
     if not JINX_ENABLED:
+        return
+    if not ed_running:
+        return
+    if not jinx_running:
         return
 
     sync_raw = _sammi_get_variable(JINX_SYNC_VAR_NAME)
@@ -1734,10 +1756,21 @@ def collect_ed_state() -> dict[str, Any]:
 
 
 def collect_music_state() -> dict[str, Any]:
+    process_names = _list_process_names()
+    music_running = _process_running_by_names(process_names, MUSIC_PROCESS_NAMES)
+    if SUP_MUSIC_REQUIRES_PROCESS and not music_running:
+        return {
+            "music.app_running": False,
+            "music.playing": False,
+            "music.track.title": "",
+            "music.track.artist": "",
+        }
+
     title = _read_text(NOW_PLAYING_DIR / "ytm-title.txt")
     artist = _read_text(NOW_PLAYING_DIR / "ytm-artist.txt")
     playing = bool(title or artist)
     return {
+        "music.app_running": bool(music_running),
         "music.playing": playing,
         "music.track.title": title,
         "music.track.artist": artist,
@@ -2351,7 +2384,14 @@ def run_supervisor_loop() -> None:
         now = time.monotonic()
 
         if now >= next_hardware:
-            process_hardware(db)
+            jinx_running_for_stats = bool((previous_aux_running or {}).get("jinx"))
+            if previous_aux_running is None:
+                jinx_running_for_stats = _process_running_by_names(
+                    _list_process_names(),
+                    JINX_PROCESS_NAMES,
+                )
+            if (not SUP_HARDWARE_REQUIRES_JINX) or jinx_running_for_stats:
+                process_hardware(db)
             next_hardware = now + HARDWARE_LOOP_SEC
 
         if now >= next_ed:
@@ -2373,7 +2413,8 @@ def run_supervisor_loop() -> None:
                 ed_running=bool(previous_ed_running),
                 jinx_running=bool((previous_aux_running or {}).get("jinx")),
             )
-            process_sammi_bridge(db, ed_running=bool(previous_ed_running))
+            if previous_ed_running:
+                process_sammi_bridge(db, ed_running=True)
             next_ed = now + (ED_ACTIVE_SEC if previous_ed_running else ED_IDLE_SEC)
 
         if now >= next_music:
@@ -2382,7 +2423,8 @@ def run_supervisor_loop() -> None:
                 previous_music_playing,
                 previous_track,
             )
-            process_sammi_bridge(db, ed_running=bool(previous_ed_running))
+            if previous_ed_running:
+                process_sammi_bridge(db, ed_running=True)
             next_music = now + (MUSIC_ACTIVE_SEC if previous_music_playing else MUSIC_IDLE_SEC)
 
         if previous_ed_running is not None:
@@ -2400,7 +2442,6 @@ def run_supervisor_loop() -> None:
 def run_supervisor_once() -> None:
     db = BrainstemDB(DB_PATH, SCHEMA_PATH)
     db.ensure_schema()
-    process_hardware(db)
     ed_running = process_ed(db, previous_running=None)
     process_edparser(
         db,
@@ -2419,7 +2460,10 @@ def run_supervisor_once() -> None:
         ed_running=ed_running,
         jinx_running=bool((aux_running or {}).get("jinx")),
     )
-    process_sammi_bridge(db, ed_running=ed_running)
+    if (not SUP_HARDWARE_REQUIRES_JINX) or bool((aux_running or {}).get("jinx")):
+        process_hardware(db)
+    if ed_running:
+        process_sammi_bridge(db, ed_running=True)
     process_music(db, previous_playing=None, previous_track=None)
     process_watch_condition(db, previous_condition=None, ed_running=ed_running)
 

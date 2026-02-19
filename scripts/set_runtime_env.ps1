@@ -129,6 +129,10 @@ Set-EnvDefault -Name "WKV_SAMMI_NEW_WRITE_IGNORE_VARS" -Value "Heartbeat,timesta
 Set-EnvDefault -Name "WKV_SUP_ED_ACTIVE_SEC" -Value "0.35"
 Set-EnvDefault -Name "WKV_SUP_LOOP_SLEEP_SEC" -Value "0.1"
 Set-EnvDefault -Name "WKV_EDPARSER_ACTIVE_SEC" -Value "0.35"
+Set-EnvDefault -Name "WKV_SUP_HARDWARE_REQUIRES_JINX" -Value "1"
+Set-EnvDefault -Name "WKV_SUP_MUSIC_REQUIRES_PROCESS" -Value "1"
+Set-EnvDefault -Name "WKV_SUP_MUSIC_PROCESS_NAMES" -Value "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe"
+Set-EnvDefault -Name "WKV_YTMD_PROCESS_NAMES" -Value "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe"
 
 $qdrantBin = Resolve-PreferredPath -Candidates @(
   (Join-Path $root "tools\qdrant\qdrant.exe"),
@@ -204,6 +208,10 @@ if (-not $Quiet) {
   Write-Host "  WKV_SUP_ED_ACTIVE_SEC=$([Environment]::GetEnvironmentVariable('WKV_SUP_ED_ACTIVE_SEC','Process'))"
   Write-Host "  WKV_SUP_LOOP_SLEEP_SEC=$([Environment]::GetEnvironmentVariable('WKV_SUP_LOOP_SLEEP_SEC','Process'))"
   Write-Host "  WKV_EDPARSER_ACTIVE_SEC=$([Environment]::GetEnvironmentVariable('WKV_EDPARSER_ACTIVE_SEC','Process'))"
+  Write-Host "  WKV_SUP_HARDWARE_REQUIRES_JINX=$([Environment]::GetEnvironmentVariable('WKV_SUP_HARDWARE_REQUIRES_JINX','Process'))"
+  Write-Host "  WKV_SUP_MUSIC_REQUIRES_PROCESS=$([Environment]::GetEnvironmentVariable('WKV_SUP_MUSIC_REQUIRES_PROCESS','Process'))"
+  Write-Host "  WKV_SUP_MUSIC_PROCESS_NAMES=$([Environment]::GetEnvironmentVariable('WKV_SUP_MUSIC_PROCESS_NAMES','Process'))"
+  Write-Host "  WKV_YTMD_PROCESS_NAMES=$([Environment]::GetEnvironmentVariable('WKV_YTMD_PROCESS_NAMES','Process'))"
   Write-Host "  WKV_SUP_STATS_TXT_ENABLED=$([Environment]::GetEnvironmentVariable('WKV_SUP_STATS_TXT_ENABLED','Process'))"
   Write-Host "  WKV_SUP_STATS_DIR=$([Environment]::GetEnvironmentVariable('WKV_SUP_STATS_DIR','Process'))"
   Write-Host "  WKV_SUP_STATS_LINE_SEC=$([Environment]::GetEnvironmentVariable('WKV_SUP_STATS_LINE_SEC','Process'))"
