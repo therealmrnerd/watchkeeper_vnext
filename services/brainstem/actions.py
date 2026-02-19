@@ -10,6 +10,9 @@ from urllib import error, request
 from urllib.parse import quote
 
 from runtime import (
+    ADVISORY_ENABLED,
+    ADVISORY_TIMEOUT_SEC,
+    ADVISORY_URL,
     DB_SERVICE,
     DEFAULT_WATCH_CONDITION,
     EDPARSER_TOOL,
@@ -186,6 +189,61 @@ def _execute_edparser(tool_name: str, parameters: dict[str, Any]) -> dict[str, A
     raise ValueError(f"Unsupported edparser tool: {tool_name}")
 
 
+def _normalize_jinx_effect(effect: Any) -> str:
+    text = str(effect or "").strip().upper()
+    if not text:
+        raise ValueError("jinx effect is required")
+    if text.startswith("S") or text.startswith("C"):
+        if len(text) <= 1 or not text[1:].isdigit():
+            raise ValueError(f"Invalid jinx effect: {text}")
+        return f"{text[0]}{int(text[1:])}"
+    if text.isdigit():
+        return f"S{int(text)}"
+    raise ValueError(f"Invalid jinx effect: {text}")
+
+
+def _set_state_quick(state_key: str, state_value: Any) -> None:
+    DB_SERVICE.set_state(
+        state_key=state_key,
+        state_value=state_value,
+        source="brainstem_execute",
+        observed_at_utc=utc_now_iso(),
+        confidence=1.0,
+        emit_event=False,
+    )
+
+
+def _execute_jinx(tool_name: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    canonical = tool_name.strip().lower()
+
+    if canonical in {"jinx.set_effect", "jinx_set_effect", "jinx.effect"}:
+        effect = _normalize_jinx_effect(parameters.get("effect") or parameters.get("mode"))
+        _set_state_quick("jinx.effect", effect)
+        _set_state_quick("jinx.scene", "")
+        _set_state_quick("jinx.chase", "")
+        return {"ok": True, "jinx.effect": effect}
+
+    if canonical in {"jinx.set_scene", "jinx_set_scene", "jinx.scene"}:
+        scene = str(parameters.get("scene", "")).strip()
+        if not scene.isdigit():
+            raise ValueError("jinx scene must be numeric")
+        _set_state_quick("jinx.scene", int(scene))
+        _set_state_quick("jinx.effect", "")
+        _set_state_quick("jinx.chase", "")
+        return {"ok": True, "jinx.scene": int(scene)}
+
+    if canonical in {"jinx.set_chase", "jinx_set_chase", "jinx.chase"}:
+        chase = str(parameters.get("chase", "")).strip()
+        if not chase.isdigit():
+            raise ValueError("jinx chase must be numeric")
+        _set_state_quick("jinx.chase", int(chase))
+        _set_state_quick("jinx.effect", "")
+        _set_state_quick("jinx.scene", "")
+        return {"ok": True, "jinx.chase": int(chase)}
+
+    raise ValueError(f"Unsupported jinx tool: {tool_name}")
+
+
 def execute_tool(
     *,
     tool_name: str,
@@ -226,6 +284,8 @@ def execute_tool(
         "edparser_status",
     }:
         output = _execute_edparser(tool_name, parameters)
+    elif tool_name.startswith("jinx"):
+        output = _execute_jinx(tool_name, parameters)
     else:
         raise ValueError(f"Unsupported tool: {tool_name}")
 
@@ -542,6 +602,22 @@ def record_confirmation(payload: dict[str, Any], source: str) -> dict[str, Any]:
         correlation_id=payload.get("request_id") or incident_id,
         mode=payload.get("mode"),
     )
+    emit_event(
+        con=None,
+        event_type="ASSIST_CONFIRM_ACCEPTED",
+        source=source,
+        payload={
+            "incident_id": incident_id,
+            "tool_name": tool_key,
+            "confirm_token": confirm_token,
+            "confirmed_at_utc": confirmed_at_utc,
+            "request_id": payload.get("request_id"),
+        },
+        session_id=payload.get("session_id"),
+        correlation_id=payload.get("request_id") or incident_id,
+        mode=payload.get("mode"),
+        tags=["assist", "confirm", "accepted"],
+    )
     return {
         "incident_id": incident_id,
         "tool_name": tool_key,
@@ -702,6 +778,9 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 denied_reason = policy_decision.get("deny_reason_text")
                 denied_reason_code = policy_decision.get("deny_reason_code")
                 if policy_decision.get("requires_confirmation", False):
+                    confirm_event_type = "ACTION_CONFIRMATION_REQUIRED"
+                    if denied_reason_code == "DENY_CONFIRMATION_EXPIRED":
+                        confirm_event_type = "ACTION_CONFIRMATION_EXPIRED"
                     con.execute(
                         """
                         UPDATE action_log
@@ -712,7 +791,7 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     )
                     emit_event(
                         con,
-                        event_type="ACTION_CONFIRMATION_REQUIRED",
+                        event_type=confirm_event_type,
                         source=source,
                         payload={
                             "request_id": request_id,
@@ -727,6 +806,9 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                         correlation_id=request_id,
                         mode=intent["mode"],
                         severity="warn",
+                        tags=["assist", "confirm", "required"]
+                        if confirm_event_type == "ACTION_CONFIRMATION_REQUIRED"
+                        else ["assist", "confirm", "expired"],
                     )
                     results.append(
                         {
@@ -842,17 +924,21 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                 ),
             )
             if status_after == "success":
-                LOGBOOK.log_execute_result(
-                    incident_id=incident_id_value,
-                    tool_name=row["tool_name"],
-                    ok=True,
-                    result_or_error=output,
-                    req_context={
+                emit_event(
+                    con,
+                    event_type="TOOL_EXECUTE_RESULT",
+                    source=source,
+                    payload={
                         "request_id": request_id,
                         "action_id": row["action_id"],
-                        "session_id": intent["session_id"],
-                        "mode": intent["mode"],
+                        "tool_name": row["tool_name"],
+                        "incident_id": incident_id,
+                        "ok": True,
+                        "result_or_error": output,
                     },
+                    session_id=intent["session_id"],
+                    correlation_id=request_id,
+                    mode=intent["mode"],
                 )
                 emit_event(
                     con,
@@ -873,17 +959,22 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
                     mode=intent["mode"],
                 )
             else:
-                LOGBOOK.log_execute_result(
-                    incident_id=incident_id_value,
-                    tool_name=row["tool_name"],
-                    ok=False,
-                    result_or_error=error_message,
-                    req_context={
+                emit_event(
+                    con,
+                    event_type="TOOL_EXECUTE_RESULT",
+                    source=source,
+                    payload={
                         "request_id": request_id,
                         "action_id": row["action_id"],
-                        "session_id": intent["session_id"],
-                        "mode": intent["mode"],
+                        "tool_name": row["tool_name"],
+                        "incident_id": incident_id,
+                        "ok": False,
+                        "result_or_error": error_message,
                     },
+                    session_id=intent["session_id"],
+                    correlation_id=request_id,
+                    mode=intent["mode"],
+                    severity="error",
                 )
                 emit_event(
                     con,
@@ -925,4 +1016,265 @@ def execute_actions(payload: dict[str, Any], source: str) -> dict[str, Any]:
         "watch_condition": watch_condition,
         "dry_run": dry_run,
         "results": results,
+    }
+
+
+def _fetch_advisory_proposal(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not ADVISORY_ENABLED:
+        raise ValueError("advisory service is disabled (WKV_ADVISORY_ENABLED=0)")
+    if not ADVISORY_URL:
+        raise ValueError("WKV_ADVISORY_URL is not configured")
+
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = request.Request(
+        ADVISORY_URL,
+        data=raw,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Source": "brainstem_assist",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=ADVISORY_TIMEOUT_SEC) as resp:
+            status = int(getattr(resp, "status", 200))
+            body = resp.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"advisory HTTP {exc.code}: {message}") from exc
+    except Exception as exc:
+        raise ValueError(f"advisory request failed: {exc}") from exc
+
+    try:
+        parsed = json.loads(body) if body else {}
+    except Exception as exc:
+        raise ValueError("advisory returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("advisory response must be a JSON object")
+
+    proposal = parsed.get("proposal")
+    if not isinstance(proposal, dict):
+        raise ValueError("advisory response missing proposal object")
+
+    meta = {
+        "status": status,
+        "provider": parsed.get("provider"),
+        "service_meta": parsed.get("meta") if isinstance(parsed.get("meta"), dict) else {},
+    }
+    return proposal, meta
+
+
+def assist_with_advisory(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    request_id_hint = str(payload.get("request_id") or f"req-{uuid.uuid4().hex[:12]}")
+    mode_hint = str(payload.get("mode") or "standby")
+    emit_event(
+        con=None,
+        event_type="ASSIST_REQUEST_SUMMARY",
+        source=source,
+        payload={
+            "request_id": request_id_hint,
+            "mode": mode_hint,
+            "domain": payload.get("domain"),
+            "urgency": payload.get("urgency"),
+            "watch_condition": payload.get("watch_condition"),
+            "max_actions": payload.get("max_actions"),
+            "user_text_chars": len(str(payload.get("user_text") or "")),
+            "has_context": isinstance(payload.get("context"), dict),
+        },
+        session_id=payload.get("session_id"),
+        correlation_id=request_id_hint,
+        mode=mode_hint,
+        tags=["assist", "request"],
+    )
+
+    proposal, advisory_meta = _fetch_advisory_proposal(payload)
+    request_id = proposal["request_id"]
+    incident_id = (payload.get("incident_id") or f"inc-{request_id}").strip()
+    emit_event(
+        con=None,
+        event_type="ASSIST_PROPOSAL_RECEIVED",
+        source=source,
+        payload={
+            "request_id": request_id,
+            "incident_id": incident_id,
+            "provider": advisory_meta.get("provider"),
+            "advisory_status": advisory_meta.get("status"),
+            "service_meta": advisory_meta.get("service_meta", {}),
+            "actions_count": len(proposal.get("proposed_actions", []))
+            if isinstance(proposal.get("proposed_actions"), list)
+            else 0,
+        },
+        session_id=proposal.get("session_id"),
+        correlation_id=request_id,
+        mode=proposal.get("mode"),
+        tags=["assist", "proposal", "received"],
+    )
+
+    from validators import validate_intent_proposal
+
+    try:
+        validate_intent_proposal(proposal)
+    except Exception as exc:
+        emit_event(
+            con=None,
+            event_type="ASSIST_PROPOSAL_INVALID",
+            source=source,
+            payload={
+                "request_id": request_id,
+                "incident_id": incident_id,
+                "validation_error": str(exc),
+                "provider": advisory_meta.get("provider"),
+            },
+            session_id=proposal.get("session_id"),
+            correlation_id=request_id,
+            mode=proposal.get("mode"),
+            severity="warn",
+            tags=["assist", "proposal", "invalid"],
+        )
+        raise
+
+    stt_confidence = payload.get("stt_confidence")
+    if not isinstance(stt_confidence, (int, float)):
+        stt_confidence = None
+    else:
+        stt_confidence = float(stt_confidence)
+    foreground_process = payload.get("foreground_process")
+    if not isinstance(foreground_process, str) or not foreground_process.strip():
+        foreground_process = None
+
+    watch_condition = _resolve_watch_condition(payload.get("watch_condition"), proposal["mode"])
+    retrieval = proposal.get("retrieval")
+    if not isinstance(retrieval, dict):
+        retrieval = {}
+    emit_event(
+        con=None,
+        event_type="ASSIST_PROPOSAL_VALIDATED",
+        source=source,
+        payload={
+            "request_id": request_id,
+            "incident_id": incident_id,
+            "watch_condition": watch_condition,
+            "actions_count": len(proposal.get("proposed_actions", [])),
+            "needs_clarification": bool(proposal.get("needs_clarification", False)),
+            "retrieval_context_meta": retrieval.get("context_pack_metadata", {}),
+        },
+        session_id=proposal.get("session_id"),
+        correlation_id=request_id,
+        mode=proposal.get("mode"),
+        tags=["assist", "proposal", "validated"],
+    )
+
+    with connect_db() as con:
+        queued_actions = upsert_intent(con, proposal, source=source)
+        con.commit()
+
+    policy_preview: list[dict[str, Any]] = []
+    needs_confirmation = False
+    gated_action_count = 0
+    now_ts = time.time()
+
+    for action in proposal.get("proposed_actions", []):
+        action_id = str(action.get("action_id") or "")
+        tool_name = str(action.get("tool_name") or "")
+        params = action.get("parameters")
+        if not isinstance(params, dict):
+            params = {}
+        routed = TOOL_ROUTER.evaluate_action(
+            incident_id=incident_id,
+            watch_condition=watch_condition,
+            tool_name=tool_name,
+            args=params,
+            source=source,
+            stt_confidence=stt_confidence,
+            foreground_process=foreground_process,
+            user_confirmed=False,
+            user_confirm_token=None,
+            action_requires_confirmation=bool(action.get("requires_confirmation", False)),
+            now_ts=now_ts,
+            req_context={
+                "request_id": request_id,
+                "action_id": action_id,
+                "session_id": proposal.get("session_id"),
+                "mode": proposal.get("mode"),
+                "phase": "assist_proposal",
+            },
+        )
+        decision = routed["decision"]
+        if decision.get("requires_confirmation"):
+            needs_confirmation = True
+            emit_event(
+                con=None,
+                event_type="ASSIST_CONFIRM_ISSUED",
+                source=source,
+                payload={
+                    "request_id": request_id,
+                    "incident_id": incident_id,
+                    "action_id": action_id,
+                    "tool_name": tool_name,
+                    "confirm_token": routed.get("confirm_token"),
+                    "reason_code": decision.get("deny_reason_code"),
+                    "constraints": decision.get("constraints", {}),
+                },
+                session_id=proposal.get("session_id"),
+                correlation_id=request_id,
+                mode=proposal.get("mode"),
+                severity="warn",
+                tags=["assist", "confirm", "issued"],
+            )
+        if not decision.get("allowed"):
+            gated_action_count += 1
+        policy_preview.append(
+            {
+                "action_id": action_id,
+                "tool_name": tool_name,
+                "decision": decision,
+                "confirm_token": routed.get("confirm_token"),
+            }
+        )
+
+    emit_event(
+        con=None,
+        event_type="ASSIST_POLICY_PREVIEW",
+        source=source,
+        payload={
+            "request_id": request_id,
+            "incident_id": incident_id,
+            "watch_condition": watch_condition,
+            "actions": policy_preview,
+        },
+        session_id=proposal.get("session_id"),
+        correlation_id=request_id,
+        mode=proposal.get("mode"),
+        tags=["assist", "policy", "preview"],
+    )
+
+    emit_event(
+        con=None,
+        event_type="ASSIST_PROPOSAL",
+        source=source,
+        payload={
+            "request_id": request_id,
+            "incident_id": incident_id,
+            "watch_condition": watch_condition,
+            "queued_actions": queued_actions,
+            "gated_action_count": gated_action_count,
+            "needs_confirmation": needs_confirmation,
+            "advisory": advisory_meta,
+            "retrieval_context_meta": retrieval.get("context_pack_metadata", {}),
+        },
+        session_id=proposal.get("session_id"),
+        correlation_id=request_id,
+        mode=proposal.get("mode"),
+        tags=["assist", "proposal"],
+    )
+
+    return {
+        "request_id": request_id,
+        "incident_id": incident_id,
+        "watch_condition": watch_condition,
+        "proposal": proposal,
+        "queued_actions": queued_actions,
+        "policy_preview": policy_preview,
+        "needs_confirmation": needs_confirmation,
+        "advisory": advisory_meta,
     }
