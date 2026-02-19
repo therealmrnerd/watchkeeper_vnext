@@ -29,6 +29,11 @@ This project is in an active vNext rebuild stage (early-to-mid integration).
 - Knowledge service and vector backend support are working (including Qdrant lifecycle).
 - Focus now is operational hardening, integration polish, and expanding live data coverage.
 
+## External Integrations
+
+- Current external integrations are Jinx (LED lighting sync) and SAMMI Board (in-game and streaming control panel).
+- Future integrations may be added for other lighting software and control surfaces (for example Stream Deck and Glass).
+
 ## Quick Start
 
 Start full stack:
