@@ -26,30 +26,35 @@ $services = @(
   [pscustomobject]@{
     Name = "brainstem"
     Script = "services/brainstem/run.ps1"
+    MatchArgs = @("services/brainstem/run.ps1", "services/brainstem/app.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8787/health"
   },
   [pscustomobject]@{
     Name = "knowledge"
     Script = "services/ai/run_knowledge.ps1"
+    MatchArgs = @("services/ai/run_knowledge.ps1", "services/ai/knowledge_service.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8790/health"
   },
   [pscustomobject]@{
     Name = "assist_router"
     Script = "services/ai/run_assist_router.ps1"
+    MatchArgs = @("services/ai/run_assist_router.ps1", "services/ai/assist_router.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8791/health"
   },
   [pscustomobject]@{
     Name = "supervisor"
     Script = "services/brainstem/run_supervisor.ps1"
+    MatchArgs = @("services/brainstem/run_supervisor.ps1", "services/brainstem/supervisor.py")
     Kind = "process"
     HealthUrl = $null
   },
   [pscustomobject]@{
     Name = "state_collector"
     Script = "services/adapters/run_state_collector.ps1"
+    MatchArgs = @("services/adapters/run_state_collector.ps1", "services/adapters/state_collector.py")
     Kind = "process"
     HealthUrl = $null
   }
@@ -154,6 +159,34 @@ function Start-ServiceProcess {
     return
   }
 
+  $externalPids = Find-ServiceProcessIds -Service $Service
+  if ($externalPids.Count -gt 0) {
+    $selected = [int](($externalPids | Sort-Object -Descending)[0])
+    foreach ($candidatePid in $externalPids) {
+      $pidValue = [int]$candidatePid
+      if ($pidValue -eq $selected) {
+        continue
+      }
+      try {
+        taskkill /PID $pidValue /T /F | Out-Null
+        Write-Host ("[dedupe] {0} terminated duplicate pid={1}" -f $Service.Name, $pidValue)
+      } catch {
+        Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+      }
+    }
+    $stdoutLog = Join-Path $logsDir ("{0}.out.log" -f $Service.Name)
+    $stderrLog = Join-Path $logsDir ("{0}.err.log" -f $Service.Name)
+    $StateTable[$Service.Name] = [pscustomobject]@{
+      pid = $selected
+      script = $Service.Script
+      started_at_utc = UtcNowIso
+      stdout_log = $stdoutLog
+      stderr_log = $stderrLog
+    }
+    Write-Host ("[adopt] {0} existing pid={1}" -f $Service.Name, $selected)
+    return
+  }
+
   if ($Service.Kind -eq "http" -and (Test-HealthEndpoint -Url $Service.HealthUrl -TimeoutSec 2)) {
     Write-Host ("[skip] {0} health endpoint already up (external process)" -f $Service.Name)
     return
@@ -189,33 +222,52 @@ function Start-ServiceProcess {
 function Stop-ServiceProcess {
   param(
     [pscustomobject]$Service,
-    [hashtable]$StateTable
+    [hashtable]$StateTable,
+    [switch]$IncludeUnmanaged
   )
 
   $existing = $StateTable[$Service.Name]
-  if (-not $existing) {
-    Write-Host ("[skip] {0} not managed by stack state" -f $Service.Name)
-    return
-  }
-
-  $procId = [int]$existing.pid
-  if (-not (Test-PidRunning -ProcessId $procId)) {
-    Write-Host ("[stale] {0} pid={1} not running" -f $Service.Name, $procId)
-    $StateTable.Remove($Service.Name)
-    return
-  }
-
-  try {
-    taskkill /PID $procId /T /F | Out-Null
-  } catch {
-    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-  }
-  Start-Sleep -Milliseconds 250
-  if (Test-PidRunning -ProcessId $procId) {
-    Write-Warning ("[warn] failed to stop {0} pid={1}" -f $Service.Name, $procId)
+  if ($existing) {
+    $procId = [int]$existing.pid
+    if (-not (Test-PidRunning -ProcessId $procId)) {
+      Write-Host ("[stale] {0} pid={1} not running" -f $Service.Name, $procId)
+      $StateTable.Remove($Service.Name)
+    } else {
+      try {
+        taskkill /PID $procId /T /F | Out-Null
+      } catch {
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+      }
+      Start-Sleep -Milliseconds 250
+      if (Test-PidRunning -ProcessId $procId) {
+        Write-Warning ("[warn] failed to stop {0} pid={1}" -f $Service.Name, $procId)
+      } else {
+        Write-Host ("[stop] {0} pid={1}" -f $Service.Name, $procId)
+        $StateTable.Remove($Service.Name)
+      }
+    }
   } else {
-    Write-Host ("[stop] {0} pid={1}" -f $Service.Name, $procId)
-    $StateTable.Remove($Service.Name)
+    Write-Host ("[skip] {0} not managed by stack state" -f $Service.Name)
+  }
+
+  if ($IncludeUnmanaged) {
+    $exclude = @()
+    if ($existing) {
+      $exclude += [int]$existing.pid
+    }
+    $extraPids = Find-ServiceProcessIds -Service $Service -ExcludePids $exclude
+    foreach ($candidatePid in $extraPids) {
+      $pidValue = [int]$candidatePid
+      if (-not (Test-PidRunning -ProcessId $pidValue)) {
+        continue
+      }
+      try {
+        taskkill /PID $pidValue /T /F | Out-Null
+        Write-Host ("[stop-unmanaged] {0} pid={1}" -f $Service.Name, $pidValue)
+      } catch {
+        Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+      }
+    }
   }
 }
 
@@ -282,6 +334,72 @@ function Show-Status {
   }
 }
 
+function Normalize-CommandText {
+  param([string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+  return ($Value.ToLower().Replace("/", "\"))
+}
+
+function Get-ServiceNeedles {
+  param([pscustomobject]$Service)
+  $needles = @()
+  if ($Service.PSObject.Properties.Match("MatchArgs").Count -gt 0 -and $Service.MatchArgs) {
+    foreach ($arg in $Service.MatchArgs) {
+      if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
+        $needles += (Normalize-CommandText -Value ([string]$arg))
+      }
+    }
+  }
+  if ($needles.Count -eq 0) {
+    $needles += (Normalize-CommandText -Value ([string]$Service.Script))
+  }
+  return $needles
+}
+
+function Find-ServiceProcessIds {
+  param(
+    [pscustomobject]$Service,
+    [int[]]$ExcludePids = @()
+  )
+  $needles = Get-ServiceNeedles -Service $Service
+  $exclude = @{}
+  foreach ($excludePid in $ExcludePids) {
+    if ($excludePid -gt 0) {
+      $exclude[[int]$excludePid] = $true
+    }
+  }
+
+  $matches = @()
+  try {
+    $rows = Get-CimInstance Win32_Process -ErrorAction Stop
+  } catch {
+    return @()
+  }
+  foreach ($row in $rows) {
+    $rowPid = [int]$row.ProcessId
+    if ($rowPid -le 0 -or $exclude.ContainsKey($rowPid)) {
+      continue
+    }
+    $cmd = Normalize-CommandText -Value ([string]$row.CommandLine)
+    if ([string]::IsNullOrWhiteSpace($cmd)) {
+      continue
+    }
+    $isMatch = $false
+    foreach ($needle in $needles) {
+      if ($needle -and $cmd.Contains($needle)) {
+        $isMatch = $true
+        break
+      }
+    }
+    if ($isMatch) {
+      $matches += $rowPid
+    }
+  }
+  return @($matches | Sort-Object -Unique)
+}
+
 function Get-ReverseServices {
   $copy = @($services)
   [array]::Reverse($copy)
@@ -322,10 +440,11 @@ function Start-Stack {
 }
 
 function Stop-Stack {
+  param([switch]$IncludeUnmanaged)
   $state = Read-StackState
   $reverse = Get-ReverseServices
   foreach ($svc in $reverse) {
-    Stop-ServiceProcess -Service $svc -StateTable $state
+    Stop-ServiceProcess -Service $svc -StateTable $state -IncludeUnmanaged:$IncludeUnmanaged
   }
   if ($state.Count -gt 0) {
     Write-StackState -StateTable $state
@@ -341,10 +460,10 @@ switch ($Action) {
     Start-Stack
   }
   "stop" {
-    Stop-Stack
+    Stop-Stack -IncludeUnmanaged
   }
   "restart" {
-    Stop-Stack
+    Stop-Stack -IncludeUnmanaged
     Start-Stack
   }
   "status" {

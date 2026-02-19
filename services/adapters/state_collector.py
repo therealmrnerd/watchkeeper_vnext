@@ -38,11 +38,16 @@ YTMD_PROCESS_NAMES = [
     p.strip().lower()
     for p in os.getenv(
         "WKV_YTMD_PROCESS_NAMES",
-        "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe",
+        (
+            "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,"
+            "youtube-music-desktop-app.exe,YouTube Music.exe,ytmdesktop.exe"
+        ),
     ).split(",")
     if p.strip()
 ]
 _ytmd_next_allowed_at = 0.0
+_ytmd_cached_payload: dict[str, Any] | None = None
+_ytmd_cached_at = 0.0
 ED_PROCESS_NAMES = [
     p.strip()
     for p in os.getenv(
@@ -57,6 +62,7 @@ ED_ACTIVE_INTERVAL_SEC = float(os.getenv("WKV_ED_ACTIVE_INTERVAL_SEC", "2"))
 ED_IDLE_INTERVAL_SEC = float(os.getenv("WKV_ED_IDLE_INTERVAL_SEC", "8"))
 MUSIC_ACTIVE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_ACTIVE_INTERVAL_SEC", "2"))
 MUSIC_IDLE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_IDLE_INTERVAL_SEC", "12"))
+YTMD_CACHE_MAX_SEC = float(os.getenv("WKV_YTMD_CACHE_MAX_SEC", "8"))
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -113,7 +119,7 @@ def _read_ytmd_token() -> str | None:
 
 
 def _fetch_ytmd_track() -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    global _ytmd_next_allowed_at
+    global _ytmd_next_allowed_at, _ytmd_cached_payload, _ytmd_cached_at
     status = {
         "music.api_endpoint": f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
         "music.api_reachable": False,
@@ -123,16 +129,22 @@ def _fetch_ytmd_track() -> tuple[dict[str, Any] | None, dict[str, Any]]:
         return None, status
 
     now = time.time()
+    token = _read_ytmd_token()
     if now < _ytmd_next_allowed_at:
+        if _ytmd_cached_payload and (now - _ytmd_cached_at) <= max(0.0, YTMD_CACHE_MAX_SEC):
+            status["music.api_reachable"] = True
+            status["music.api_authorized"] = True if token else status["music.api_authorized"]
+            return dict(_ytmd_cached_payload), status
         return None, status
 
     if not _port_open(YTMD_HOST, YTMD_PORT, YTMD_TIMEOUT_SEC):
         _ytmd_next_allowed_at = now + max(1.0, YTMD_REST_POLL_MS / 1000.0)
+        if _ytmd_cached_payload and (now - _ytmd_cached_at) <= max(0.0, YTMD_CACHE_MAX_SEC):
+            return dict(_ytmd_cached_payload), status
         return None, status
     status["music.api_reachable"] = True
 
     headers: dict[str, str] = {}
-    token = _read_ytmd_token()
     if token:
         headers["Authorization"] = token
 
@@ -161,9 +173,13 @@ def _fetch_ytmd_track() -> tuple[dict[str, Any] | None, dict[str, Any]]:
         _ytmd_next_allowed_at = now + backoff_sec
         if int(exc.code) not in (401, 403):
             status["music.api_authorized"] = bool(token)
+        if _ytmd_cached_payload and (now - _ytmd_cached_at) <= max(0.0, YTMD_CACHE_MAX_SEC):
+            return dict(_ytmd_cached_payload), status
         return None, status
     except Exception:
         _ytmd_next_allowed_at = now + max(1.0, YTMD_REST_POLL_MS / 1000.0)
+        if _ytmd_cached_payload and (now - _ytmd_cached_at) <= max(0.0, YTMD_CACHE_MAX_SEC):
+            return dict(_ytmd_cached_payload), status
         return None, status
 
     status["music.api_authorized"] = True
@@ -185,18 +201,19 @@ def _fetch_ytmd_track() -> tuple[dict[str, Any] | None, dict[str, Any]]:
         thumb_url = str(thumbs[0].get("url") or "").strip()
     now_playing = " - ".join([part for part in (title, artist) if part]).strip()
     if not title and not artist:
+        _ytmd_cached_payload = None
+        _ytmd_cached_at = 0.0
         return None, status
-
-    return (
-        {
-            "title": title,
-            "artist": artist,
-            "album": album,
-            "now_playing": now_playing,
-            "artwork_path": thumb_url or None,
-        },
-        status,
-    )
+    out = {
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "now_playing": now_playing,
+        "artwork_path": thumb_url or None,
+    }
+    _ytmd_cached_payload = dict(out)
+    _ytmd_cached_at = now
+    return out, status
 
 
 def _list_process_names() -> set[str]:
@@ -224,7 +241,18 @@ def _list_process_names() -> set[str]:
 def _process_running_by_names(process_names: set[str], configured_names: list[str]) -> bool:
     if not configured_names:
         return False
-    return any(name in process_names for name in configured_names)
+    if any(name in process_names for name in configured_names):
+        return True
+
+    def _canon(value: str) -> str:
+        text = value.strip().lower()
+        if text.endswith(".exe"):
+            text = text[:-4]
+        return re.sub(r"[^a-z0-9]", "", text)
+
+    process_canon = {_canon(name) for name in process_names if name}
+    configured_canon = [_canon(name) for name in configured_names if name]
+    return any(name in process_canon for name in configured_canon)
 
 
 def collect_ed_state(process_names: set[str] | None = None) -> dict[str, Any]:
@@ -250,6 +278,8 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
         return {
             "music.app_running": False,
             "music.playing": False,
+            "music.track.title": "",
+            "music.track.artist": "",
             "music.source_path": None,
             "music.api_endpoint": f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
             "music.api_reachable": False,
@@ -268,6 +298,8 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
         return {
             "music.app_running": True,
             "music.playing": True,
+            "music.track.title": track_payload.get("title", ""),
+            "music.track.artist": track_payload.get("artist", ""),
             "music.source_path": f"ytmd_api://{YTMD_HOST}:{YTMD_PORT}",
             **api_status,
             "music.now_playing": track_payload,
@@ -318,6 +350,8 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
     return {
         "music.app_running": True,
         "music.playing": playing,
+        "music.track.title": primary_payload.get("title", ""),
+        "music.track.artist": primary_payload.get("artist", ""),
         "music.source_path": str(source_dir),
         **api_status,
         "music.now_playing": primary_payload,

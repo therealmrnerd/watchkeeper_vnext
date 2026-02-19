@@ -1,6 +1,7 @@
 import ctypes
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -100,24 +101,8 @@ ED_NAVROUTE_PATH = Path(
 ED_ACTIVE_SEC = float(os.getenv("WKV_SUP_ED_ACTIVE_SEC", "0.35"))
 ED_IDLE_SEC = float(os.getenv("WKV_SUP_ED_IDLE_SEC", "8"))
 
-NOW_PLAYING_DIR = Path(
-    os.getenv("WKV_NOW_PLAYING_DIR", str(ROOT_DIR / "data" / "now-playing"))
-)
 MUSIC_ACTIVE_SEC = float(os.getenv("WKV_SUP_MUSIC_ACTIVE_SEC", "2"))
 MUSIC_IDLE_SEC = float(os.getenv("WKV_SUP_MUSIC_IDLE_SEC", "10"))
-MUSIC_PROCESS_NAMES = [
-    p.strip().lower()
-    for p in os.getenv(
-        "WKV_SUP_MUSIC_PROCESS_NAMES",
-        "YouTube Music Desktop App.exe,YouTubeMusicDesktopApp.exe,YouTube Music.exe,ytmdesktop.exe",
-    ).split(",")
-    if p.strip()
-]
-SUP_MUSIC_REQUIRES_PROCESS = os.getenv("WKV_SUP_MUSIC_REQUIRES_PROCESS", "1").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
 SUP_HARDWARE_REQUIRES_JINX = os.getenv("WKV_SUP_HARDWARE_REQUIRES_JINX", "1").strip().lower() in {
     "1",
     "true",
@@ -583,7 +568,18 @@ def _process_running_by_names(
 ) -> bool:
     if not configured_names:
         return False
-    return any(name in process_names_snapshot for name in configured_names)
+    if any(name in process_names_snapshot for name in configured_names):
+        return True
+
+    def _canon(value: str) -> str:
+        text = value.strip().lower()
+        if text.endswith(".exe"):
+            text = text[:-4]
+        return re.sub(r"[^a-z0-9]", "", text)
+
+    process_canon = {_canon(name) for name in process_names_snapshot if name}
+    configured_canon = [_canon(name) for name in configured_names if name]
+    return any(name in process_canon for name in configured_canon)
 
 
 def _launch_executable(
@@ -1755,28 +1751,6 @@ def collect_ed_state() -> dict[str, Any]:
     }
 
 
-def collect_music_state() -> dict[str, Any]:
-    process_names = _list_process_names()
-    music_running = _process_running_by_names(process_names, MUSIC_PROCESS_NAMES)
-    if SUP_MUSIC_REQUIRES_PROCESS and not music_running:
-        return {
-            "music.app_running": False,
-            "music.playing": False,
-            "music.track.title": "",
-            "music.track.artist": "",
-        }
-
-    title = _read_text(NOW_PLAYING_DIR / "ytm-title.txt")
-    artist = _read_text(NOW_PLAYING_DIR / "ytm-artist.txt")
-    playing = bool(title or artist)
-    return {
-        "music.app_running": bool(music_running),
-        "music.playing": playing,
-        "music.track.title": title,
-        "music.track.artist": artist,
-    }
-
-
 def make_state_items(
     *,
     values: dict[str, Any],
@@ -2171,20 +2145,42 @@ def process_music(
     previous_track: tuple[str, str] | None,
 ) -> tuple[bool, tuple[str, str]]:
     correlation_id = str(uuid.uuid4())
-    values = collect_music_state()
-    playing = bool(values.get("music.playing"))
-    track = (
-        str(values.get("music.track.title") or ""),
-        str(values.get("music.track.artist") or ""),
-    )
+    music_playing_row = db.get_state("music.playing")
+    music_title_row = db.get_state("music.track.title")
+    music_artist_row = db.get_state("music.track.artist")
+    music_now_playing_row = db.get_state("music.now_playing")
 
-    items = make_state_items(
-        values=values,
-        source="music_supervisor",
-        correlation_id=correlation_id,
-        mode="game" if playing else "standby",
-    )
-    db.batch_set_state(items=items, emit_events=True)
+    playing_raw = music_playing_row.get("state_value") if music_playing_row else None
+    if isinstance(playing_raw, bool):
+        playing = playing_raw
+    elif isinstance(playing_raw, (int, float)):
+        playing = bool(playing_raw)
+    elif isinstance(playing_raw, str):
+        playing = playing_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        playing = False
+
+    title = str((music_title_row or {}).get("state_value") or "").strip()
+    artist = str((music_artist_row or {}).get("state_value") or "").strip()
+    now_playing_obj = (music_now_playing_row or {}).get("state_value")
+    if isinstance(now_playing_obj, dict):
+        if not title:
+            title = str(now_playing_obj.get("title") or "").strip()
+        if not artist:
+            artist = str(now_playing_obj.get("artist") or "").strip()
+        if (not title or not artist) and isinstance(now_playing_obj.get("now_playing"), str):
+            combined = str(now_playing_obj.get("now_playing") or "").strip()
+            if combined and " - " in combined:
+                parts = [part.strip() for part in combined.split(" - ", 1)]
+                if len(parts) == 2:
+                    if not title:
+                        title = parts[0]
+                    if not artist:
+                        artist = parts[1]
+
+    if not playing and (title or artist):
+        playing = True
+    track = (title, artist)
 
     if previous_playing is not None and previous_playing != playing:
         db.append_event(
