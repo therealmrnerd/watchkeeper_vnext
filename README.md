@@ -6,6 +6,34 @@ Watchkeeper is a local-first "ship AI" for **Elite Dangerous** and streaming ops
 
 ---
 
+## The story so far
+
+Watchkeeper did not start as a clean architecture project. It started as a practical survival stack: scripts, adapters, and glue code built to keep a live game + stream environment stable under pressure.
+
+The early prototype proved the hard part first: local models could run on constrained hardware, game/system/music signals could be ingested, and real automation could be triggered in-session.
+
+That prototype also exposed the real pain:
+
+- duplicated state
+- unclear ownership between services
+- fragile integrations when dependencies dropped
+- too much "it works, but why does it work?"
+
+vNext is the response to those lessons. Same mission, higher engineering bar.
+
+## Why vNext is different
+
+Watchkeeper vNext is opinionated:
+
+- AI proposes, core decides
+- policy gates before action
+- every important decision is traceable
+- dependency loss should degrade behavior, not collapse it
+
+If the internet is down, or a local model fails, or an external tool disappears, the system should still behave like a disciplined bridge crew, not a random macro chain.
+
+---
+
 ## What we're aiming for
 
 A modular, local-first assistant that can:
@@ -25,11 +53,13 @@ This is not "an AI that does whatever it wants." It is closer to a well-behaved 
 vNext is the architecture reset: a cleaner spine, better boundaries, stronger operational discipline.
 
 ### Core spine: Brainstem + contracts + runtime discipline
+
 - Clear separation between ingestion, state, policy, and tool execution
 - Contract-driven API surface (stable JSON shapes over ad-hoc internal structures)
 - Deterministic runtime patterns (no mystery background loops)
 
 ### Twitch/SAMMI integration checkpoint (recent milestone)
+
 - **Two-way comms between SAMMI and Watchkeeper**
 - UDP "doorbell" event notification: `category|timestamp`
 - Twitch ingest is **hard-gated** by SAMMI runtime state (`app.sammi.running`)
@@ -52,12 +82,14 @@ In short: the "nervous system" is working and stable. Next is filling the databa
 - Implemented early **operator console/UI** for visibility and control
 - Proved **SAMMI <-> Watchkeeper** messaging is reliable enough for production use
 - Added safety gates so external dependencies do not cause runaway background work
+- Moved key behavior into documented contracts so future rewrites are ports, not redesigns
 
 ---
 
 ## Where we're going next
 
 ### 1) Twitch user modelling + SQLite persistence
+
 We want Watchkeeper to recognize people and patterns without hoarding data.
 
 - One entry per user (Twitch user_id as primary key)
@@ -67,6 +99,7 @@ We want Watchkeeper to recognize people and patterns without hoarding data.
 - "Usual behaviour" prompts (e.g. "Want the usual redeem?") with policy limits
 
 ### 2) Twitch policy framework (what we do / ask / don't)
+
 A rules layer that makes behaviour consistent and non-annoying:
 
 - What we do: contextual replies, lightweight personalization, good operator hygiene
@@ -74,7 +107,9 @@ A rules layer that makes behaviour consistent and non-annoying:
 - What we do not: store full chat logs, infer sensitive traits, pester users relentlessly
 
 ### 3) Endpoints + UI expansion
+
 Once the base is solid:
+
 - Add a **Twitch frame** in the UI (live events, user card, stats, policy decisions)
 - Expose clean endpoints for user context and recent events
 - Add operator tooling for debugging ("why did it say that?")
@@ -88,6 +123,7 @@ Once the base is solid:
 - **Policy before action**: anything potentially disruptive gets gated
 - **Human operable**: UI and logs make it obvious what is happening
 - **Small, composable services**: each subsystem does one job well
+- **Build for handover**: another engineer should be able to understand "what happened and why" quickly
 
 ---
 
@@ -105,17 +141,27 @@ Once the base is solid:
 
 ## Status
 
-This project is active and evolving. Expect iteration, refactors, and checkpoints that prioritise:
-- reliability
-- safety
-- clarity
-- and making the system genuinely useful day-to-day
+Current status: **Usable (developer alpha)**.
+
+Working now:
+
+- Brainstem runtime, policy gate, and event/state pipeline
+- ED/music/system ingestion loops
+- SAMMI <-> Watchkeeper Twitch bridge with gating and dedupe
+- Web UI for operator workflows, diagnostics, and policy previews
+
+Next short-form steps:
+
+- deepen Twitch user memory and behavior modelling
+- expand policy-guided chat/redeem response quality
+- continue hardening recovery paths and degraded-mode behavior
 
 ---
 
 ## Contributing / dev notes
 
 This is a "build the bridge while flying the ship" repo. If you are contributing:
+
 - keep changes scoped
 - update docs/contracts when you add behaviour
 - prefer deterministic state transitions to clever hacks
