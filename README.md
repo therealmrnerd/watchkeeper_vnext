@@ -1,88 +1,128 @@
-# Watchkeeper vNext
+﻿# Watchkeeper vNext
 
-Watchkeeper is a local-first AI + automation stack for Elite Dangerous, stream
-operations, and desktop assistance.
+Watchkeeper is a local-first "ship AI" for **Elite Dangerous** and streaming ops: it ingests live game + system signals, reasons over them with an LLM, and can trigger tools/actions (OBS/SAMMI/lighting/automation) in a way that is **deterministic, auditable, and safe**.
 
-## What This Project Is
+**Why this exists:** modern PC + stream + game setups are a spaghetti monster of windows, macros, overlays, and "why is nothing responding?" Watchkeeper is an attempt to turn that chaos into a system: **sensors -> state -> policy -> decisions -> actions**, with a UI that tells you what it is doing and why.
 
-Watchkeeper combines a deterministic "Brainstem" runtime with policy-gated AI.
-The core keeps running and enforcing rules even if AI/cloud/model services fail.
-The AI proposes actions, while the core decides and executes safely.
+---
 
-## What It Does Today
+## What we're aiming for
 
-- Runs a deterministic Brainstem core with SQLite-backed state and event log.
-- Supervises Elite Dangerous, YouTube Music Desktop, and system stat pipelines.
-- Applies Standing Orders policy gates with allow/deny, confirmations, and reason codes.
-- Supports `/assist` and `/confirm` action flows with incident tracking.
-- Exposes operational APIs for state, events, sitrep, execution, and Twitch context.
-- Uses local knowledge retrieval with SQLite and optional Qdrant vector backend.
-- Provides a browser UI for console operations, policy preview, sitrep, and diagnostics.
-- Integrates with Jinx for LED scene/effect/chase control.
-- Integrates bidirectionally with SAMMI:
-- SAMMI -> Watchkeeper via UDP doorbell Twitch ingest.
-- Watchkeeper -> SAMMI via variable writes and button triggers (including Twitch chat send).
-- Ingests Twitch event categories (chat, redeem, bits, follow, and extended mappings) with dedupe and persistence.
+A modular, local-first assistant that can:
 
-In human terms: Watchkeeper can now make and gate decisions based on live game
-state and live stream interaction state, not just static prompts.
+- **Understand context** (game state, UI focus, ship status, events, chat/redeems/bits, system health)
+- **Decide safely** (policy gating, confirmations where needed, rate-limits, dependency awareness)
+- **Act reliably** (tool calls for streaming, automation, and "ship" functions)
+- **Explain itself** (traceable events, deterministic state transitions, operator-friendly UI)
+- **Stay resilient** (continues functioning when dependencies go down; degrades gracefully)
 
-## UI Snapshot (Current)
+This is not "an AI that does whatever it wants." It is closer to a well-behaved bridge officer: helpful, cautious, and accountable.
+
+---
+
+## Where we are now
+
+vNext is the architecture reset: a cleaner spine, better boundaries, stronger operational discipline.
+
+### Core spine: Brainstem + contracts + runtime discipline
+- Clear separation between ingestion, state, policy, and tool execution
+- Contract-driven API surface (stable JSON shapes over ad-hoc internal structures)
+- Deterministic runtime patterns (no mystery background loops)
+
+### Twitch/SAMMI integration checkpoint (recent milestone)
+- **Two-way comms between SAMMI and Watchkeeper**
+- UDP "doorbell" event notification: `category|timestamp`
+- Twitch ingest is **hard-gated** by SAMMI runtime state (`app.sammi.running`)
+  - Listener binds only when SAMMI is running
+  - Clean unbind/close when SAMMI drops
+  - Automatic rebind when SAMMI returns
+- UI polish pass for the bridge panel workflow and visual consistency
+
+In short: the "nervous system" is working and stable. Next is filling the database with real, useful memory.
+
+## UI Snapshot
 
 ![Watchkeeper vNext UI Snapshot](docs/assets/watchkeeper-ui-snapshot-2026-02-20.png)
 
-## Why Be Part Of It
+---
 
-- Build a practical local-first assistant that works under real runtime constraints.
-- Contribute to a clean "AI proposes, core decides" architecture instead of unsafe direct agent control.
-- Help shape reusable contracts for future Go/Rust/C++ migrations.
-- Work on a real integration surface: game telemetry, stream tooling, lighting, and policy automation.
-- Improve reliability and operator UX for a system designed to be run live.
+## What we've done (high-level)
 
-## Planned Capabilities (Roadmap)
+- Built the vNext foundation around a **deterministic core**
+- Implemented early **operator console/UI** for visibility and control
+- Proved **SAMMI <-> Watchkeeper** messaging is reliable enough for production use
+- Added safety gates so external dependencies do not cause runaway background work
 
-- Harden STT/TTS as independent production services.
-- Expand Twitch category coverage as SAMMI mappings are finalized.
-- Move Twitch gate condition from "SAMMI running" to "streaming active".
-- Add dedicated ED Status and OBS tabs in the web UI.
-- Improve expert routing and retrieval pack quality for local LLM assist.
-- Continue performance tuning for high-frequency loops and adapters.
-- Preserve stable contracts while preparing staged native rewrites.
+---
 
-## External Integrations
+## Where we're going next
 
-- Current external integrations are Jinx (LED lighting sync) and SAMMI Board
-  (in-game and streaming control panel, including Twitch data bridge).
-- Future integrations may be added for other lighting software and control surfaces (for example Stream Deck and Glass).
+### 1) Twitch user modelling + SQLite persistence
+We want Watchkeeper to recognize people and patterns without hoarding data.
 
-## Quick Start
+- One entry per user (Twitch user_id as primary key)
+- Store **last 5 chat messages** for short-term context
+- Track roles and signals: VIP/mod/broadcaster/subscriber
+- Track aggregates: bits totals, redeems claimed, hype activity
+- "Usual behaviour" prompts (e.g. "Want the usual redeem?") with policy limits
 
-Start full stack:
+### 2) Twitch policy framework (what we do / ask / don't)
+A rules layer that makes behaviour consistent and non-annoying:
 
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action start`
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action status`
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action stop`
+- What we do: contextual replies, lightweight personalization, good operator hygiene
+- What we ask: confirmation before spammy/disruptive actions
+- What we do not: store full chat logs, infer sensitive traits, pester users relentlessly
 
-## Status Brief
+### 3) Endpoints + UI expansion
+Once the base is solid:
+- Add a **Twitch frame** in the UI (live events, user card, stats, policy decisions)
+- Expose clean endpoints for user context and recent events
+- Add operator tooling for debugging ("why did it say that?")
 
-- Status: Usable (developer alpha, active integration).
-- Currently working:
-- Brainstem runtime and policy layer.
-- ED/music/system ingest loops and stack orchestration.
-- Twitch ingest + SAMMI doorbell bridge + policy-gated Twitch send chat.
-- Jinx and SAMMI integrations through the core pipeline.
-- Web console for assist, policy preview, sitrep, and diagnostics.
-- Current focus:
-- Operational hardening and integration polish.
-- Expanding Twitch and UI feature coverage.
-- Next steps (short):
-- Finalize streaming-aware Twitch gate condition.
-- Expand speech reliability and recovery behavior.
-- Continue modular cleanup for future language-port phases.
+---
 
-## Useful Docs
+## Design principles
 
-- Operations runbook: `docs/operations.md`
-- Brainstem details: `services/brainstem/README.md`
-- AI/knowledge details: `services/ai/README.md`
-- Adapter details: `services/adapters/README.md`
+- **Local-first**: work offline, degrade gracefully, minimal cloud dependence
+- **Deterministic by default**: predictable loops, explicit state, no hidden magic
+- **Policy before action**: anything potentially disruptive gets gated
+- **Human operable**: UI and logs make it obvious what is happening
+- **Small, composable services**: each subsystem does one job well
+
+---
+
+## Repository map (conceptual)
+
+- `services/brainstem/` - the core state + policy + tool orchestration layer
+- `contracts/` - API contracts and payload shapes
+- `docs/` - architecture, operations, policy notes
+- `ui/` - operator console / bridge panel
+- `db/` - persistence utilities and schema/migrations
+
+(Exact paths may evolve as vNext matures.)
+
+---
+
+## Status
+
+This project is active and evolving. Expect iteration, refactors, and checkpoints that prioritise:
+- reliability
+- safety
+- clarity
+- and making the system genuinely useful day-to-day
+
+---
+
+## Contributing / dev notes
+
+This is a "build the bridge while flying the ship" repo. If you are contributing:
+- keep changes scoped
+- update docs/contracts when you add behaviour
+- prefer deterministic state transitions to clever hacks
+- never add background loops without explicit gating and lifecycle management
+
+---
+
+## License
+
+TBD (add license once the architecture settles and we are happy with the public surface).
