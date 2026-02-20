@@ -34,34 +34,28 @@ body {
 }
 
 .brand-block {
-  min-width: 240px;
+  min-width: 220px;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
 .brand-title-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-start;
 }
 
 .brand-logo {
-  width: 30px;
-  height: 30px;
+  width: auto;
+  height: 44px;
+  max-width: 120px;
   object-fit: contain;
-  flex: 0 0 30px;
-}
-
-.brand-block h1 {
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: 0.3px;
-  color: var(--wk-orange);
+  flex: 0 0 auto;
 }
 
 .brand-sub {
-  margin: 4px 0 0 0;
+  margin: 3px 0 0 2px;
   font-size: 12px;
   color: #d2aa76;
   text-transform: uppercase;
