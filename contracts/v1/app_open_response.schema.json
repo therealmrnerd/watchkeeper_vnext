@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AppOpenResponse",
+  "type": "object",
+  "required": ["ok", "app_id", "target", "launched"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "app_id": { "type": "string" },
+    "target": { "type": "string" },
+    "launched": { "type": "boolean" }
+  }
+}

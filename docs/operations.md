@@ -52,6 +52,11 @@ Runtime gating:
 - If ED is not running, supervisor does not poll SAMMI variables or send SAMMI bridge updates.
 - If YTMD is not running, now-playing parsing is skipped.
 - If Jinx is not running, hardware stats parsing/writes are skipped.
+- If `app.sammi.running` is false, Brainstem Twitch UDP listener is unbound and Twitch ingest reads are skipped.
+
+Twitch gate state key:
+- `app.sammi.running` (`true`/`false`) is the current bind gate for Twitch UDP ingest.
+- Current invariant: `no SAMMI -> no UDP bind -> no ingest reads`.
 
 `ID116.new_write` behavior:
 - On meaningful SAMMI variable changes, supervisor writes `ID116.new_write=yes`
@@ -74,6 +79,13 @@ Runtime telemetry for bridge performance:
 - `app.sammi.api.last_cycle_ms`
 - `app.sammi.api.last_push_count`
 - `app.sammi.api.deferred_count`
+
+## Quick Manual Verification (Twitch Gate)
+
+1. Set/observe `app.sammi.running=false` and verify UDP `9765` is not bound.
+2. Set/observe `app.sammi.running=true` and verify bind occurs once.
+3. Set/observe `app.sammi.running=false` again and verify socket closes cleanly.
+4. Send a UDP doorbell while false and verify no ingest event/read is recorded.
 
 Jinx sync behavior:
 - Polls SAMMI variable `sync` (`on`/`off`)

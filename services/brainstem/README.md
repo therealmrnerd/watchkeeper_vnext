@@ -14,11 +14,17 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `GET /health`
 - `GET /state`
 - `GET /events`
+- `GET /sitrep`
 - `POST /state`
 - `POST /intent`
 - `POST /execute`
 - `POST /confirm`
 - `POST /feedback`
+- `GET /twitch/user/{user_id}`
+- `GET /twitch/user/{user_id}/redeems/top?limit=5`
+- `GET /twitch/recent?limit=50`
+- `POST /twitch/send_chat`
+- `POST /app/open`
 
 ## Stub Implementation
 
@@ -70,6 +76,36 @@ Deterministic core runtime. No LLM dependency for baseline operation.
   - tool policy guards (foreground, confidence, confirmation, rate limits)
   - incident ID requirement (`incident_id`)
   - deny/execute logging with reason payloads
+
+## Twitch Ingest
+
+Brainstem supports Twitch ingest via SAMMI UDP doorbell + variable readback.
+
+- Doorbell token format: `category|timestamp`
+- Numeric packed format also supported: `CCC<timestamp>` (for example `101...` for CHAT)
+  - chosen to keep SAMMI packet handling deterministic and avoid string-buffer instability
+- Commit marker rule (when variable-based): write `wk.<category>.ts` last in SAMMI
+- Gate invariant: `no SAMMI -> no UDP bind -> no ingest reads`
+
+Primary knobs:
+
+- `WKV_TWITCH_UDP_ENABLED`, `WKV_TWITCH_UDP_HOST`, `WKV_TWITCH_UDP_PORT`
+- `WKV_TWITCH_UDP_ACK_ONLY`
+- per-category debounce (ms):
+  - `WKV_TWITCH_CHAT_DEBOUNCE_MS`
+  - `WKV_TWITCH_REDEEM_DEBOUNCE_MS`
+  - `WKV_TWITCH_BITS_DEBOUNCE_MS`
+  - `WKV_TWITCH_FOLLOW_DEBOUNCE_MS`
+  - `WKV_TWITCH_SUB_DEBOUNCE_MS`
+  - `WKV_TWITCH_RAID_DEBOUNCE_MS`
+  - `WKV_TWITCH_HYPE_TRAIN_DEBOUNCE_MS`
+  - `WKV_TWITCH_POLL_DEBOUNCE_MS`
+  - `WKV_TWITCH_PREDICTION_DEBOUNCE_MS`
+  - `WKV_TWITCH_SHOUTOUT_DEBOUNCE_MS`
+  - `WKV_TWITCH_POWER_UPS_DEBOUNCE_MS`
+  - `WKV_TWITCH_HYPE_DEBOUNCE_MS`
+
+Reference: `docs/twitch_ingest.md`
 
 ## Run
 

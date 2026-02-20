@@ -81,6 +81,7 @@ class TwitchIngestService:
         sammi_client: SammiClient,
         source: str = "twitch_ingest",
         chat_debounce_ms: int = 250,
+        debounce_ms_by_event: dict[str, int] | None = None,
         ack_only: bool = False,
         variable_index_path: str | Path | None = None,
     ) -> None:
@@ -107,6 +108,20 @@ class TwitchIngestService:
                 for field_name, var_names in fields_by_event.get(event_type.value, default_fields).items()
             }
             self.event_commit_keys[event_type] = list(commits_by_event.get(event_type.value, default_commits))
+        self.debounce_ms_by_event: dict[TwitchEventType, int] = {}
+        for event_type in TwitchEventType:
+            default_ms = self.chat_debounce_ms if event_type == TwitchEventType.CHAT else 0
+            self.debounce_ms_by_event[event_type] = max(0, int(default_ms))
+        if isinstance(debounce_ms_by_event, dict):
+            for raw_event, raw_ms in debounce_ms_by_event.items():
+                event_name = str(raw_event or "").strip().upper()
+                if event_name not in TwitchEventType.__members__:
+                    continue
+                try:
+                    debounce_ms = max(0, int(raw_ms))
+                except Exception:
+                    continue
+                self.debounce_ms_by_event[TwitchEventType[event_name]] = debounce_ms
 
     @staticmethod
     def parse_doorbell(payload_text: str) -> tuple[TwitchEventType, str, int]:
@@ -611,14 +626,15 @@ class TwitchIngestService:
         self._last_doorbell_event = event_type
         if self.ack_only:
             return self._ack_packet(event_type=event_type, marker=marker, seq=seq)
-        if event_type == TwitchEventType.CHAT and self.chat_debounce_ms > 0:
+        debounce_ms = int(self.debounce_ms_by_event.get(event_type, 0))
+        if debounce_ms > 0:
             with self._lock:
                 self._pending_markers[event_type] = marker or _utc_now_iso()
                 timer = self._debounce_timers.get(event_type)
                 if timer is not None and timer.is_alive():
                     return {"accepted": True, "debounced": True, "event_type": event_type.value}
                 new_timer = threading.Timer(
-                    float(self.chat_debounce_ms) / 1000.0,
+                    float(debounce_ms) / 1000.0,
                     self._flush_debounced,
                     args=(event_type,),
                 )

@@ -10,6 +10,10 @@ State keys in `/state` ingestion must follow:
 - `policy.*` for standing orders, watch condition, and safety state
 - `ai.*` for assistant/router health and mode state
 
+Note: runtime-managed keys may exist outside `/state` ingestion validation.
+Example: `app.sammi.running` is written by internal services and used as a
+Twitch UDP ingest gate.
+
 Examples:
 
 - `ed.running`

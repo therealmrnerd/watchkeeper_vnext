@@ -154,6 +154,28 @@ class TwitchIngestTests(unittest.TestCase):
         ctx = self.repo.get_user_context("u3")
         self.assertEqual(len(ctx["last_messages"]), 1)
 
+    def test_redeem_debounce_coalesces_burst_when_enabled(self) -> None:
+        ingest = TwitchIngestService(
+            db_service=self.db,
+            repo=self.repo,
+            sammi_client=self.sammi,  # type: ignore[arg-type]
+            chat_debounce_ms=0,
+            debounce_ms_by_event={"REDEEM": 80},
+            source="test_ingest",
+        )
+        self.sammi.values = {
+            "Twitch_Redeem.twitchredeem_user_id": "u-redeem-1",
+            "Twitch_Redeem.twitchredeem_user_name": "redeemer",
+            "Twitch_Redeem.twitchredeem_display_name": "Redeemer",
+            "Twitch_Redeem.twitchredeem_redeem_name": "Hydrate",
+            "Twitch_Redeem.twitchredeem_cost": "100",
+        }
+        for _ in range(25):
+            ingest.handle_ping("redeem|193800111")
+        time.sleep(0.2)
+        recent = self.repo.list_recent(limit=10, event_type="REDEEM")
+        self.assertEqual(len(recent), 1)
+
     def test_doorbell_supports_marker_variable_alias(self) -> None:
         self.sammi.values = {
             "global.since_2020": "2026-02-20T16:00:00.000000Z",
@@ -242,8 +264,54 @@ class TwitchIngestTests(unittest.TestCase):
         }
         result = self.ingest.handle_ping("chat|193736050")
         self.assertTrue(result.get("processed"))
+        self.assertEqual(result.get("commit_ts"), "2026-02-20T07:34:10.000000Z")
         recent = self.repo.list_recent(limit=1)
-        self.assertEqual(recent[0]["commit_ts"], "193736050")
+        self.assertEqual(recent[0]["commit_ts"], "2026-02-20T07:34:10.000000Z")
+
+    def test_parse_doorbell_handles_malformed_and_numeric_forms(self) -> None:
+        event, marker, seq = TwitchIngestService.parse_doorbell("")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "__AUTO__")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("\x00")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "__AUTO__")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("CHAT|")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("|123")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "__AUTO__")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("CHAT|123|bad")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "123")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("101193735314")
+        self.assertEqual(event, TwitchEventType.CHAT)
+        self.assertEqual(marker, "193735314")
+        self.assertEqual(seq, 0)
+
+    def test_commit_marker_variable_can_override_packet_timestamp(self) -> None:
+        self.sammi.values = {
+            "wk.hype.ts": "2026-02-20T19:00:00.000000Z",
+            "wk.hype.user_id": "u-hype-1",
+            "wk.hype.user_name": "hype_user",
+            "wk.hype.display_name": "Hype User",
+            "wk.hype.amount": "3",
+            "wk.hype.level": "1",
+        }
+        result = self.ingest.handle_ping("hype|193900000")
+        self.assertTrue(result.get("processed"))
+        self.assertEqual(result.get("event_type"), "HYPE")
+        self.assertEqual(result.get("commit_ts"), "2026-02-20T19:00:00.000000Z")
 
     def test_udp_listener_binds_only_when_gate_enabled(self) -> None:
         gate = {"enabled": False}
@@ -289,6 +357,16 @@ class TwitchIngestTests(unittest.TestCase):
         try:
             self.assertTrue(_wait_for(lambda: _can_bind_udp_port(port)))
 
+            sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sender.sendto(b"chat|193735313", ("127.0.0.1", port))
+            finally:
+                sender.close()
+            time.sleep(0.15)
+            self.assertEqual(recorder.count, 0)
+
+            gate["enabled"] = True
+            self.assertTrue(_wait_for(lambda: not _can_bind_udp_port(port)))
             gate["enabled"] = True
             self.assertTrue(_wait_for(lambda: not _can_bind_udp_port(port)))
 
@@ -299,6 +377,8 @@ class TwitchIngestTests(unittest.TestCase):
                 sender.close()
             self.assertTrue(_wait_for(lambda: recorder.count >= 1))
 
+            gate["enabled"] = False
+            self.assertTrue(_wait_for(lambda: _can_bind_udp_port(port)))
             gate["enabled"] = False
             self.assertTrue(_wait_for(lambda: _can_bind_udp_port(port)))
         finally:
