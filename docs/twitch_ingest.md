@@ -94,6 +94,14 @@ Runtime override:
 - Cursor update is atomic (`twitch_event_cursor`).
 - Duplicate UDP packets do not duplicate DB updates.
 
+## Failure Handling
+
+- malformed/empty doorbell tokens are ignored or mapped to safe auto-detection paths
+- malformed sequence fields are treated as `0`
+- packet commit marker older than cursor is ignored (no re-ingest)
+- if packet timestamp and configured commit-marker variable disagree, commit-marker variable wins
+  (single-pass resolution; no retry loop)
+
 ## Quick Manual Verification
 
 - Set `app.sammi.running=false` and confirm UDP port is not bound.

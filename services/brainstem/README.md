@@ -105,6 +105,20 @@ Primary knobs:
   - `WKV_TWITCH_POWER_UPS_DEBOUNCE_MS`
   - `WKV_TWITCH_HYPE_DEBOUNCE_MS`
 
+Failure handling:
+
+- malformed doorbell tokens are ignored (no ingest write)
+- duplicate/old commit markers are ignored via cursor dedupe
+- when packet timestamp and commit-marker variable differ, configured commit marker wins
+  (single-pass resolution; no retry loop)
+
+Well-known SAMMI runtime state keys:
+
+- `app.sammi.running` (Twitch UDP bind gate)
+- `app.sammi.enabled`
+- `app.sammi.path`
+- `app.sammi.last_error`
+
 Reference: `docs/twitch_ingest.md`
 
 ## Run
