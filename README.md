@@ -1,50 +1,53 @@
 # Watchkeeper vNext
 
-Watchkeeper is a local-first system assistant for Elite Dangerous workflows and
-general desktop control.
+Watchkeeper is a local-first AI + automation stack for Elite Dangerous, stream
+operations, and desktop assistance.
 
-## Current Capabilities (Live Now)
+## What This Project Is
 
-- Deterministic Brainstem core with SQLite-backed state + append-only event log.
-- Supervisor loops for:
-  - Elite Dangerous runtime + parser lifecycle control
-  - YouTube Music Desktop now-playing ingest
-  - hardware/system stats ingest
-- Standing Orders policy engine with allow/deny, confirmations, reason codes, and rate/guard checks.
-- Action execution flow with `/assist` proposal handling and `/confirm` approval flow.
-- Knowledge layer support for local facts + vectors (SQLite backend and optional Qdrant backend).
-- Brainstem web UI with:
-  - Console (assist prompt/response + policy preview)
-  - Quick SitRep (app status chips, now playing, Twitch summaries)
-  - Logs & diagnostics views
-- Jinx integration for lighting control/sync (effects/scenes/chases via state/action pipeline).
-- SAMMI bidirectional integration:
-  - SAMMI -> Watchkeeper: UDP "doorbell" triggers typed Twitch ingest.
-  - Watchkeeper -> SAMMI: variable writes + button triggers (including Twitch chat send path).
-- Twitch ingest pipeline with persistence and context queries for chat/redeem/bits/follow flows (and extensible event mapping for additional categories).
-- Twitch send-chat path is policy-gated and confirm-capable (`twitch.send_chat` through Standing Orders).
+Watchkeeper combines a deterministic "Brainstem" runtime with policy-gated AI.
+The core keeps running and enforcing rules even if AI/cloud/model services fail.
+The AI proposes actions, while the core decides and executes safely.
 
-As a result, Watchkeeper can now decide and gate actions on live game/runtime
-state and stream interaction state (through SAMMI/Twitch events), rather than
-just passively observing telemetry.
+## What It Does Today
+
+- Runs a deterministic Brainstem core with SQLite-backed state and event log.
+- Supervises Elite Dangerous, YouTube Music Desktop, and system stat pipelines.
+- Applies Standing Orders policy gates with allow/deny, confirmations, and reason codes.
+- Supports `/assist` and `/confirm` action flows with incident tracking.
+- Exposes operational APIs for state, events, sitrep, execution, and Twitch context.
+- Uses local knowledge retrieval with SQLite and optional Qdrant vector backend.
+- Provides a browser UI for console operations, policy preview, sitrep, and diagnostics.
+- Integrates with Jinx for LED scene/effect/chase control.
+- Integrates bidirectionally with SAMMI:
+- SAMMI -> Watchkeeper via UDP doorbell Twitch ingest.
+- Watchkeeper -> SAMMI via variable writes and button triggers (including Twitch chat send).
+- Ingests Twitch event categories (chat, redeem, bits, follow, and extended mappings) with dedupe and persistence.
+
+In human terms: Watchkeeper can now make and gate decisions based on live game
+state and live stream interaction state, not just static prompts.
+
+## UI Snapshot (Current)
+
+![Watchkeeper vNext UI Snapshot](docs/assets/watchkeeper-ui-snapshot-2026-02-20.png)
+
+## Why Be Part Of It
+
+- Build a practical local-first assistant that works under real runtime constraints.
+- Contribute to a clean "AI proposes, core decides" architecture instead of unsafe direct agent control.
+- Help shape reusable contracts for future Go/Rust/C++ migrations.
+- Work on a real integration surface: game telemetry, stream tooling, lighting, and policy automation.
+- Improve reliability and operator UX for a system designed to be run live.
 
 ## Planned Capabilities (Roadmap)
 
-- Harden STT/TTS as independent production services (wake-word, confidence, barge-in, personalization).
-- Expand Twitch coverage for newer event classes (power ups, shoutouts, hype train, polls, predictions, raids, subs) as SAMMI mappings are finalized.
-- Move Twitch gating from "SAMMI running" to "streaming active" policy condition.
-- Add dedicated ED Status and OBS UI tabs.
-- Improve expert routing + retrieval packs for local LLM assist quality.
-- Continue performance optimization and loop efficiency hardening.
-- Keep interface contracts stable to support staged Go/Rust/C++ rewrites.
-
-## Current Stage
-
-This project is in an active vNext rebuild stage (early-to-mid integration).
-
-- Core runtime, policy layer, ED/music/system loops, and stack orchestration are working.
-- Knowledge service and vector backend support are working (including Qdrant lifecycle).
-- Focus now is operational hardening, integration polish, and expanding live data coverage.
+- Harden STT/TTS as independent production services.
+- Expand Twitch category coverage as SAMMI mappings are finalized.
+- Move Twitch gate condition from "SAMMI running" to "streaming active".
+- Add dedicated ED Status and OBS tabs in the web UI.
+- Improve expert routing and retrieval pack quality for local LLM assist.
+- Continue performance tuning for high-frequency loops and adapters.
+- Preserve stable contracts while preparing staged native rewrites.
 
 ## External Integrations
 
@@ -59,6 +62,23 @@ Start full stack:
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action start`
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action status`
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_stack.ps1 -Action stop`
+
+## Status Brief
+
+- Status: Usable (developer alpha, active integration).
+- Currently working:
+- Brainstem runtime and policy layer.
+- ED/music/system ingest loops and stack orchestration.
+- Twitch ingest + SAMMI doorbell bridge + policy-gated Twitch send chat.
+- Jinx and SAMMI integrations through the core pipeline.
+- Web console for assist, policy preview, sitrep, and diagnostics.
+- Current focus:
+- Operational hardening and integration polish.
+- Expanding Twitch and UI feature coverage.
+- Next steps (short):
+- Finalize streaming-aware Twitch gate condition.
+- Expand speech reliability and recovery behavior.
+- Continue modular cleanup for future language-port phases.
 
 ## Useful Docs
 
