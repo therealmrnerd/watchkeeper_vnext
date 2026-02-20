@@ -13,50 +13,56 @@
       <p class="brand-sub">Bridge Watch Panel</p>
     </div>
     <div class="bridge-panel">
-      <div class="bridge-cell">
+      <div class="bridge-cell bridge-cell-watch">
         <span class="bridge-label">Watch Condition</span>
-        <span id="watchTier" class="bridge-value tier-normal">NORMAL</span>
-        <span id="watchCondition" class="bridge-sub">STANDBY</span>
-        <span class="bridge-label bridge-label-inline">Mode</span>
-        <span id="watchMode" class="bridge-sub">STANDBY</span>
+        <div class="bridge-watch-row">
+          <span id="watchTier" class="bridge-value tier-normal">NORMAL</span>
+          <span id="watchCondition" class="bridge-sub">STANDBY</span>
+          <span class="bridge-sep">|</span>
+          <span class="bridge-label bridge-label-inline">Mode</span>
+          <span id="watchMode" class="bridge-sub">STANDBY</span>
+        </div>
       </div>
       <div class="bridge-cell">
         <span class="bridge-label">AI Advisory</span>
-        <span id="advisoryStatus" class="bridge-value status-offline">offline</span>
-        <span id="advisoryLatency" class="bridge-sub">-</span>
+        <div class="bridge-status-row">
+          <span id="advisoryStatus" class="bridge-value status-offline">offline</span>
+          <span id="advisoryLatency" class="bridge-sub">-</span>
+        </div>
       </div>
       <div class="bridge-cell">
         <span class="bridge-label">Vector</span>
-        <span id="vectorStatus" class="bridge-value status-offline">offline</span>
-        <span id="vectorLatency" class="bridge-sub">-</span>
+        <div class="bridge-status-row">
+          <span id="vectorStatus" class="bridge-value status-offline">offline</span>
+          <span id="vectorLatency" class="bridge-sub">-</span>
+        </div>
       </div>
       <div class="bridge-cell">
         <span class="bridge-label">Last Alarm</span>
-        <span id="lastAlarmTs" class="bridge-value">none</span>
-        <span id="lastAlarmMeta" class="bridge-sub">-</span>
+        <div class="bridge-status-row">
+          <span id="lastAlarmTs" class="bridge-value">none</span>
+          <span id="lastAlarmMeta" class="bridge-sub">-</span>
+        </div>
       </div>
     </div>
   </header>
 
   <nav class="tabs">
-    <button class="tab-btn active" data-tab="console">Console</button>
-    <button class="tab-btn" data-tab="status">Stack Status</button>
-    <button class="tab-btn" data-tab="logs">Logs & Diagnostics</button>
+    <div class="tabs-left">
+      <button class="tab-btn active" data-tab="console">Console</button>
+      <button class="tab-btn" data-tab="logs">Logs & Diagnostics</button>
+    </div>
+    <div class="tabs-right">
+      <button id="modeAutoBtn" class="mode-icon-btn active" title="Automatic mode">A</button>
+      <button id="modeNormalBtn" class="mode-icon-btn" title="Normal mode">N</button>
+      <button id="modeGameBtn" class="mode-icon-btn" title="Game mode">G</button>
+    </div>
   </nav>
 
   <main>
     <section id="tab-console" class="tab-panel active">
       <div class="console-grid">
         <div class="console-main">
-          <div class="panel">
-            <label for="modeSelect">Mode</label>
-            <select id="modeSelect">
-              <option value="game">game</option>
-              <option value="work">work</option>
-              <option value="standby" selected>standby</option>
-              <option value="tutor">tutor</option>
-            </select>
-          </div>
           <div class="panel">
             <div class="row response-head">
               <h2>Response</h2>
@@ -74,48 +80,92 @@
             <label for="promptInput">Prompt</label>
             <textarea id="promptInput" rows="6" placeholder="Ask Watchkeeper..."></textarea>
             <div class="row">
-              <button id="sendAssistBtn">Send to /assist</button>
+              <button id="sendAssistBtn">Send</button>
               <button id="clearPromptBtn" class="secondary">Clear</button>
               <button id="saveMacroBtn" class="secondary" disabled title="Reserved for later">Save as Macro</button>
               <span id="assistMeta" class="muted"></span>
             </div>
           </div>
+          <div class="panel">
+            <div class="policy-head">
+              <h2>Policy Preview</h2>
+              <div class="policy-controls">
+                <label for="policyViewSelect" class="policy-demo-label">View</label>
+                <select id="policyViewSelect" class="policy-view-select">
+                  <option value="pending" selected>Pending requests</option>
+                  <option value="all">All actions</option>
+                </select>
+                <button id="policyApproveAllBtn" class="secondary policy-bulk-btn">Approve Pending</button>
+                <button id="policyDenyAllBtn" class="secondary policy-bulk-btn">Deny Pending</button>
+                <div id="policyDemoRow" class="policy-demo-inline is-hidden">
+                  <label for="policyDemoSelect" class="policy-demo-label">Demo scenario</label>
+                  <select id="policyDemoSelect" class="policy-demo-select">
+                    <option value="none" selected>None (normal mode)</option>
+                    <option value="all">Demo: ALL</option>
+                    <option value="no_actions">Demo: No actions</option>
+                    <option value="allowed">Demo: Allowed</option>
+                    <option value="needs_confirmation">Demo: Needs confirmation</option>
+                    <option value="denied">Demo: Denied</option>
+                    <option value="mixed">Demo: Mixed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="policyPreview" class="policy-preview-list"></div>
+          </div>
         </div>
         <div class="console-side">
           <div class="panel">
             <h2>Quick SitRep</h2>
-            <pre id="quickSitrep" class="code response-box"></pre>
+            <div id="quickSitrep" class="quick-sitrep-icons">
+              <button id="quickAppElite" class="quick-app-chip" data-app-id="elite" title="Open Elite Dangerous">
+                <span class="quick-app-icon-wrap">
+                  <img class="quick-app-icon" src="icons/elite-dangerous-logo.png" alt="Elite icon">
+                  <span id="quickAppEliteState" class="quick-app-state is-down">x</span>
+                </span>
+                <span class="quick-app-name">Elite Dangerous</span>
+              </button>
+              <button id="quickAppJinx" class="quick-app-chip" data-app-id="jinx" title="Open Jinx">
+                <span class="quick-app-icon-wrap">
+                  <img class="quick-app-icon" src="icons/jinx.svg" alt="Jinx icon">
+                  <span id="quickAppJinxState" class="quick-app-state is-down">x</span>
+                </span>
+                <span class="quick-app-name">!Jinx</span>
+              </button>
+              <button id="quickAppSammi" class="quick-app-chip" data-app-id="sammi" title="Open SAMMI">
+                <span class="quick-app-icon-wrap">
+                  <img class="quick-app-icon" src="icons/sammi.png" alt="Sammi icon">
+                  <span id="quickAppSammiState" class="quick-app-state is-down">x</span>
+                </span>
+                <span class="quick-app-name">Sammi</span>
+              </button>
+              <button id="quickAppYtmd" class="quick-app-chip" data-app-id="ytmd" title="Open YTMD">
+                <span class="quick-app-icon-wrap">
+                  <img class="quick-app-icon" src="icons/YT_Music.svg.png" alt="YTMD icon">
+                  <span id="quickAppYtmdState" class="quick-app-state is-down">x</span>
+                </span>
+                <span class="quick-app-name">YTMD</span>
+              </button>
+            </div>
+            <div id="quickNowPlaying" class="quick-now-playing">
+              <span class="quick-now-playing-label">Now playing:</span>
+              <span id="quickNowPlayingValue" class="quick-now-playing-value">-</span>
+            </div>
+            <h3 class="subhead">Twitch Chat (Live)</h3>
+            <div class="streamlabs-chat-wrap">
+              <iframe
+                id="streamlabsChat"
+                class="streamlabs-chat-frame"
+                src="https://streamlabs.com/widgets/chat-box/v1/778F6B84DF492A15A8A8"
+                title="Streamlabs Chat"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              ></iframe>
+            </div>
+            <h3 class="subhead">Twitch Events (Latest 3)</h3>
+            <div id="quickTwitchEvents" class="quick-twitch-events"></div>
           </div>
         </div>
-      </div>
-      <div class="panel">
-        <h2>Policy Preview</h2>
-        <div id="policyDemoRow" class="row policy-demo-row is-hidden">
-          <label for="policyDemoSelect" class="policy-demo-label">Demo scenario</label>
-          <select id="policyDemoSelect">
-            <option value="none" selected>None (normal mode)</option>
-            <option value="no_actions">Demo: No actions</option>
-            <option value="needs_confirmation">Demo: Needs confirmation</option>
-            <option value="denied">Demo: Denied</option>
-            <option value="mixed">Demo: Mixed</option>
-          </select>
-        </div>
-        <div id="policyPreview" class="policy-preview-list"></div>
-      </div>
-    </section>
-
-    <section id="tab-status" class="tab-panel">
-      <div class="panel">
-        <h2>Services</h2>
-        <div id="servicesTable"></div>
-      </div>
-      <div class="panel">
-        <h2>Runtime</h2>
-        <pre id="runtimeInfo" class="code"></pre>
-      </div>
-      <div class="panel">
-        <h2>Handover / SitRep</h2>
-        <pre id="handoverInfo" class="code"></pre>
       </div>
     </section>
 
