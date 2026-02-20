@@ -34,10 +34,23 @@ body {
 }
 
 .brand-block {
-  min-width: 210px;
+  min-width: 240px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.brand-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex: 0 0 30px;
 }
 
 .brand-block h1 {
