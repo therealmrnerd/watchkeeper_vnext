@@ -60,9 +60,13 @@
     providerEdsmBtn: document.getElementById("providerEdsmBtn"),
     providerEdsmStatus: document.getElementById("providerEdsmStatus"),
     providerEdsmLatency: document.getElementById("providerEdsmLatency"),
+    providerInaraBtn: document.getElementById("providerInaraBtn"),
+    providerInaraStatus: document.getElementById("providerInaraStatus"),
+    providerInaraLatency: document.getElementById("providerInaraLatency"),
     refreshEdStatusBtn: document.getElementById("refreshEdStatusBtn"),
     edStatusMeta: document.getElementById("edStatusMeta"),
     edSystemBadges: document.getElementById("edSystemBadges"),
+    edProviderCards: document.getElementById("edProviderCards"),
     edSystemSummary: document.getElementById("edSystemSummary"),
     edBodiesBadges: document.getElementById("edBodiesBadges"),
     edBodiesMeta: document.getElementById("edBodiesMeta"),
@@ -271,6 +275,13 @@
       el.providerEdsmLatency,
       providers.edsm || null
     );
+    setProviderHealthButton(
+      el.providerInaraBtn,
+      el.providerInaraStatus,
+      el.providerInaraLatency,
+      providers.inara || null
+    );
+    renderEdProviderCards(providers);
   }
 
   async function loadProviderHealth() {
@@ -287,9 +298,112 @@
     const targets = {
       spansh: "https://www.spansh.co.uk",
       edsm: "https://www.edsm.net",
+      inara: "https://inara.cz",
     };
     if (targets[provider]) {
       window.open(targets[provider], "_blank", "noopener");
+    }
+  }
+
+  function providerFeatureLabel(providerId, features) {
+    const labels = [];
+    if (providerId === "spansh" || providerId === "edsm") {
+      if (features.system_lookup) {
+        labels.push("systems");
+      }
+      if (features.bodies_lookup) {
+        labels.push("bodies");
+      }
+      if (features.stations_lookup) {
+        labels.push("stations");
+      }
+    }
+    if (providerId === "inara" && features.commander_location_push) {
+      labels.push("commander sync");
+    }
+    if (features.read_only) {
+      labels.push("read-only");
+    }
+    return labels;
+  }
+
+  function renderEdProviderCards(providers) {
+    if (!el.edProviderCards) {
+      return;
+    }
+    el.edProviderCards.innerHTML = "";
+    const order = ["spansh", "edsm", "inara"];
+    for (const providerId of order) {
+      const item = providers && typeof providers === "object" ? providers[providerId] : null;
+      if (!item) {
+        continue;
+      }
+      const card = document.createElement("button");
+      const health = item && typeof item.health === "object" ? item.health : null;
+      const status = String((health && health.status) || "unknown").trim().toLowerCase() || "unknown";
+      card.type = "button";
+      card.className = "ed-provider-card";
+      card.dataset.status = status;
+      card.dataset.provider = providerId;
+      card.addEventListener("click", () => openProviderSite(providerId));
+
+      const top = document.createElement("div");
+      top.className = "ed-provider-card-head";
+
+      const title = document.createElement("div");
+      title.className = "ed-provider-card-title";
+      title.textContent = providerId.toUpperCase();
+
+      const state = document.createElement("div");
+      state.className = "ed-provider-card-state";
+      state.textContent = status;
+
+      top.appendChild(title);
+      top.appendChild(state);
+
+      const meta = document.createElement("div");
+      meta.className = "ed-provider-card-meta";
+      const latencyMs = health && typeof health.latency_ms === "number" ? health.latency_ms : null;
+      meta.textContent = [
+        item.enabled ? "enabled" : "disabled",
+        latencyMs !== null ? `~${latencyMs}ms` : "latency -",
+      ].join(" | ");
+
+      const auth = item && typeof item.auth_summary === "object" ? item.auth_summary : null;
+      const sync = item && typeof item.sync === "object" ? item.sync : null;
+      const features = item && typeof item.features === "object" ? item.features : {};
+
+      const detail = document.createElement("div");
+      detail.className = "ed-provider-card-detail";
+      if (providerId === "inara") {
+        const configured = auth && auth.configured ? "configured" : "needs auth";
+        const debounce = sync && typeof sync.location_debounce_s === "number"
+          ? `${sync.location_debounce_s}s debounce`
+          : "no debounce";
+        detail.textContent = `${configured} | ${debounce}`;
+      } else {
+        const url = String(item.base_url || "").replace(/^https?:\/\//, "");
+        detail.textContent = url || "no endpoint";
+      }
+
+      const tags = document.createElement("div");
+      tags.className = "ed-provider-card-tags";
+      const labels = providerFeatureLabel(providerId, features);
+      if (providerId === "inara" && auth) {
+        labels.push(auth.configured ? "auth ready" : "auth missing");
+      }
+      for (const label of labels.slice(0, 4)) {
+        const chip = document.createElement("span");
+        chip.className = "ed-provider-chip";
+        chip.textContent = label;
+        tags.appendChild(chip);
+      }
+
+      card.appendChild(top);
+      card.appendChild(meta);
+      card.appendChild(detail);
+      card.appendChild(tags);
+      el.edProviderCards.appendChild(card);
     }
   }
 
@@ -1839,6 +1953,9 @@
     }
     if (el.providerEdsmBtn) {
       el.providerEdsmBtn.addEventListener("click", () => openProviderSite("edsm"));
+    }
+    if (el.providerInaraBtn) {
+      el.providerInaraBtn.addEventListener("click", () => openProviderSite("inara"));
     }
     if (el.refreshEdStatusBtn) {
       el.refreshEdStatusBtn.addEventListener("click", loadEdStatus);

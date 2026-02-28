@@ -208,6 +208,8 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertIn("spansh", body.get("providers", {}))
         self.assertEqual(body["providers"]["spansh"]["health"]["status"], "ok")
         self.assertEqual(body["providers"]["spansh"]["health"]["latency_ms"], 42)
+        self.assertIn("inara", body.get("providers", {}))
+        self.assertIn("auth_summary", body["providers"]["inara"])
 
     def test_post_providers_query_uses_provider_service(self) -> None:
         before = len(self.fake_provider_service.requests)

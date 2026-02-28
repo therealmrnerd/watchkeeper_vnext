@@ -110,10 +110,36 @@ def query_provider_health(db_path: Path, config_path: str | Path | None = None) 
     for provider_id, cfg in providers_cfg.items():
         if not isinstance(cfg, dict):
             continue
+        auth = cfg.get("auth") if isinstance(cfg.get("auth"), dict) else {}
+        sync_cfg = cfg.get("sync") if isinstance(cfg.get("sync"), dict) else {}
+        auth_summary = None
+        if auth:
+            mode = str(auth.get("mode") or "").strip() or None
+            commander_name_present = bool(str(auth.get("commander_name") or "").strip())
+            app_name_present = bool(str(auth.get("app_name") or "").strip())
+            api_key_present = bool(str(auth.get("api_key") or "").strip())
+            app_key_present = bool(str(auth.get("app_key") or "").strip())
+            frontier_id_present = bool(str(auth.get("frontier_id") or "").strip())
+            configured = False
+            if provider_id == "inara":
+                configured = app_name_present and app_key_present and commander_name_present
+            elif provider_id == "edsm":
+                configured = commander_name_present and api_key_present
+            auth_summary = {
+                "mode": mode,
+                "configured": configured,
+                "commander_name_present": commander_name_present,
+                "app_name_present": app_name_present,
+                "api_key_present": api_key_present,
+                "app_key_present": app_key_present,
+                "frontier_id_present": frontier_id_present,
+            }
         out[provider_id] = {
             "enabled": bool(cfg.get("enabled")),
             "base_url": str(cfg.get("base_url") or "").strip() or None,
             "features": cfg.get("features") if isinstance(cfg.get("features"), dict) else {},
+            "auth_summary": auth_summary,
+            "sync": sync_cfg,
             "health": stored.get(provider_id),
         }
     return {"ok": True, "providers": out}

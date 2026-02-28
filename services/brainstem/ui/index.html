@@ -166,6 +166,11 @@
                 <span id="providerEdsmStatus" class="provider-health-state">unknown</span>
                 <span id="providerEdsmLatency" class="provider-health-latency">-</span>
               </button>
+              <button id="providerInaraBtn" class="provider-health-btn" type="button" data-provider="inara">
+                <span class="provider-health-name">Inara</span>
+                <span id="providerInaraStatus" class="provider-health-state">unknown</span>
+                <span id="providerInaraLatency" class="provider-health-latency">-</span>
+              </button>
             </div>
             <h3 class="subhead">Twitch Chat (Live)</h3>
             <div class="streamlabs-chat-wrap">
@@ -193,6 +198,10 @@
         </div>
         <div id="edStatusMeta" class="muted">Waiting for provider data.</div>
         <div id="edSystemBadges" class="ed-badge-row"></div>
+      </div>
+      <div class="panel">
+        <h2>Provider Status</h2>
+        <div id="edProviderCards" class="ed-provider-grid"></div>
       </div>
       <div class="ed-status-grid">
         <div class="panel">
