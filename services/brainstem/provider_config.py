@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 from typing import Any
+
+from provider_secrets import DEFAULT_PROVIDER_SECRETS_PATH, get_provider_secret_entry
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -139,5 +142,30 @@ def validate_provider_config(payload: dict[str, Any]) -> None:
 def load_provider_config(path: str | Path | None = None) -> dict[str, Any]:
     config_path = Path(path) if path is not None else DEFAULT_PROVIDER_CONFIG_PATH
     payload = json.loads(config_path.read_text(encoding="utf-8"))
+    validate_provider_config(payload)
+    return payload
+
+
+def load_runtime_provider_config(
+    path: str | Path | None = None,
+    secrets_path: str | Path | None = None,
+    codec: Any | None = None,
+) -> dict[str, Any]:
+    payload = deepcopy(load_provider_config(path))
+    inara_secret = get_provider_secret_entry(
+        "inara",
+        secrets_path if secrets_path is not None else DEFAULT_PROVIDER_SECRETS_PATH,
+        codec=codec,
+    )
+    if inara_secret:
+        providers = payload.setdefault("providers", {})
+        inara_cfg = providers.get("inara")
+        if isinstance(inara_cfg, dict):
+            auth = inara_cfg.setdefault("auth", {})
+            if isinstance(auth, dict):
+                for key in ("commander_name", "frontier_id", "app_key"):
+                    value = inara_secret.get(key)
+                    if value is not None:
+                        auth[key] = value
     validate_provider_config(payload)
     return payload

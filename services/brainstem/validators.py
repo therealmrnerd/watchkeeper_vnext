@@ -421,3 +421,24 @@ def validate_provider_query(payload: dict[str, Any]) -> None:
     incident_id = trace.get("incident_id")
     if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
         raise ValueError("provider_query.trace.incident_id must be a non-empty string when supplied")
+
+
+def validate_inara_credentials_update(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    allowed = {"commander_name", "frontier_id", "api_key"}
+    _check_extra_keys(payload, allowed, "inara_credentials")
+    if not payload:
+        raise ValueError("inara_credentials body must not be empty")
+
+    commander_name = payload.get("commander_name")
+    if commander_name is not None and not isinstance(commander_name, str):
+        raise ValueError("commander_name must be a string when supplied")
+
+    frontier_id = payload.get("frontier_id")
+    if frontier_id is not None and not isinstance(frontier_id, (str, int)):
+        raise ValueError("frontier_id must be a string or integer when supplied")
+
+    api_key = payload.get("api_key")
+    if api_key is not None and not isinstance(api_key, str):
+        raise ValueError("api_key must be a string when supplied")

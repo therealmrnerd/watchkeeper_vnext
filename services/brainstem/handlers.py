@@ -16,6 +16,7 @@ from actions import (
     open_external_app,
     record_confirmation,
     record_feedback,
+    save_inara_credentials,
     send_twitch_chat,
     upsert_intent,
 )
@@ -27,6 +28,7 @@ from queries import (
     query_log_tail,
     query_current_system_provider,
     query_current_system_stations,
+    query_inara_credentials,
     query_providers_health,
     query_sitrep,
     query_state,
@@ -52,6 +54,7 @@ from validators import (
     validate_assist_request,
     validate_confirm,
     validate_feedback,
+    validate_inara_credentials_update,
     validate_intent,
     validate_provider_query,
     validate_state_ingest,
@@ -229,6 +232,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 self._send_json(200, query_providers_health(query))
                 return
 
+            if parsed.path == "/providers/inara/credentials":
+                self._send_json(200, query_inara_credentials(query))
+                return
+
             if parsed.path == "/providers/current-system":
                 self._send_json(200, query_current_system_provider(query))
                 return
@@ -330,6 +337,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 validate_provider_query(body)
                 result = execute_provider_query(body, source=source)
+                self._send_json(200, result)
+                return
+
+            if parsed.path == "/providers/inara/credentials":
+                body = self._read_json_body()
+                validate_inara_credentials_update(body)
+                result = save_inara_credentials(body, source=source)
                 self._send_json(200, result)
                 return
 

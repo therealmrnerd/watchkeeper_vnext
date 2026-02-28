@@ -766,7 +766,6 @@ main {
   padding: 10px;
   background: linear-gradient(180deg, rgba(24, 31, 39, 0.96) 0%, rgba(19, 25, 33, 0.96) 100%);
   color: #e6eef7;
-  cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
@@ -853,10 +852,68 @@ main {
   margin-top: 10px;
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ed-provider-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ed-provider-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ed-provider-field-wide {
+  grid-column: 1 / -1;
+}
+
+.ed-provider-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9fb6ca;
+}
+
+.ed-provider-input {
+  width: 100%;
+  border: 1px solid rgba(102, 124, 147, 0.55);
+  border-radius: 6px;
+  background: rgba(8, 14, 22, 0.92);
+  color: #e6eef7;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.ed-provider-input:focus {
+  outline: none;
+  border-color: rgba(255, 140, 26, 0.8);
+  box-shadow:
+    0 0 1px rgba(255, 140, 26, 0.35),
+    0 0 3px rgba(255, 140, 26, 0.17);
+}
+
+.ed-provider-form-note {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: #9fb4c9;
+  line-height: 1.35;
 }
 
 .ed-provider-sync-btn {
   min-width: 160px;
+}
+
+.ed-provider-save-btn,
+.ed-provider-open-btn {
+  min-width: 128px;
 }
 
 .ed-provider-action-result {
@@ -1522,6 +1579,10 @@ a {
   }
 
   .provider-health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ed-provider-form {
     grid-template-columns: 1fr;
   }
 }

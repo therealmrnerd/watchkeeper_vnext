@@ -9,7 +9,10 @@
     latestSitrep: null,
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
+    inaraCredentials: null,
+    inaraCredentialDraft: null,
     inaraManualAction: null,
+    inaraCredentialAction: null,
     demoEnabled: false,
     demoScenario: "none",
     demoPreviewItems: null,
@@ -331,6 +334,44 @@
     return labels;
   }
 
+  function inaraCredentialValues() {
+    const payload = state.inaraCredentials && typeof state.inaraCredentials === "object"
+      ? state.inaraCredentials
+      : {};
+    const credentials = payload.credentials && typeof payload.credentials === "object"
+      ? payload.credentials
+      : {};
+    const auth = payload.auth && typeof payload.auth === "object" ? payload.auth : {};
+    const storage = payload.storage && typeof payload.storage === "object" ? payload.storage : {};
+    const draft = state.inaraCredentialDraft && typeof state.inaraCredentialDraft === "object"
+      ? state.inaraCredentialDraft
+      : {};
+    return { credentials, auth, storage, draft };
+  }
+
+  function updateInaraCredentialDraft(field, value) {
+    const current = state.inaraCredentialDraft && typeof state.inaraCredentialDraft === "object"
+      ? state.inaraCredentialDraft
+      : {};
+    state.inaraCredentialDraft = Object.assign({}, current, { [field]: String(value || "") });
+  }
+
+  async function loadInaraCredentials() {
+    try {
+      const data = await apiGet("/providers/inara/credentials");
+      state.inaraCredentials = data && typeof data === "object" ? data : null;
+    } catch (err) {
+      state.inaraCredentials = {
+        ok: false,
+        error: String(err.message || err),
+        credentials: {},
+        auth: {},
+        storage: {},
+      };
+    }
+    renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
+  }
+
   function renderEdProviderCards(providers) {
     if (!el.edProviderCards) {
       return;
@@ -342,14 +383,12 @@
       if (!item) {
         continue;
       }
-      const card = document.createElement("button");
+      const card = document.createElement("div");
       const health = item && typeof item.health === "object" ? item.health : null;
       const status = String((health && health.status) || "unknown").trim().toLowerCase() || "unknown";
-      card.type = "button";
       card.className = "ed-provider-card";
       card.dataset.status = status;
       card.dataset.provider = providerId;
-      card.addEventListener("click", () => openProviderSite(providerId));
 
       const top = document.createElement("div");
       top.className = "ed-provider-card-head";
@@ -358,12 +397,12 @@
       title.className = "ed-provider-card-title";
       title.textContent = providerId.toUpperCase();
 
-      const state = document.createElement("div");
-      state.className = "ed-provider-card-state";
-      state.textContent = status;
+      const statusNode = document.createElement("div");
+      statusNode.className = "ed-provider-card-state";
+      statusNode.textContent = status;
 
       top.appendChild(title);
-      top.appendChild(state);
+      top.appendChild(statusNode);
 
       const meta = document.createElement("div");
       meta.className = "ed-provider-card-meta";
@@ -413,9 +452,97 @@
       card.appendChild(detail);
       card.appendChild(activityNode);
       card.appendChild(tags);
+      const actions = document.createElement("div");
+      actions.className = "ed-provider-card-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "secondary header-chip ed-provider-open-btn";
+      openBtn.textContent = "Open Site";
+      openBtn.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        openProviderSite(providerId);
+      });
+      actions.appendChild(openBtn);
       if (providerId === "inara") {
-        const actions = document.createElement("div");
-        actions.className = "ed-provider-card-actions";
+        const { credentials, auth: inaraAuth, storage, draft } = inaraCredentialValues();
+        const form = document.createElement("div");
+        form.className = "ed-provider-form";
+
+        const commanderField = document.createElement("label");
+        commanderField.className = "ed-provider-field";
+        const commanderLabel = document.createElement("span");
+        commanderLabel.className = "ed-provider-field-label";
+        commanderLabel.textContent = "Commander Name";
+        const commanderInput = document.createElement("input");
+        commanderInput.type = "text";
+        commanderInput.className = "ed-provider-input";
+        commanderInput.value = String(
+          draft.commander_name !== undefined ? draft.commander_name : (credentials.commander_name || "")
+        );
+        commanderInput.placeholder = "Commander name";
+        commanderInput.addEventListener("input", () => updateInaraCredentialDraft("commander_name", commanderInput.value));
+        commanderField.appendChild(commanderLabel);
+        commanderField.appendChild(commanderInput);
+
+        const frontierField = document.createElement("label");
+        frontierField.className = "ed-provider-field";
+        const frontierLabel = document.createElement("span");
+        frontierLabel.className = "ed-provider-field-label";
+        frontierLabel.textContent = "Frontier ID";
+        const frontierInput = document.createElement("input");
+        frontierInput.type = "text";
+        frontierInput.className = "ed-provider-input";
+        frontierInput.value = String(
+          draft.frontier_id !== undefined ? draft.frontier_id : (credentials.frontier_id || "")
+        );
+        frontierInput.placeholder = "Frontier ID";
+        frontierInput.addEventListener("input", () => updateInaraCredentialDraft("frontier_id", frontierInput.value));
+        frontierField.appendChild(frontierLabel);
+        frontierField.appendChild(frontierInput);
+
+        const keyField = document.createElement("label");
+        keyField.className = "ed-provider-field ed-provider-field-wide";
+        const keyLabel = document.createElement("span");
+        keyLabel.className = "ed-provider-field-label";
+        keyLabel.textContent = "API Key";
+        const keyInput = document.createElement("input");
+        keyInput.type = "password";
+        keyInput.className = "ed-provider-input";
+        keyInput.value = String(draft.api_key || "");
+        keyInput.placeholder = credentials.api_key_present ? "Stored securely. Enter a new key to replace it." : "Enter API key";
+        keyInput.addEventListener("input", () => updateInaraCredentialDraft("api_key", keyInput.value));
+        keyField.appendChild(keyLabel);
+        keyField.appendChild(keyInput);
+
+        const helper = document.createElement("div");
+        helper.className = "ed-provider-form-note";
+        const appNameText = inaraAuth && inaraAuth.app_name ? `App: ${inaraAuth.app_name}` : "App name is still configured in providers.json";
+        const storageText = storage && storage.encrypted ? "Stored with Windows encryption for this user." : "No encrypted store active.";
+        helper.textContent = `${appNameText} | ${storageText}`;
+
+        form.appendChild(commanderField);
+        form.appendChild(frontierField);
+        form.appendChild(keyField);
+        form.appendChild(helper);
+        card.appendChild(form);
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "secondary header-chip ed-provider-save-btn";
+        saveBtn.textContent = "Save Securely";
+        saveBtn.addEventListener("click", async (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          await saveInaraCredentials({
+            commander_name: commanderInput.value,
+            frontier_id: frontierInput.value,
+            api_key: keyInput.value,
+          }, saveBtn);
+          keyInput.value = "";
+        });
+        actions.appendChild(saveBtn);
+
         const syncBtn = document.createElement("button");
         syncBtn.type = "button";
         syncBtn.className = "secondary header-chip ed-provider-sync-btn";
@@ -429,6 +556,19 @@
         });
         actions.appendChild(syncBtn);
         card.appendChild(actions);
+        if (state.inaraCredentialAction && state.inaraCredentialAction.text) {
+          const credNode = document.createElement("div");
+          credNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraCredentialAction.status || "idle"}`;
+          const credState = document.createElement("div");
+          credState.className = "ed-provider-action-result-state";
+          credState.textContent = String(state.inaraCredentialAction.status || "idle").toUpperCase();
+          const credText = document.createElement("div");
+          credText.className = "ed-provider-action-result-text";
+          credText.textContent = state.inaraCredentialAction.text;
+          credNode.appendChild(credState);
+          credNode.appendChild(credText);
+          card.appendChild(credNode);
+        }
         if (state.inaraManualAction && state.inaraManualAction.text) {
           const resultNode = document.createElement("div");
           resultNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraManualAction.status || "idle"}`;
@@ -442,8 +582,36 @@
           resultNode.appendChild(resultText);
           card.appendChild(resultNode);
         }
+      } else {
+        card.appendChild(actions);
       }
       el.edProviderCards.appendChild(card);
+    }
+  }
+
+  async function saveInaraCredentials(payload, buttonNode) {
+    if (buttonNode) {
+      buttonNode.disabled = true;
+    }
+    setInaraCredentialActionStatus("executing", "Saving Inara credentials securely...");
+    renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
+    setEdMeta("Saving Inara credentials securely...");
+    try {
+      const result = await apiPost("/providers/inara/credentials", payload);
+      state.inaraCredentials = result;
+      state.inaraCredentialDraft = null;
+      setInaraCredentialActionStatus("completed", "Encrypted Inara credentials saved.");
+      setEdMeta("Encrypted Inara credentials saved.");
+      await loadProviderHealth();
+      await loadInaraCredentials();
+    } catch (err) {
+      setInaraCredentialActionStatus("failed", `Credential save failed: ${String(err.message || err)}`);
+      setEdMeta(`Credential save failed: ${String(err.message || err)}`);
+      renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
+    } finally {
+      if (buttonNode) {
+        buttonNode.disabled = false;
+      }
     }
   }
 
@@ -548,6 +716,14 @@
 
   function setInaraManualActionStatus(status, text) {
     state.inaraManualAction = {
+      status: String(status || "idle").trim().toLowerCase(),
+      text: String(text || "").trim(),
+      at: nowIso(),
+    };
+  }
+
+  function setInaraCredentialActionStatus(status, text) {
+    state.inaraCredentialAction = {
       status: String(status || "idle").trim().toLowerCase(),
       text: String(text || "").trim(),
       at: nowIso(),
@@ -2125,6 +2301,7 @@
 
     await loadSitrep();
     await loadProviderHealth();
+    await loadInaraCredentials();
     await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();

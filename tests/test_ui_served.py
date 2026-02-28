@@ -26,6 +26,8 @@ class UIServedTests(unittest.TestCase):
         os.environ["WKV_DB_PATH"] = str(cls.db_path)
         os.environ["WKV_SCHEMA_PATH"] = str(ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
         os.environ["WKV_STANDING_ORDERS_PATH"] = str(ROOT_DIR / "config" / "standing_orders.json")
+        os.environ["WKV_PROVIDER_CONFIG_PATH"] = str(ROOT_DIR / "config" / "providers.json")
+        os.environ["WKV_PROVIDER_SECRETS_PATH"] = str(cls.temp_dir / "provider_secrets.dpapi")
         os.environ["WKV_ENABLE_ACTUATORS"] = "0"
         os.environ["WKV_EDPARSER_ENABLED"] = "0"
 

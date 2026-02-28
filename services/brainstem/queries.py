@@ -17,6 +17,8 @@ from runtime import (
     KNOWLEDGE_HEALTH_URL,
     LOG_DIR,
     PORT,
+    PROVIDER_CONFIG_PATH,
+    PROVIDER_SECRETS_PATH,
     QDRANT_HEALTH_URL,
     SNAPSHOT_DIR,
     START_TS,
@@ -27,8 +29,10 @@ from runtime import (
     parse_iso8601_utc,
 )
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
+from provider_config import load_runtime_provider_config
 from provider_health import list_provider_health
 from provider_query import query_provider_health
+from provider_secrets import get_provider_secret_entry
 
 try:
     from tools.diag_report import build_diag_report
@@ -212,7 +216,7 @@ def query_twitch_recent(query: dict[str, list[str]]) -> dict[str, Any]:
 
 
 def query_providers_health(query: dict[str, list[str]]) -> dict[str, Any]:
-    payload = query_provider_health(Path(DB_PATH))
+    payload = query_provider_health(Path(DB_PATH), PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
     provider_filter = str((query.get("provider", [""])[0] or "")).strip().lower()
     if provider_filter:
         return {
@@ -221,6 +225,50 @@ def query_providers_health(query: dict[str, list[str]]) -> dict[str, Any]:
             "item": payload.get("providers", {}).get(provider_filter),
         }
     return payload
+
+
+def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
+    config = load_runtime_provider_config(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
+    providers = config.get("providers", {})
+    inara_cfg = providers.get("inara") if isinstance(providers, dict) else {}
+    if not isinstance(inara_cfg, dict):
+        inara_cfg = {}
+    auth = inara_cfg.get("auth") if isinstance(inara_cfg.get("auth"), dict) else {}
+    secure_auth = get_provider_secret_entry("inara", PROVIDER_SECRETS_PATH)
+
+    commander_name = str(secure_auth.get("commander_name") or auth.get("commander_name") or "").strip()
+    frontier_id_raw = secure_auth.get("frontier_id")
+    if frontier_id_raw in (None, ""):
+        frontier_id_raw = auth.get("frontier_id")
+    frontier_id = str(frontier_id_raw).strip() if frontier_id_raw not in (None, "") else ""
+    app_key_present = bool(str(secure_auth.get("app_key") or auth.get("app_key") or "").strip())
+    app_name = str(auth.get("app_name") or "").strip()
+
+    return {
+        "ok": True,
+        "provider": "inara",
+        "enabled": bool(inara_cfg.get("enabled")),
+        "storage": {
+            "encrypted": True,
+            "path": str(Path(PROVIDER_SECRETS_PATH).resolve()),
+            "exists": Path(PROVIDER_SECRETS_PATH).exists(),
+            "secure_store_present": bool(secure_auth),
+        },
+        "auth": {
+            "app_name": app_name or None,
+            "configured": bool(app_name and app_key_present and commander_name),
+        },
+        "credentials": {
+            "commander_name": commander_name,
+            "frontier_id": frontier_id,
+            "api_key_present": app_key_present,
+            "api_key_source": (
+                "secure_store"
+                if bool(str(secure_auth.get("app_key") or "").strip())
+                else ("config" if bool(str(auth.get("app_key") or "").strip()) else None)
+            ),
+        },
+    }
 
 
 def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]:

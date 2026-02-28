@@ -25,7 +25,7 @@ from core.ed_provider_types import (
     ProviderRateLimitState,
     ProviderResult,
 )
-from provider_config import load_provider_config
+from provider_config import load_runtime_provider_config
 from provider_health import (
     HttpProviderHealthProbe,
     InaraHealthProbe,
@@ -165,8 +165,12 @@ def get_provider_health_map(db_path: Path) -> dict[str, dict[str, Any]]:
         return {}
 
 
-def query_provider_health(db_path: Path, config_path: str | Path | None = None) -> dict[str, Any]:
-    config = load_provider_config(config_path)
+def query_provider_health(
+    db_path: Path,
+    config_path: str | Path | None = None,
+    secrets_path: str | Path | None = None,
+) -> dict[str, Any]:
+    config = load_runtime_provider_config(config_path, secrets_path)
     stored = get_provider_health_map(db_path)
     providers_cfg = config.get("providers", {})
     out: dict[str, Any] = {}
@@ -567,12 +571,17 @@ class ProviderQueryService:
         *,
         db_path: Path,
         config_path: str | Path | None = None,
+        secrets_path: str | Path | None = None,
         opener: Callable[..., Any] = urllib.request.urlopen,
     ) -> None:
         self.db_path = Path(db_path)
         self.config_path = config_path
-        self.config = load_provider_config(config_path)
+        self.secrets_path = secrets_path
         self.opener = opener
+        self.reload_config()
+
+    def reload_config(self) -> None:
+        self.config = load_runtime_provider_config(self.config_path, self.secrets_path)
         self._spansh = self._build_spansh_adapter()
         self._edsm = self._build_edsm_adapter()
         self._inara = self._build_inara_adapter()

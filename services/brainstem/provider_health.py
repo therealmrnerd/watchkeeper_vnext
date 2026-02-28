@@ -17,7 +17,7 @@ from core.ed_provider_types import (
     ProviderId,
     ProviderRateLimitState,
 )
-from provider_config import load_provider_config
+from provider_config import load_runtime_provider_config
 
 
 def _utc_now_iso() -> str:
@@ -306,8 +306,11 @@ class InaraHealthProbe:
             )
 
 
-def build_provider_health_probes(config_path: str | Path | None = None) -> list[Any]:
-    config = load_provider_config(config_path)
+def build_provider_health_probes(
+    config_path: str | Path | None = None,
+    secrets_path: str | Path | None = None,
+) -> list[Any]:
+    config = load_runtime_provider_config(config_path, secrets_path)
     providers = config.get("providers", {})
     probes: list[HttpProviderHealthProbe] = []
     for provider_name in ("spansh", "edsm"):
@@ -371,13 +374,20 @@ class ProviderHealthScheduler:
         self._rng = rng or random.Random()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     def run_once(self) -> dict[str, dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
-        for probe in self.probes:
+        with self._lock:
+            probes = list(self.probes)
+        for probe in probes:
             health = probe.probe()
             results[health.provider.value] = upsert_provider_health(self.db_path, health)
         return results
+
+    def update_probes(self, probes: list[Any]) -> None:
+        with self._lock:
+            self.probes = list(probes)
 
     def _sleep_interval(self) -> float:
         if self.min_interval_sec >= self.max_interval_sec:
@@ -400,7 +410,9 @@ class ProviderHealthScheduler:
                 continue
 
     def start(self) -> None:
-        if not self.probes:
+        with self._lock:
+            has_probes = bool(self.probes)
+        if not has_probes:
             return
         if self._thread is not None and self._thread.is_alive():
             return

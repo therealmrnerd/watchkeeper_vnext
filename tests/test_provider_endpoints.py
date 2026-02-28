@@ -118,10 +118,22 @@ class ProviderEndpointsTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.temp_dir = Path(tempfile.mkdtemp(prefix="provider_endpoints_"))
         cls.db_path = cls.temp_dir / "provider_endpoints.db"
+        cls.config_path = cls.temp_dir / "providers.json"
+        cls.secrets_path = cls.temp_dir / "provider_secrets.dpapi"
+
+        provider_config = json.loads((ROOT_DIR / "config" / "providers.json").read_text(encoding="utf-8"))
+        provider_config["providers"]["inara"]["enabled"] = True
+        provider_config["providers"]["inara"]["auth"]["app_name"] = "Watchkeeper"
+        provider_config["providers"]["inara"]["auth"]["app_key"] = ""
+        provider_config["providers"]["inara"]["auth"]["commander_name"] = ""
+        provider_config["providers"]["inara"]["auth"]["frontier_id"] = None
+        cls.config_path.write_text(json.dumps(provider_config), encoding="utf-8")
 
         os.environ["WKV_DB_PATH"] = str(cls.db_path)
         os.environ["WKV_SCHEMA_PATH"] = str(ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
         os.environ["WKV_STANDING_ORDERS_PATH"] = str(ROOT_DIR / "config" / "standing_orders.json")
+        os.environ["WKV_PROVIDER_CONFIG_PATH"] = str(cls.config_path)
+        os.environ["WKV_PROVIDER_SECRETS_PATH"] = str(cls.secrets_path)
         os.environ["WKV_ENABLE_ACTUATORS"] = "0"
         os.environ["WKV_EDPARSER_ENABLED"] = "0"
         os.environ["WKV_ADVISORY_HEALTH_URL"] = ""
@@ -204,6 +216,8 @@ class ProviderEndpointsTests(unittest.TestCase):
             cls.server.server_close()
         except Exception:
             pass
+        for key in ("WKV_PROVIDER_CONFIG_PATH", "WKV_PROVIDER_SECRETS_PATH"):
+            os.environ.pop(key, None)
         shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -245,6 +259,38 @@ class ProviderEndpointsTests(unittest.TestCase):
             body["providers"]["inara"]["activity_summary"]["last_failure_at"],
             "2026-02-28T12:20:00.000000Z",
         )
+
+    def test_get_inara_credentials_returns_secure_summary(self) -> None:
+        status, body = self._request("GET", "/providers/inara/credentials")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body.get("provider"), "inara")
+        self.assertEqual(body.get("auth", {}).get("app_name"), "Watchkeeper")
+        self.assertFalse(body.get("credentials", {}).get("api_key_present"))
+
+    def test_post_inara_credentials_saves_encrypted_file(self) -> None:
+        status, body = self._request(
+            "POST",
+            "/providers/inara/credentials",
+            {
+                "commander_name": "Cmdr Nerd",
+                "frontier_id": "6206398",
+                "api_key": "secret-api-key",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertTrue(body.get("saved_securely"))
+        self.assertEqual(body.get("credentials", {}).get("commander_name"), "Cmdr Nerd")
+        self.assertEqual(body.get("credentials", {}).get("frontier_id"), "6206398")
+        self.assertTrue(body.get("credentials", {}).get("api_key_present"))
+        self.assertEqual(body.get("credentials", {}).get("api_key_source"), "secure_store")
+        self.assertTrue(self.secrets_path.exists())
+        self.assertNotIn(b"secret-api-key", self.secrets_path.read_bytes())
+
+        status, health_body = self._request("GET", "/providers/health")
+        self.assertEqual(status, 200)
+        self.assertTrue(health_body["providers"]["inara"]["auth_summary"]["configured"])
 
     def test_post_providers_query_uses_provider_service(self) -> None:
         before = len(self.fake_provider_service.requests)

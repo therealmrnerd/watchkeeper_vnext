@@ -10,7 +10,18 @@ BRAINSTEM_DIR = ROOT_DIR / "services" / "brainstem"
 if str(BRAINSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(BRAINSTEM_DIR))
 
-from provider_config import load_provider_config, validate_provider_config
+from provider_config import load_provider_config, load_runtime_provider_config, validate_provider_config
+from provider_secrets import save_inara_secret_entry
+
+
+class _FakeCodec:
+    def encrypt(self, plaintext: bytes) -> bytes:
+        return b"enc:" + plaintext[::-1]
+
+    def decrypt(self, ciphertext: bytes) -> bytes:
+        if not ciphertext.startswith(b"enc:"):
+            raise ValueError("bad ciphertext")
+        return ciphertext[4:][::-1]
 
 
 class ProviderConfigTests(unittest.TestCase):
@@ -58,6 +69,30 @@ class ProviderConfigTests(unittest.TestCase):
             config_path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_provider_config(config_path)
+
+    def test_runtime_provider_config_overlays_secure_inara_values(self) -> None:
+        payload = load_provider_config(ROOT_DIR / "config" / "providers.json")
+        payload["providers"]["inara"]["auth"]["app_name"] = "Watchkeeper"
+        payload["providers"]["inara"]["auth"]["app_key"] = ""
+        payload["providers"]["inara"]["auth"]["commander_name"] = ""
+        payload["providers"]["inara"]["auth"]["frontier_id"] = None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.json"
+            secrets_path = Path(temp_dir) / "provider_secrets.dpapi"
+            config_path.write_text(json.dumps(payload), encoding="utf-8")
+            save_inara_secret_entry(
+                commander_name="Cmdr Nerd",
+                frontier_id="6206398",
+                app_key="secret-api-key",
+                path=secrets_path,
+                codec=_FakeCodec(),
+            )
+            merged = load_runtime_provider_config(config_path, secrets_path, codec=_FakeCodec())
+        auth = merged["providers"]["inara"]["auth"]
+        self.assertEqual(auth["app_name"], "Watchkeeper")
+        self.assertEqual(auth["commander_name"], "Cmdr Nerd")
+        self.assertEqual(str(auth["frontier_id"]), "6206398")
+        self.assertEqual(auth["app_key"], "secret-api-key")
 
 
 if __name__ == "__main__":

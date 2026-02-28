@@ -23,6 +23,7 @@ from db.twitch_repo import TwitchRepository
 from provider_config import DEFAULT_PROVIDER_CONFIG_PATH
 from provider_health import ProviderHealthScheduler, build_provider_health_probes
 from provider_query import ProviderQueryService
+from provider_secrets import DEFAULT_PROVIDER_SECRETS_PATH
 from sammi_client import SammiClient
 from twitch_ingest import TwitchIngestService
 
@@ -223,6 +224,7 @@ TWITCH_DEV_INGEST_ENABLED = os.getenv("WKV_TWITCH_DEV_INGEST_ENABLED", "0").stri
     "yes",
 }
 PROVIDER_CONFIG_PATH = Path(os.getenv("WKV_PROVIDER_CONFIG_PATH", DEFAULT_PROVIDER_CONFIG_PATH))
+PROVIDER_SECRETS_PATH = Path(os.getenv("WKV_PROVIDER_SECRETS_PATH", DEFAULT_PROVIDER_SECRETS_PATH))
 PROVIDER_HEALTH_ENABLED = os.getenv("WKV_PROVIDER_HEALTH_ENABLED", "1").strip().lower() in {
     "1",
     "true",
@@ -313,7 +315,9 @@ TWITCH_INGEST_SERVICE = TwitchIngestService(
     variable_index_path=TWITCH_VARIABLE_INDEX_PATH,
 )
 ED_PROVIDER_HEALTH_PROBES = (
-    build_provider_health_probes(PROVIDER_CONFIG_PATH) if PROVIDER_HEALTH_ENABLED else []
+    build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
+    if PROVIDER_HEALTH_ENABLED
+    else []
 )
 ED_PROVIDER_HEALTH_SCHEDULER = ProviderHealthScheduler(
     db_path=DB_PATH,
@@ -325,4 +329,5 @@ ED_PROVIDER_HEALTH_SCHEDULER = ProviderHealthScheduler(
 ED_PROVIDER_QUERY_SERVICE = ProviderQueryService(
     db_path=DB_PATH,
     config_path=PROVIDER_CONFIG_PATH,
+    secrets_path=PROVIDER_SECRETS_PATH,
 )
