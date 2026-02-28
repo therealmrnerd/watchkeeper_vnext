@@ -75,6 +75,14 @@ Policy:
 3. Prefer `spansh`; fallback to `edsm`.
 4. Normalize and persist.
 
+Operational hook:
+
+- on first-seen/current system change from ED telemetry, Brainstem should ensure local topology cache once
+- result is logged as:
+  - `ED_SYSTEM_CACHE_ENSURED`
+  - `ED_SYSTEM_CACHE_FAILED`
+- this keeps provider fetch behavior tied to a deterministic ship-state transition rather than arbitrary UI polling
+
 ### B. Market / commodities / outfitting
 
 Not part of this provider slice.

@@ -121,9 +121,9 @@ Well-known SAMMI runtime state keys:
 
 Reference: `docs/twitch_ingest.md`
 
-## External ED Providers (Scaffolded)
+## External ED Providers
 
-The contract layer for external Elite Dangerous providers is scaffolded, but adapters are not yet live.
+The external ED provider layer is live for read-only topology and health monitoring.
 
 - config:
   - `config/providers.json`
@@ -135,12 +135,6 @@ The contract layer for external Elite Dangerous providers is scaffolded, but ada
 - Python scaffolding:
   - `core/ed_provider_types.py`
   - `services/brainstem/provider_config.py`
-
-Current intent:
-
-- lock provider IDs, health shapes, query/response contracts, and config validation first
-- keep UI and policy logic provider-agnostic
-- land adapters later against these stable seams
 
 Primary provider order for topology:
 
@@ -155,23 +149,35 @@ Live endpoints in this slice:
 - `POST /providers/query`
   - current implementation is intentionally narrow:
     - `provider=spansh|edsm`
-    - `operation=system_lookup`
+    - `operation=system_lookup|bodies_lookup|stations_lookup`
     - `spansh`: params `system_address` or exact `system_name`
-    - `edsm`: params exact `system_name`
+    - `edsm`: params exact `system_name` for `system_lookup` only
   - persists normalized system rows into `ed_systems`
   - persists query cache into `provider_cache`
 - `GET /providers/current-system`
   - reads current ED system from Brainstem state
-  - current state key used in this slice: `ed.telemetry.system_name`
+  - current state keys used in this slice:
+    - `ed.telemetry.system_name`
+    - `ed.telemetry.system_address`
   - routes by configured provider priority:
     - `spansh` first
     - `edsm` fallback
   - returns the same normalized provider result shape plus `current_system_state`
+- `GET /providers/current-system/bodies`
+  - serves cached normalized bodies when present
+  - read-through to `spansh` when cache is missing
+- `GET /providers/current-system/stations`
+  - serves cached normalized stations when present
+  - read-through to `spansh` when cache is missing
 
 Operational notes:
 
 - provider health is scheduler-driven and persisted in `provider_health`
 - UI provider buttons read `/providers/health`, not live internet endpoints
+- supervisor auto-caches topology on first-seen/current system transitions
+  - event types:
+    - `ED_SYSTEM_CACHE_ENSURED`
+    - `ED_SYSTEM_CACHE_FAILED`
 - query path uses verified Spansh endpoints:
   - `GET /api/search/systems?q=<name>`
   - `GET /api/system/<id64>`

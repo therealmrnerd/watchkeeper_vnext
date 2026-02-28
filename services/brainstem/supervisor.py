@@ -16,8 +16,11 @@ from urllib import error, parse, request
 THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
+from core.ed_provider_types import ProviderOperationId
 from db_service import BrainstemDB
 from edparser_tool import EDParserTool
+from provider_config import DEFAULT_PROVIDER_CONFIG_PATH
+from provider_query import ProviderQueryService
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -118,7 +121,12 @@ EDPARSER_AUTORUN = os.getenv("WKV_SUP_EDPARSER_AUTORUN", "1").strip().lower() in
     "true",
     "yes",
 }
+PROVIDER_AUTOCACHE_MAX_AGE_S = max(60, int(os.getenv("WKV_SUP_PROVIDER_AUTOCACHE_MAX_AGE_S", "86400")))
 EDPARSER_TOOL = EDParserTool(db_service=None)
+ED_PROVIDER_QUERY_SERVICE = ProviderQueryService(
+    db_path=DB_PATH,
+    config_path=DEFAULT_PROVIDER_CONFIG_PATH,
+)
 
 AUX_APPS_AUTORUN = os.getenv("WKV_SUP_AUX_APPS_AUTORUN", "0").strip().lower() in {
     "1",
@@ -399,6 +407,72 @@ class MEMORYSTATUSEX(ctypes.Structure):
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _parse_system_address(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return None
+
+
+def _current_system_identity(values: dict[str, Any]) -> tuple[str | None, int | None] | None:
+    system_name = str(values.get("ed.telemetry.system_name") or "").strip() or None
+    system_address = _parse_system_address(values.get("ed.telemetry.system_address"))
+    if system_name is None and system_address is None:
+        return None
+    return (system_name, system_address)
+
+
+def _ensure_current_system_cached(
+    *,
+    db: BrainstemDB,
+    correlation_id: str,
+    system_identity: tuple[str | None, int | None],
+    previous_system: tuple[str | None, int | None] | None,
+    provider_query_service: ProviderQueryService,
+) -> None:
+    system_name, system_address = system_identity
+    params: dict[str, Any] = {}
+    if system_name:
+        params["system_name"] = system_name
+    if system_address is not None:
+        params["system_address"] = system_address
+    result = provider_query_service.execute_priority(
+        operation=ProviderOperationId.SYSTEM_LOOKUP,
+        params=params,
+        max_age_s=PROVIDER_AUTOCACHE_MAX_AGE_S,
+        allow_stale_if_error=True,
+        incident_id=correlation_id,
+        reason="system_change",
+    )
+    db.append_event(
+        event_id=str(uuid.uuid4()),
+        timestamp_utc=utc_now_iso(),
+        event_type="ED_SYSTEM_CACHE_ENSURED" if result.ok else "ED_SYSTEM_CACHE_FAILED",
+        source="ed_supervisor",
+        payload={
+            "system_name": system_name,
+            "system_address": system_address,
+            "previous_system_name": previous_system[0] if previous_system else None,
+            "previous_system_address": previous_system[1] if previous_system else None,
+            "provider": result.provider.value,
+            "operation": result.operation.value,
+            "cache_hit": result.cache.hit,
+            "cache_age_s": result.cache.age_s,
+            "stale_served": result.cache.stale_served,
+            "error": result.error,
+            "deny_reason": result.deny_reason.value if result.deny_reason else None,
+        },
+        profile=PROFILE,
+        session_id=SESSION_ID,
+        correlation_id=correlation_id,
+        mode="game",
+        severity="info" if result.ok else "warn",
+        tags=["ed", "providers", "system_cache"],
+    )
 
 
 def _hide_console_window() -> None:
@@ -1844,10 +1918,16 @@ def process_hardware(db: BrainstemDB) -> None:
         )
 
 
-def process_ed(db: BrainstemDB, previous_running: bool | None) -> bool:
+def process_ed(
+    db: BrainstemDB,
+    previous_running: bool | None,
+    previous_system: tuple[str | None, int | None] | None = None,
+    provider_query_service: ProviderQueryService | None = None,
+) -> tuple[bool, tuple[str | None, int | None] | None]:
     correlation_id = str(uuid.uuid4())
     values = collect_ed_state()
     running = bool(values.get("ed.running"))
+    current_system = _current_system_identity(values)
     items = make_state_items(
         values=values,
         source="ed_supervisor",
@@ -1856,8 +1936,17 @@ def process_ed(db: BrainstemDB, previous_running: bool | None) -> bool:
     )
     db.batch_set_state(items=items, emit_events=True)
 
+    if running and current_system is not None and current_system != previous_system:
+        _ensure_current_system_cached(
+            db=db,
+            correlation_id=correlation_id,
+            system_identity=current_system,
+            previous_system=previous_system,
+            provider_query_service=provider_query_service or ED_PROVIDER_QUERY_SERVICE,
+        )
+
     if previous_running is None:
-        return running
+        return running, (current_system or previous_system if running else None)
     if previous_running != running:
         db.append_event(
             event_id=str(uuid.uuid4()),
@@ -1877,7 +1966,7 @@ def process_ed(db: BrainstemDB, previous_running: bool | None) -> bool:
             severity="info",
             tags=["ed"],
         )
-    return running
+    return running, (current_system or previous_system if running else None)
 
 
 def process_edparser(
@@ -2397,6 +2486,7 @@ def run_supervisor_loop() -> None:
     print(f"Supervisor started. DB: {DB_PATH}")
 
     previous_ed_running: bool | None = None
+    previous_ed_system: tuple[str | None, int | None] | None = None
     previous_edparser_running: bool | None = None
     previous_edparser_error: str | None = None
     previous_music_playing: bool | None = None
@@ -2425,7 +2515,11 @@ def run_supervisor_loop() -> None:
             next_hardware = now + HARDWARE_LOOP_SEC
 
         if now >= next_ed:
-            previous_ed_running = process_ed(db, previous_ed_running)
+            previous_ed_running, previous_ed_system = process_ed(
+                db,
+                previous_ed_running,
+                previous_ed_system,
+            )
             previous_edparser_running, previous_edparser_error = process_edparser(
                 db=db,
                 ed_running=previous_ed_running,
@@ -2472,7 +2566,7 @@ def run_supervisor_loop() -> None:
 def run_supervisor_once() -> None:
     db = BrainstemDB(DB_PATH, SCHEMA_PATH)
     db.ensure_schema()
-    ed_running = process_ed(db, previous_running=None)
+    ed_running, _ = process_ed(db, previous_running=None, previous_system=None)
     process_edparser(
         db,
         ed_running=ed_running,
