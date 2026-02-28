@@ -242,6 +242,7 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
         frontier_id_raw = auth.get("frontier_id")
     frontier_id = str(frontier_id_raw).strip() if frontier_id_raw not in (None, "") else ""
     app_key_present = bool(str(secure_auth.get("app_key") or auth.get("app_key") or "").strip())
+    secret_updated_at = str(secure_auth.get("_updated_at_utc") or "").strip() or None
     app_name = str(auth.get("app_name") or "").strip()
 
     return {
@@ -253,6 +254,7 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
             "path": str(Path(PROVIDER_SECRETS_PATH).resolve()),
             "exists": Path(PROVIDER_SECRETS_PATH).exists(),
             "secure_store_present": bool(secure_auth),
+            "last_updated_at": secret_updated_at,
         },
         "auth": {
             "app_name": app_name or None,
@@ -267,6 +269,7 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
                 if bool(str(secure_auth.get("app_key") or "").strip())
                 else ("config" if bool(str(auth.get("app_key") or "").strip()) else None)
             ),
+            "last_updated_at": secret_updated_at,
         },
     }
 
@@ -274,6 +277,7 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
 def query_openai_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
     secure_auth = get_provider_secret_entry("openai", PROVIDER_SECRETS_PATH)
     api_key_present = bool(str(secure_auth.get("api_key") or "").strip())
+    secret_updated_at = str(secure_auth.get("_updated_at_utc") or "").strip() or None
     return {
         "ok": True,
         "provider": "openai",
@@ -282,14 +286,21 @@ def query_openai_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
             "path": str(Path(PROVIDER_SECRETS_PATH).resolve()),
             "exists": Path(PROVIDER_SECRETS_PATH).exists(),
             "secure_store_present": bool(secure_auth),
+            "last_updated_at": secret_updated_at,
         },
         "credentials": {
             "api_key_present": api_key_present,
             "api_key_source": "secure_store" if api_key_present else None,
+            "last_updated_at": secret_updated_at,
         },
         "usage": {
             "wired": False,
-            "note": "Stored for future OpenAI fallback wiring; current advisory runtime does not consume it yet.",
+            "ready_for_cloud_fallback": api_key_present,
+            "note": (
+                "Cloud fallback key is present in the encrypted keystore."
+                if api_key_present
+                else "Stored for future OpenAI fallback wiring; current advisory runtime does not consume it yet."
+            ),
         },
     }
 

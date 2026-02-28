@@ -265,6 +265,7 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body.get("ok"))
         self.assertFalse(body["credentials"]["api_key_present"])
+        self.assertIsNone(body["credentials"]["last_updated_at"])
 
         status, body = self._request(
             "POST",
@@ -281,6 +282,8 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body["credentials"]["api_key_present"])
         self.assertEqual(body["credentials"]["api_key_source"], "secure_store")
+        self.assertTrue(body["credentials"]["last_updated_at"])
+        self.assertEqual(body["credentials"]["last_updated_at"], body["storage"]["last_updated_at"])
 
     def test_get_inara_credentials_returns_secure_summary(self) -> None:
         status, body = self._request("GET", "/providers/inara/credentials")

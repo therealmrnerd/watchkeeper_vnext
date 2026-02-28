@@ -51,9 +51,11 @@ class ProviderSecretsTests(unittest.TestCase):
         self.assertNotIn(b"secret-api-key", raw)
 
         store = load_provider_secret_store(self.secret_path, codec=self.codec)
+        self.assertTrue(store["updated_at_utc"])
         self.assertEqual(store["providers"]["inara"]["frontier_id"], "6206398")
         loaded = get_provider_secret_entry("inara", self.secret_path, codec=self.codec)
         self.assertEqual(loaded["app_key"], "secret-api-key")
+        self.assertTrue(loaded["_updated_at_utc"])
 
     def test_blank_api_key_preserves_existing_secret(self) -> None:
         save_inara_secret_entry(
@@ -85,6 +87,7 @@ class ProviderSecretsTests(unittest.TestCase):
 
         loaded = get_provider_secret_entry("openai", self.secret_path, codec=self.codec)
         self.assertEqual(loaded["api_key"], "openai-secret-key")
+        self.assertTrue(loaded["_updated_at_utc"])
 
 
 if __name__ == "__main__":

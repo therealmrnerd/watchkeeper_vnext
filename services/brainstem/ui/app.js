@@ -419,6 +419,7 @@
       const appName = String(inaraAuth.app_name || "").trim();
       metaParts.push(appName ? `App: ${appName}` : "App name still lives in providers.json");
       metaParts.push(inaraStorage.encrypted ? "Stored in encrypted keystore" : "Secure store unavailable");
+      metaParts.push(`Last updated: ${formatKeystoreUpdated(inaraStorage.last_updated_at || inaraCredentials.last_updated_at)}`);
       if (state.configInaraAction && state.configInaraAction.text) {
         metaParts.push(state.configInaraAction.text);
       }
@@ -455,6 +456,7 @@
     if (el.configOpenAiMeta) {
       const metaParts = [
         openAiStorage.encrypted ? "Stored in encrypted keystore" : "Secure store unavailable",
+        `Last updated: ${formatKeystoreUpdated(openAiStorage.last_updated_at || openAiCredentials.last_updated_at)}`,
         openAiUsage.note ? String(openAiUsage.note) : "Stored for future OpenAI fallback wiring.",
       ];
       if (state.configOpenAiAction && state.configOpenAiAction.text) {
@@ -730,6 +732,18 @@
   function formatProviderActivityLabel(prefix, value) {
     const ts = formatProviderTimestamp(value);
     return `${prefix}: ${ts}`;
+  }
+
+  function formatKeystoreUpdated(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return "never";
+    }
+    const parsed = Date.parse(text);
+    if (!Number.isFinite(parsed)) {
+      return text;
+    }
+    return new Date(parsed).toLocaleString();
   }
 
   function setInaraManualActionStatus(status, text) {

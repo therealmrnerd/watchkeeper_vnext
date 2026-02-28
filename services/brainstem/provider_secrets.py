@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,6 +18,10 @@ class SecretCodec(Protocol):
     def encrypt(self, plaintext: bytes) -> bytes: ...
 
     def decrypt(self, ciphertext: bytes) -> bytes: ...
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 class _DataBlob(ctypes.Structure):
@@ -115,7 +120,7 @@ class WindowsDpapiCodec:
 
 
 def _default_payload() -> dict[str, Any]:
-    return {"schema_version": "1.0", "providers": {}}
+    return {"schema_version": "1.0", "updated_at_utc": None, "providers": {}}
 
 
 def _normalize_store(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -124,8 +129,12 @@ def _normalize_store(payload: dict[str, Any] | None) -> dict[str, Any]:
     providers = payload.get("providers")
     if not isinstance(providers, dict):
         providers = {}
+    updated_at_utc = payload.get("updated_at_utc")
+    if updated_at_utc is not None and not isinstance(updated_at_utc, str):
+        updated_at_utc = None
     return {
         "schema_version": "1.0",
+        "updated_at_utc": updated_at_utc,
         "providers": providers,
     }
 
@@ -160,6 +169,7 @@ def save_provider_secret_store(
     secret_path.parent.mkdir(parents=True, exist_ok=True)
     active_codec = codec or WindowsDpapiCodec()
     normalized = _normalize_store(payload)
+    normalized["updated_at_utc"] = _utc_now_iso()
     plaintext = json.dumps(normalized, ensure_ascii=False, indent=2).encode("utf-8")
     encrypted = active_codec.encrypt(plaintext)
     temp_path = secret_path.with_suffix(secret_path.suffix + ".tmp")
@@ -210,6 +220,7 @@ def save_inara_secret_entry(
         entry["app_key"] = str(existing.get("app_key") or "").strip()
 
     if entry:
+        entry["_updated_at_utc"] = _utc_now_iso()
         providers["inara"] = entry
     else:
         providers.pop("inara", None)
@@ -236,6 +247,7 @@ def save_openai_secret_entry(
         entry["api_key"] = str(existing.get("api_key") or "").strip()
 
     if entry:
+        entry["_updated_at_utc"] = _utc_now_iso()
         providers["openai"] = entry
     else:
         providers.pop("openai", None)
