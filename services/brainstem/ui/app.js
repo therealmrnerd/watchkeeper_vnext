@@ -7,6 +7,7 @@
     currentLogFile: null,
     eventFilterCorrelationId: null,
     latestSitrep: null,
+    latestEdProviderCurrent: null,
     demoEnabled: false,
     demoScenario: "none",
     demoPreviewItems: null,
@@ -371,6 +372,7 @@
 
       const auth = item && typeof item.auth_summary === "object" ? item.auth_summary : null;
       const sync = item && typeof item.sync === "object" ? item.sync : null;
+      const activity = item && typeof item.activity_summary === "object" ? item.activity_summary : null;
       const features = item && typeof item.features === "object" ? item.features : {};
 
       const detail = document.createElement("div");
@@ -385,6 +387,10 @@
         const url = String(item.base_url || "").replace(/^https?:\/\//, "");
         detail.textContent = url || "no endpoint";
       }
+
+      const activityNode = document.createElement("div");
+      activityNode.className = "ed-provider-card-activity";
+      activityNode.textContent = `${formatProviderActivityLabel("Last ok", activity && activity.last_success_at)} | ${formatProviderActivityLabel("Last issue", activity && activity.last_failure_at)}`;
 
       const tags = document.createElement("div");
       tags.className = "ed-provider-card-tags";
@@ -402,8 +408,76 @@
       card.appendChild(top);
       card.appendChild(meta);
       card.appendChild(detail);
+      card.appendChild(activityNode);
       card.appendChild(tags);
+      if (providerId === "inara") {
+        const actions = document.createElement("div");
+        actions.className = "ed-provider-card-actions";
+        const syncBtn = document.createElement("button");
+        syncBtn.type = "button";
+        syncBtn.className = "secondary header-chip ed-provider-sync-btn";
+        syncBtn.textContent = "Sync Current Location";
+        const canSync = Boolean(item.enabled && auth && auth.configured && state.latestEdProviderCurrent && state.latestEdProviderCurrent.ok);
+        syncBtn.disabled = !canSync;
+        syncBtn.addEventListener("click", async (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          await syncCurrentLocationToInara(syncBtn);
+        });
+        actions.appendChild(syncBtn);
+        card.appendChild(actions);
+      }
       el.edProviderCards.appendChild(card);
+    }
+  }
+
+  async function syncCurrentLocationToInara(buttonNode) {
+    const current = state.latestEdProviderCurrent;
+    if (!current || !current.ok || !current.data) {
+      setEdMeta("Inara sync unavailable: current system is unknown.");
+      return;
+    }
+    const systemName = String(current.data.name || current.current_system_state?.system_name || "").trim();
+    if (!systemName) {
+      setEdMeta("Inara sync unavailable: system name missing.");
+      return;
+    }
+    const payload = {
+      tool: "ed.provider_query",
+      provider: "inara",
+      operation: "commander_location_push",
+      params: {
+        system_name: systemName,
+        system_address: current.data.system_address || current.current_system_state?.system_address || null,
+      },
+      requirements: {
+        max_age_s: 0,
+        allow_stale_if_error: false,
+      },
+      trace: {
+        incident_id: requestId(),
+        reason: "ui_manual_inara_sync",
+      },
+    };
+    if (buttonNode) {
+      buttonNode.disabled = true;
+    }
+    setEdMeta(`Syncing ${systemName} to Inara...`);
+    try {
+      const result = await apiPost("/providers/query", payload);
+      if (result.ok) {
+        const skipped = Boolean(result.data && result.data.sync_skipped);
+        setEdMeta(skipped ? `Inara sync skipped for ${systemName}.` : `Inara sync completed for ${systemName}.`);
+      } else {
+        setEdMeta(`Inara sync blocked: ${String(result.error || result.deny_reason || "request_failed")}`);
+      }
+    } catch (err) {
+      setEdMeta(`Inara sync failed: ${String(err.message || err)}`);
+    } finally {
+      await loadProviderHealth();
+      if (buttonNode) {
+        buttonNode.disabled = false;
+      }
     }
   }
 
@@ -436,6 +510,11 @@
       return text;
     }
     return new Date(parsed).toLocaleString();
+  }
+
+  function formatProviderActivityLabel(prefix, value) {
+    const ts = formatProviderTimestamp(value);
+    return `${prefix}: ${ts}`;
   }
 
   function setEdMeta(text) {
@@ -616,8 +695,10 @@
     setEdMeta("Refreshing ED provider data...");
     try {
       const current = await apiGet("/providers/current-system");
+      state.latestEdProviderCurrent = current;
       renderEdSystemSummary(current);
       if (!current.ok || !current.data) {
+        state.latestEdProviderCurrent = null;
         setEdMeta(current.error ? `Current system unavailable: ${current.error}` : "Current system unavailable.");
         renderEdBadges(el.edBodiesBadges, null);
         renderEdBadges(el.edStationsBadges, null);
@@ -663,6 +744,7 @@
       const systemName = String(current.data.name || current.current_system_state?.system_name || "-").trim() || "-";
       setQuickEdSummary(`ED external: ${systemName} | bodies ${bodyCount} | stations ${stationCount}`);
     } catch (err) {
+      state.latestEdProviderCurrent = null;
       renderEdSystemSummary(null);
       renderEdBadges(el.edBodiesBadges, null);
       renderEdBadges(el.edStationsBadges, null);

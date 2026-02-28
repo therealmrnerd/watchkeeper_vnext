@@ -72,6 +72,69 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return con
 
 
+def _provider_activity_summary(db_path: Path, provider_id: str, health: dict[str, Any] | None) -> dict[str, Any]:
+    summary = {
+        "last_success_at": None,
+        "last_failure_at": None,
+    }
+    with _connect(db_path) as con:
+        write_success_row = con.execute(
+            """
+            SELECT timestamp_utc
+            FROM event_log
+            WHERE source='provider_query'
+              AND event_type='PROVIDER_WRITE_EXECUTED'
+              AND json_extract(payload_json, '$.provider')=?
+            ORDER BY timestamp_utc DESC
+            LIMIT 1
+            """,
+            (provider_id,),
+        ).fetchone()
+        write_failure_row = con.execute(
+            """
+            SELECT timestamp_utc
+            FROM event_log
+            WHERE source='provider_query'
+              AND event_type IN ('PROVIDER_WRITE_FAILED', 'PROVIDER_WRITE_DENIED')
+              AND json_extract(payload_json, '$.provider')=?
+            ORDER BY timestamp_utc DESC
+            LIMIT 1
+            """,
+            (provider_id,),
+        ).fetchone()
+        cache_success_row = con.execute(
+            """
+            SELECT stored_at
+            FROM provider_cache
+            WHERE provider=?
+            ORDER BY stored_at DESC
+            LIMIT 1
+            """,
+            (provider_id,),
+        ).fetchone()
+
+    if cache_success_row:
+        summary["last_success_at"] = str(cache_success_row["stored_at"])
+    if write_success_row:
+        write_success_at = str(write_success_row["timestamp_utc"])
+        if summary["last_success_at"] is None or write_success_at > str(summary["last_success_at"]):
+            summary["last_success_at"] = write_success_at
+    if write_failure_row:
+        summary["last_failure_at"] = str(write_failure_row["timestamp_utc"])
+
+    if isinstance(health, dict):
+        checked_at = str(health.get("checked_at") or "").strip() or None
+        status = str(health.get("status") or "").strip().lower()
+        if checked_at:
+            if status in {"ok", "degraded"}:
+                if summary["last_success_at"] is None or checked_at > str(summary["last_success_at"]):
+                    summary["last_success_at"] = checked_at
+            elif status in {"down", "throttled", "misconfigured"}:
+                if summary["last_failure_at"] is None or checked_at > str(summary["last_failure_at"]):
+                    summary["last_failure_at"] = checked_at
+    return summary
+
+
 def _as_provider_health(raw: dict[str, Any] | None) -> ProviderHealth | None:
     if not raw or not isinstance(raw, dict):
         return None
@@ -141,6 +204,7 @@ def query_provider_health(db_path: Path, config_path: str | Path | None = None) 
             "auth_summary": auth_summary,
             "sync": sync_cfg,
             "health": stored.get(provider_id),
+            "activity_summary": _provider_activity_summary(db_path, provider_id, stored.get(provider_id)),
         }
     return {"ok": True, "providers": out}
 

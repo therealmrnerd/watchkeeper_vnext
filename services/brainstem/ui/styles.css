@@ -835,11 +835,28 @@ main {
   margin-top: 4px;
 }
 
+.ed-provider-card-activity {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9fb4c9;
+  line-height: 1.35;
+}
+
 .ed-provider-card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.ed-provider-card-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ed-provider-sync-btn {
+  min-width: 160px;
 }
 
 .ed-provider-chip {

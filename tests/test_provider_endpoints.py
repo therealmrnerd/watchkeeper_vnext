@@ -160,6 +160,32 @@ class ProviderEndpointsTests(unittest.TestCase):
                 message="healthy",
             ),
         )
+        cls.runtime.DB_SERVICE.append_event(
+            event_id="evt-provider-write-ok",
+            timestamp_utc="2026-02-28T12:10:00.000000Z",
+            event_type="PROVIDER_WRITE_EXECUTED",
+            source="provider_query",
+            payload={
+                "provider": "inara",
+                "operation": "commander_location_push",
+                "timestamp_utc": "2026-02-28T12:10:00.000000Z",
+                "system_name": "Sol",
+            },
+            severity="info",
+        )
+        cls.runtime.DB_SERVICE.append_event(
+            event_id="evt-provider-write-fail",
+            timestamp_utc="2026-02-28T12:20:00.000000Z",
+            event_type="PROVIDER_WRITE_FAILED",
+            source="provider_query",
+            payload={
+                "provider": "inara",
+                "operation": "commander_location_push",
+                "system_name": "Achenar",
+                "message": "provider unavailable",
+            },
+            severity="warn",
+        )
 
         cls.fake_provider_service = _FakeProviderService()
         cls.runtime.ED_PROVIDER_QUERY_SERVICE = cls.fake_provider_service
@@ -210,6 +236,15 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(body["providers"]["spansh"]["health"]["latency_ms"], 42)
         self.assertIn("inara", body.get("providers", {}))
         self.assertIn("auth_summary", body["providers"]["inara"])
+        self.assertIn("activity_summary", body["providers"]["inara"])
+        self.assertEqual(
+            body["providers"]["inara"]["activity_summary"]["last_success_at"],
+            "2026-02-28T12:10:00.000000Z",
+        )
+        self.assertEqual(
+            body["providers"]["inara"]["activity_summary"]["last_failure_at"],
+            "2026-02-28T12:20:00.000000Z",
+        )
 
     def test_post_providers_query_uses_provider_service(self) -> None:
         before = len(self.fake_provider_service.requests)
