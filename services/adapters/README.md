@@ -30,6 +30,10 @@ Runtime collectors and bridges that connect external signals into Brainstem.
 `edparser.*` tool control. It parses `Status.json` + latest Journal tail and writes
 canonical telemetry to `data/ed_telemetry.json`.
 
+It also supports schema-aware journal harvesting for allowlisted events and writes
+published journal keys (for example `j.FSDTarget.Name`) to
+`data/ed_journal_harvest.json`.
+
 ### Run
 
 - `python services/adapters/edparser_vnext.py`
@@ -46,6 +50,9 @@ canonical telemetry to `data/ed_telemetry.json`.
 - `WKV_ED_STATUS_PATH` default `%USERPROFILE%/Saved Games/Frontier Developments/Elite Dangerous/Status.json`
 - `WKV_ED_JOURNAL_DIR` default `%USERPROFILE%/Saved Games/Frontier Developments/Elite Dangerous`
 - `WKV_ED_TELEMETRY_OUT` default `data/ed_telemetry.json`
+- `WKV_ED_JOURNAL_HARVEST_OUT` default `data/ed_journal_harvest.json`
+- `WKV_ED_JOURNAL_SCHEMA_CATALOG` default `data/journal_schema_catalog.json`
+- `WKV_ED_JOURNAL_HARVEST_RULES` default `data/journal_harvest_rules.json`
 - `WKV_ED_PROCESS_NAMES` default `EliteDangerous64.exe,EliteDangerous.exe`
 - `WKV_EDPARSER_ACTIVE_SEC` default `0.6`
 - `WKV_EDPARSER_IDLE_SEC` default `2.5`

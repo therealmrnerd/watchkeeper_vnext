@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TwitchUserResponse",
+  "type": "object",
+  "required": ["ok", "user_id", "last_messages", "stats", "top_redeems"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "user_id": { "type": "string" },
+    "user": {
+      "type": ["object", "null"],
+      "properties": {
+        "user_id": { "type": "string" },
+        "login_name": { "type": ["string", "null"] },
+        "display_name": { "type": ["string", "null"] },
+        "flags": { "type": "object" },
+        "first_seen_utc": { "type": "string" },
+        "last_seen_utc": { "type": "string" },
+        "message_count": { "type": "integer" }
+      }
+    },
+    "last_messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "message_ts_utc": { "type": "string" },
+          "msg_id": { "type": ["string", "null"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "stats": { "type": "object" },
+    "top_redeems": { "type": "array" }
+  }
+}

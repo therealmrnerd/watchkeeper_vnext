@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Elite Dangerous">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9fd0ff"/>
+      <stop offset="1" stop-color="#4a7fb8"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="#122338" stroke="#33587c" stroke-width="3"/>
+  <path d="M10 34 L32 10 L54 34 L40 34 L32 54 L24 34 Z" fill="url(#g1)" stroke="#b8d9ff" stroke-width="2"/>
+  <circle cx="32" cy="30" r="4" fill="#dff0ff"/>
+</svg>

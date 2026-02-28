@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/assist_request.json",
+  "title": "AssistRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "timestamp_utc",
+    "mode",
+    "user_text"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "game",
+        "work",
+        "standby",
+        "tutor"
+      ]
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "gameplay",
+        "lore",
+        "astrophysics",
+        "general_gaming",
+        "coding",
+        "networking",
+        "system",
+        "music",
+        "speech",
+        "general"
+      ]
+    },
+    "urgency": {
+      "type": "string",
+      "enum": [
+        "low",
+        "normal",
+        "high"
+      ]
+    },
+    "watch_condition": {
+      "type": "string",
+      "enum": [
+        "STANDBY",
+        "GAME",
+        "WORK",
+        "TUTOR",
+        "RESTRICTED",
+        "DEGRADED"
+      ]
+    },
+    "incident_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "user_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "stt_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "foreground_process": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 260
+    },
+    "max_actions": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "context": {
+      "type": "object"
+    }
+  }
+}

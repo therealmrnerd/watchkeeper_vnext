@@ -121,6 +121,69 @@ Well-known SAMMI runtime state keys:
 
 Reference: `docs/twitch_ingest.md`
 
+## External ED Providers (Scaffolded)
+
+The contract layer for external Elite Dangerous providers is scaffolded, but adapters are not yet live.
+
+- config:
+  - `config/providers.json`
+- contracts:
+  - `contracts/v1/provider_config.schema.json`
+  - `contracts/v1/provider_health.schema.json`
+  - `contracts/v1/ed_provider_query.schema.json`
+  - `contracts/v1/ed_provider_response.schema.json`
+- Python scaffolding:
+  - `core/ed_provider_types.py`
+  - `services/brainstem/provider_config.py`
+
+Current intent:
+
+- lock provider IDs, health shapes, query/response contracts, and config validation first
+- keep UI and policy logic provider-agnostic
+- land adapters later against these stable seams
+
+Primary provider order for topology:
+
+- `spansh` primary
+- `edsm` fallback
+
+Live endpoints in this slice:
+
+- `GET /providers/health`
+  - returns normalized provider health rows plus static provider metadata
+  - safe for UI polling; reads local SQLite state only
+- `POST /providers/query`
+  - current implementation is intentionally narrow:
+    - `provider=spansh|edsm`
+    - `operation=system_lookup`
+    - `spansh`: params `system_address` or exact `system_name`
+    - `edsm`: params exact `system_name`
+  - persists normalized system rows into `ed_systems`
+  - persists query cache into `provider_cache`
+- `GET /providers/current-system`
+  - reads current ED system from Brainstem state
+  - current state key used in this slice: `ed.telemetry.system_name`
+  - routes by configured provider priority:
+    - `spansh` first
+    - `edsm` fallback
+  - returns the same normalized provider result shape plus `current_system_state`
+
+Operational notes:
+
+- provider health is scheduler-driven and persisted in `provider_health`
+- UI provider buttons read `/providers/health`, not live internet endpoints
+- query path uses verified Spansh endpoints:
+  - `GET /api/search/systems?q=<name>`
+  - `GET /api/system/<id64>`
+- query path uses verified EDSM endpoint:
+  - `GET /api-v1/system?systemName=<name>&showCoordinates=1&showInformation=1&showPermit=1&showId=1`
+- `system_address` is preferred whenever available; `system_name` is a lookup convenience path only
+
+Write-ish integrations remain disabled by default:
+
+- `inara`
+- commander-linked `edsm` features
+
 ## Run
 
 1. Initialize DB (once): `scripts/create_db.ps1`

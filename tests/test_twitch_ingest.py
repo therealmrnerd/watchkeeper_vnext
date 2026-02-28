@@ -299,6 +299,16 @@ class TwitchIngestTests(unittest.TestCase):
         self.assertEqual(marker, "193735314")
         self.assertEqual(seq, 0)
 
+        event, marker, seq = TwitchIngestService.parse_doorbell("new_follow|193900001")
+        self.assertEqual(event, TwitchEventType.FOLLOW)
+        self.assertEqual(marker, "193900001")
+        self.assertEqual(seq, 0)
+
+        event, marker, seq = TwitchIngestService.parse_doorbell("follower|193900002")
+        self.assertEqual(event, TwitchEventType.FOLLOW)
+        self.assertEqual(marker, "193900002")
+        self.assertEqual(seq, 0)
+
     def test_commit_marker_variable_can_override_packet_timestamp(self) -> None:
         self.sammi.values = {
             "wk.hype.ts": "2026-02-20T19:00:00.000000Z",

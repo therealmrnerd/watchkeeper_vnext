@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in os.sys.path:
+    os.sys.path.insert(0, str(THIS_DIR))
+from journal_harvester import JournalHarvester
+
 
 POLL_ACTIVE_SEC = float(os.getenv("WKV_EDPARSER_ACTIVE_SEC", "0.6"))
 POLL_IDLE_SEC = float(os.getenv("WKV_EDPARSER_IDLE_SEC", "2.5"))
@@ -35,6 +40,24 @@ JOURNAL_DIR = Path(
 )
 TELEMETRY_OUT = Path(
     os.getenv("WKV_ED_TELEMETRY_OUT", str(Path(__file__).resolve().parents[2] / "data" / "ed_telemetry.json"))
+)
+JOURNAL_HARVEST_OUT = Path(
+    os.getenv(
+        "WKV_ED_JOURNAL_HARVEST_OUT",
+        str(Path(__file__).resolve().parents[2] / "data" / "ed_journal_harvest.json"),
+    )
+)
+JOURNAL_SCHEMA_CATALOG = Path(
+    os.getenv(
+        "WKV_ED_JOURNAL_SCHEMA_CATALOG",
+        str(Path(__file__).resolve().parents[2] / "data" / "journal_schema_catalog.json"),
+    )
+)
+JOURNAL_HARVEST_RULES = Path(
+    os.getenv(
+        "WKV_ED_JOURNAL_HARVEST_RULES",
+        str(Path(__file__).resolve().parents[2] / "data" / "journal_harvest_rules.json"),
+    )
 )
 PROCESS_NAMES = [
     p.strip().lower()
@@ -141,15 +164,24 @@ class ParserState:
             "ed_running": False,
             "process_name": None,
             "system_name": None,
+            "system_address": None,
             "hull_percent": None,
             "dock_state": None,
             "supercruise": None,
             "landed": None,
+            "shield_up": None,
+            "lights_on": None,
             "status_source_mtime": None,
             "journal_source": None,
             "last_event": None,
         }
         self.last_written_json = ""
+        self.harvester = JournalHarvester(
+            catalog_path=JOURNAL_SCHEMA_CATALOG,
+            rules_path=JOURNAL_HARVEST_RULES,
+        )
+        self.journal_publish: dict[str, Any] = {}
+        self.last_written_harvest_json = ""
 
     def stop(self, *_args: Any) -> None:
         self.running = False
@@ -167,13 +199,17 @@ class ParserState:
         self.telemetry["status_source_mtime"] = mtime
         if isinstance(status.get("System"), str) and status["System"].strip():
             self.telemetry["system_name"] = status["System"].strip()
+        if isinstance(status.get("SystemAddress"), int):
+            self.telemetry["system_address"] = status.get("SystemAddress")
         if "Health" in status:
             self._set_hull(status.get("Health"))
         flags = status.get("Flags")
         if isinstance(flags, int):
             self.telemetry["dock_state"] = bool(flags & (1 << 0))
             self.telemetry["landed"] = bool(flags & (1 << 1))
+            self.telemetry["shield_up"] = bool(flags & (1 << 3))
             self.telemetry["supercruise"] = bool(flags & (1 << 4))
+            self.telemetry["lights_on"] = bool(flags & (1 << 8))
         self.telemetry["last_event"] = "status_update"
 
     def apply_journal_event(self, ev: dict[str, Any]) -> None:
@@ -184,11 +220,22 @@ class ParserState:
             star = ev.get("StarSystem") or ev.get("System")
             if isinstance(star, str) and star.strip():
                 self.telemetry["system_name"] = star.strip()
+            system_address = ev.get("SystemAddress")
+            if isinstance(system_address, int):
+                self.telemetry["system_address"] = system_address
         if "HullHealth" in ev:
             self._set_hull(ev.get("HullHealth"))
         if "Health" in ev:
             self._set_hull(ev.get("Health"))
-        self.telemetry["last_event"] = event_name
+        harvest = self.harvester.harvest_journal_event(ev)
+        published = harvest.get("published")
+        if isinstance(published, dict) and published:
+            self.journal_publish.update(published)
+        self.telemetry["last_event"] = str(
+            self.journal_publish.get("journal_last_event") or event_name
+        )
+        if harvest.get("unknown_event_first_seen"):
+            log("warn", f"Unknown journal event seen: {event_name}")
 
     def read_status_if_changed(self) -> None:
         try:
@@ -242,9 +289,25 @@ class ParserState:
         self.telemetry["timestamp_utc"] = utc_now_iso()
         raw = json.dumps(self.telemetry, sort_keys=True, ensure_ascii=False)
         if raw == self.last_written_json:
+            self.maybe_write_journal_harvest()
             return
         _atomic_write_json(TELEMETRY_OUT, self.telemetry)
         self.last_written_json = raw
+        self.maybe_write_journal_harvest()
+
+    def maybe_write_journal_harvest(self) -> None:
+        if not self.journal_publish:
+            return
+        payload = {
+            "timestamp_utc": utc_now_iso(),
+            "journal_source": self.telemetry.get("journal_source"),
+            "published": self.journal_publish,
+        }
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        if raw == self.last_written_harvest_json:
+            return
+        _atomic_write_json(JOURNAL_HARVEST_OUT, payload)
+        self.last_written_harvest_json = raw
 
 
 def run_loop() -> None:
@@ -252,7 +315,13 @@ def run_loop() -> None:
     signal.signal(signal.SIGINT, state.stop)
     signal.signal(signal.SIGTERM, state.stop)
 
-    log("info", f"ED parser vNext starting. telemetry_out={TELEMETRY_OUT}")
+    log(
+        "info",
+        (
+            f"ED parser vNext starting. telemetry_out={TELEMETRY_OUT} "
+            f"journal_harvest_out={JOURNAL_HARVEST_OUT}"
+        ),
+    )
     while state.running:
         is_running, process_name = _ed_running()
         state.update_running(is_running, process_name)

@@ -30,6 +30,9 @@
       "type": ["string", "null"],
       "maxLength": 120
     },
+    "system_address": {
+      "type": ["integer", "null"]
+    },
     "hull_percent": {
       "type": ["number", "null"],
       "minimum": 0,
@@ -42,6 +45,12 @@
       "type": ["boolean", "null"]
     },
     "landed": {
+      "type": ["boolean", "null"]
+    },
+    "shield_up": {
+      "type": ["boolean", "null"]
+    },
+    "lights_on": {
       "type": ["boolean", "null"]
     },
     "status_source_mtime": {

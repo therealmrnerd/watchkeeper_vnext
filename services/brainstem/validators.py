@@ -1,8 +1,10 @@
 import re
 from typing import Any
 
+from core.ed_provider_types import ProviderId, ProviderOperationId
 from runtime import (
     ACTION_ALLOWED_KEYS,
+    ASSIST_REQUEST_ALLOWED_KEYS,
     CONFIRM_ALLOWED_KEYS,
     DOMAIN_SET,
     FEEDBACK_ALLOWED_KEYS,
@@ -13,6 +15,7 @@ from runtime import (
     STATE_INGEST_ALLOWED_KEYS,
     STATE_ITEM_ALLOWED_KEYS,
     URGENCY_SET,
+    WATCH_CONDITION_SET,
     parse_iso8601_utc,
 )
 
@@ -258,14 +261,27 @@ def validate_confirm(payload: dict[str, Any]) -> None:
         raise ValueError("incident_id is required and must be a non-empty string")
 
     tool_name = payload.get("tool_name")
-    if not isinstance(tool_name, str) or not tool_name.strip():
-        raise ValueError("tool_name is required and must be a non-empty string")
+    if tool_name is not None and (not isinstance(tool_name, str) or not tool_name.strip()):
+        raise ValueError("tool_name must be a non-empty string when supplied")
 
     user_confirm_token = payload.get("user_confirm_token")
     if user_confirm_token is not None and (
         not isinstance(user_confirm_token, str) or not user_confirm_token.strip()
     ):
         raise ValueError("user_confirm_token must be a non-empty string when supplied")
+
+    confirm_token = payload.get("confirm_token")
+    if confirm_token is not None and (
+        not isinstance(confirm_token, str) or not confirm_token.strip()
+    ):
+        raise ValueError("confirm_token must be a non-empty string when supplied")
+
+    has_tool = isinstance(tool_name, str) and bool(tool_name.strip())
+    has_user_token = isinstance(user_confirm_token, str) and bool(user_confirm_token.strip())
+    has_confirm_token = isinstance(confirm_token, str) and bool(confirm_token.strip())
+    has_token = has_user_token or has_confirm_token
+    if not has_tool and not has_token:
+        raise ValueError("confirm requires tool_name or confirm_token/user_confirm_token")
 
     confirmed_at_utc = payload.get("confirmed_at_utc")
     if confirmed_at_utc is not None:
@@ -284,3 +300,124 @@ def validate_confirm(payload: dict[str, Any]) -> None:
     mode = payload.get("mode")
     if mode is not None and mode not in MODE_SET:
         raise ValueError(f"mode must be one of: {', '.join(sorted(MODE_SET))}")
+
+
+def validate_intent_proposal(proposal: dict[str, Any]) -> None:
+    validate_intent(proposal)
+
+
+def validate_assist_request(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    _check_extra_keys(payload, ASSIST_REQUEST_ALLOWED_KEYS, "assist_request")
+
+    required = ["schema_version", "request_id", "timestamp_utc", "mode", "user_text"]
+    for key in required:
+        if key not in payload:
+            raise ValueError(f"missing required field: {key}")
+
+    if payload["schema_version"] != "1.0":
+        raise ValueError("schema_version must be '1.0'")
+
+    if not isinstance(payload["request_id"], str) or not payload["request_id"].strip():
+        raise ValueError("request_id must be a non-empty string")
+
+    parse_iso8601_utc(payload["timestamp_utc"])
+
+    mode = payload["mode"]
+    if mode not in MODE_SET:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(MODE_SET))}")
+
+    domain = payload.get("domain")
+    if domain is not None and domain not in DOMAIN_SET:
+        raise ValueError(f"domain must be one of: {', '.join(sorted(DOMAIN_SET))}")
+
+    urgency = payload.get("urgency")
+    if urgency is not None and urgency not in URGENCY_SET:
+        raise ValueError(f"urgency must be one of: {', '.join(sorted(URGENCY_SET))}")
+
+    watch_condition = payload.get("watch_condition")
+    if watch_condition is not None:
+        if not isinstance(watch_condition, str) or not watch_condition.strip():
+            raise ValueError("watch_condition must be non-empty string when supplied")
+        if watch_condition.strip().upper() not in WATCH_CONDITION_SET:
+            raise ValueError(
+                "watch_condition must be one of: " + ", ".join(sorted(WATCH_CONDITION_SET))
+            )
+
+    incident_id = payload.get("incident_id")
+    if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
+        raise ValueError("incident_id must be a non-empty string when supplied")
+
+    if not isinstance(payload["user_text"], str) or not payload["user_text"].strip():
+        raise ValueError("user_text must be a non-empty string")
+
+    stt_confidence = payload.get("stt_confidence")
+    if stt_confidence is not None and (
+        not isinstance(stt_confidence, (int, float)) or stt_confidence < 0 or stt_confidence > 1
+    ):
+        raise ValueError("stt_confidence must be number 0..1 when supplied")
+
+    foreground_process = payload.get("foreground_process")
+    if foreground_process is not None and (
+        not isinstance(foreground_process, str) or not foreground_process.strip()
+    ):
+        raise ValueError("foreground_process must be non-empty string when supplied")
+
+    max_actions = payload.get("max_actions")
+    if max_actions is not None:
+        if not isinstance(max_actions, int) or max_actions < 0 or max_actions > MAX_ACTIONS:
+            raise ValueError(f"max_actions must be integer 0..{MAX_ACTIONS}")
+
+    context = payload.get("context")
+    if context is not None and not isinstance(context, dict):
+        raise ValueError("context must be an object when supplied")
+
+
+def validate_provider_query(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+
+    required = {"tool", "provider", "operation", "params", "requirements", "trace"}
+    extra = sorted(set(payload.keys()) - required)
+    if extra:
+        raise ValueError(f"provider_query contains unsupported fields: {', '.join(extra)}")
+    missing = sorted(required - set(payload.keys()))
+    if missing:
+        raise ValueError(f"provider_query missing required fields: {', '.join(missing)}")
+
+    if payload.get("tool") != "ed.provider_query":
+        raise ValueError("provider_query.tool must be 'ed.provider_query'")
+
+    try:
+        ProviderId(str(payload.get("provider") or "").strip().lower())
+    except Exception as exc:
+        raise ValueError("provider_query.provider is unsupported") from exc
+
+    try:
+        ProviderOperationId(str(payload.get("operation") or "").strip().lower())
+    except Exception as exc:
+        raise ValueError("provider_query.operation is unsupported") from exc
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        raise ValueError("provider_query.params must be an object")
+
+    requirements = payload.get("requirements")
+    if not isinstance(requirements, dict):
+        raise ValueError("provider_query.requirements must be an object")
+    if "max_age_s" not in requirements or "allow_stale_if_error" not in requirements:
+        raise ValueError("provider_query.requirements must include max_age_s and allow_stale_if_error")
+    if not isinstance(requirements.get("max_age_s"), int) or int(requirements.get("max_age_s")) < 0:
+        raise ValueError("provider_query.requirements.max_age_s must be an integer >= 0")
+    if not isinstance(requirements.get("allow_stale_if_error"), bool):
+        raise ValueError("provider_query.requirements.allow_stale_if_error must be boolean")
+
+    trace = payload.get("trace")
+    if not isinstance(trace, dict):
+        raise ValueError("provider_query.trace must be an object")
+    if not isinstance(trace.get("reason"), str) or not str(trace.get("reason")).strip():
+        raise ValueError("provider_query.trace.reason must be a non-empty string")
+    incident_id = trace.get("incident_id")
+    if incident_id is not None and (not isinstance(incident_id, str) or not incident_id.strip()):
+        raise ValueError("provider_query.trace.incident_id must be a non-empty string when supplied")

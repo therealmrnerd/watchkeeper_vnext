@@ -19,6 +19,8 @@ if str(THIS_DIR) not in sys.path:
 from db_service import BrainstemDB
 from edparser_tool import EDParserTool
 
+NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DB_PATH = Path(os.getenv("WKV_DB_PATH", ROOT_DIR / "data" / "watchkeeper_vnext.db"))
@@ -123,6 +125,7 @@ AUX_APPS_AUTORUN = os.getenv("WKV_SUP_AUX_APPS_AUTORUN", "0").strip().lower() in
     "true",
     "yes",
 }
+AUX_APPS_LAUNCH_BACKOFF_SEC = max(1.0, float(os.getenv("WKV_SUP_AUX_LAUNCH_BACKOFF_SEC", "10")))
 
 SAMMI_ENABLED = os.getenv("WKV_SUP_SAMMI_ENABLED", "1").strip().lower() in {
     "1",
@@ -240,6 +243,8 @@ _sammi_last_error_at = 0.0
 _sammi_last_sent: dict[str, Any] = {}
 _sammi_heartbeat = 0
 _ed_ahk_last_launch_attempt = 0.0
+_sammi_last_launch_attempt = 0.0
+_jinx_last_launch_attempt = 0.0
 _journal_cache: dict[str, Any] = {"path": None, "size": 0, "mtime": 0.0, "values": {}}
 _jinx_env_map_cache: dict[str, Any] = {"mtime": None, "values": {}}
 _jinx_sync_state = "off"
@@ -396,6 +401,19 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def _hide_console_window() -> None:
+    if os.name != "nt":
+        return
+    if os.getenv("WKV_HIDE_CONSOLE", "1").strip().lower() not in {"1", "true", "yes"}:
+        return
+    try:
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception:
+        return
+
+
 def _read_json_file(path: Path) -> dict[str, Any]:
     try:
         if not path.exists():
@@ -500,6 +518,7 @@ def _list_process_names() -> set[str]:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         names: set[str] = set()
         for raw_line in result.stdout.splitlines():
@@ -524,6 +543,7 @@ def _pid_running(pid: int | None) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         out = result.stdout or ""
         if "No tasks are running" in out:
@@ -546,7 +566,7 @@ def _terminate_pid(pid: int, force: bool = True) -> bool:
     if force:
         cmd.append("/F")
     try:
-        subprocess.run(cmd, capture_output=True, text=True, check=False)
+        subprocess.run(cmd, capture_output=True, text=True, check=False, creationflags=NO_WINDOW_FLAGS)
     except Exception:
         return False
     return not _pid_running(pid)
@@ -629,6 +649,7 @@ def _launch_executable_via_helper(exe_path: Path, args: list[str] | None = None)
             text=True,
             check=False,
             timeout=10,
+            creationflags=NO_WINDOW_FLAGS,
         )
         if result.returncode == 0:
             return True, None, None
@@ -678,6 +699,7 @@ def _find_ahk_script_pids(script_path: Path) -> list[int]:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         out = result.stdout or ""
         pids: list[int] = []
@@ -704,6 +726,7 @@ def _process_command_line(pid: int | None) -> str:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         return (result.stdout or "").strip()
     except Exception:
@@ -1744,6 +1767,7 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.running": running,
         "ed.process_name": ed_running_name if running else None,
         "ed.telemetry.system_name": telemetry.get("system_name"),
+        "ed.telemetry.system_address": telemetry.get("system_address"),
         "ed.telemetry.hull_percent": telemetry.get("hull_percent"),
         "ed.telemetry.landed": telemetry.get("landed"),
         "ed.telemetry.shield_up": telemetry.get("shield_up"),
@@ -1968,6 +1992,8 @@ def process_aux_apps(
     managed_ed_ahk_pid: int | None,
 ) -> tuple[dict[str, bool], int | None]:
     global _ed_ahk_last_launch_attempt
+    global _sammi_last_launch_attempt
+    global _jinx_last_launch_attempt
 
     correlation_id = str(uuid.uuid4())
     now = utc_now_iso()
@@ -1996,19 +2022,27 @@ def process_aux_apps(
     ed_ahk_error: str | None = None
 
     if AUX_APPS_AUTORUN and ed_running:
-        if SAMMI_ENABLED and sammi_path and not sammi_running:
+        can_restart_sammi = (time.monotonic() - _sammi_last_launch_attempt) >= AUX_APPS_LAUNCH_BACKOFF_SEC
+        can_restart_jinx = (time.monotonic() - _jinx_last_launch_attempt) >= AUX_APPS_LAUNCH_BACKOFF_SEC
+        if SAMMI_ENABLED and sammi_path and not sammi_running and can_restart_sammi:
+            _sammi_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable(sammi_path)
             if ok:
                 sammi_running = True
             else:
                 sammi_error = err or "failed to launch"
+        elif SAMMI_ENABLED and sammi_path and not sammi_running and sammi_error is None:
+            sammi_error = f"sammi launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 
-        if JINX_ENABLED and jinx_path and not jinx_running:
+        if JINX_ENABLED and jinx_path and not jinx_running and can_restart_jinx:
+            _jinx_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable_via_helper(jinx_path, JINX_LAUNCH_ARGS)
             if ok:
                 jinx_running = True
             else:
                 jinx_error = err or "failed to launch"
+        elif JINX_ENABLED and jinx_path and not jinx_running and jinx_error is None:
+            jinx_error = f"jinx launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 
         can_restart_ahk = (time.monotonic() - _ed_ahk_last_launch_attempt) >= ED_AHK_RESTART_BACKOFF_SEC
         if ED_AHK_ENABLED and ed_ahk_path and not ed_ahk_running and can_restart_ahk:
@@ -2465,6 +2499,7 @@ def run_supervisor_once() -> None:
 
 
 def main() -> None:
+    _hide_console_window()
     run_supervisor_loop()
 
 

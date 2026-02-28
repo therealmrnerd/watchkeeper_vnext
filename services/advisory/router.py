@@ -281,6 +281,39 @@ def build_assist_prompt(
             )
 
     user_text = str(request_payload.get("user_text") or "").strip()
+    context_lines: list[str] = []
+    request_context = request_payload.get("context")
+    if isinstance(request_context, dict):
+        twitch_pack = request_context.get("twitch_context_pack")
+        if isinstance(twitch_pack, dict):
+            tags = twitch_pack.get("heuristic_tags")
+            if isinstance(tags, list) and tags:
+                context_lines.append(f"TwitchTags: {','.join(str(t) for t in tags[:6])}")
+            top_redeems = twitch_pack.get("top_redeems")
+            if isinstance(top_redeems, list) and top_redeems:
+                compact_redeems: list[str] = []
+                for row in top_redeems[:3]:
+                    if not isinstance(row, dict):
+                        continue
+                    rid = str(row.get("reward_id") or "").strip()
+                    count = int(row.get("claim_count") or 0)
+                    if rid:
+                        compact_redeems.append(f"{rid}:{count}")
+                if compact_redeems:
+                    context_lines.append(f"TwitchTopRedeems: {','.join(compact_redeems)}")
+            last_messages = twitch_pack.get("last_messages")
+            if isinstance(last_messages, list) and last_messages:
+                compact_messages: list[str] = []
+                for row in last_messages[:2]:
+                    if not isinstance(row, dict):
+                        continue
+                    text = str(row.get("text") or "").strip()
+                    if text:
+                        compact_messages.append(text[:120])
+                if compact_messages:
+                    context_lines.append(
+                        "TwitchLastMessages: " + " | ".join(compact_messages)
+                    )
     lines = [
         system_prompt,
         router_prompt,
@@ -294,6 +327,8 @@ def build_assist_prompt(
         "Facts:",
         "\n".join(fact_lines) if fact_lines else "- (none)",
         f"UserRequest: {user_text}",
+        "RequestContext:",
+        "\n".join(context_lines) if context_lines else "- (none)",
         "Return JSON only with the intent proposal schema.",
     ]
     return "\n".join([line for line in lines if line is not None]).strip()
@@ -347,4 +382,3 @@ def build_fallback_proposal(
     if isinstance(session_id, str) and session_id.strip():
         proposal["session_id"] = session_id.strip()
     return proposal
-

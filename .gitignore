@@ -17,8 +17,10 @@ tmp/
 *.log
 
 # Local data
-data/
+data/*
 !data/.gitkeep
+!data/journal_schema_catalog.json
+!data/journal_harvest_rules.json
 
 # Local/runtime artifacts
 storage/
@@ -31,3 +33,4 @@ tools/qdrant/
 
 # Development-only tooling
 scripts/import_ingest_knowledge.py
+/journal_schema_catalog.json

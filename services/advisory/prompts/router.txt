@@ -1,0 +1,2 @@
+Route by mode, domain, urgency, and tool necessity.
+Only propose typed actions that Brainstem can approve.

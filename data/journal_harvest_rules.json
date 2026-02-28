@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "notes": "Initial allowlist for schema-aware journal harvesting. Keep intentionally small.",
+  "events": {
+    "FSDTarget": {
+      "fields": ["Name", "SystemAddress", "StarClass", "RemainingJumpsInRoute"]
+    },
+    "ShipTargeted": {
+      "fields": ["TargetLocked", "PilotName", "PilotRank", "Faction", "LegalStatus", "Subsystem"]
+    },
+    "NavRouteClear": {
+      "fields": ["Route"]
+    },
+    "SupercruiseDestinationDrop": {
+      "fields": ["Type", "Body", "BodyType", "StarSystem", "SystemAddress"]
+    },
+    "Docked": {
+      "fields": ["StationName", "StationType", "StationFaction", "StarSystem", "LandingPads"]
+    }
+  }
+}

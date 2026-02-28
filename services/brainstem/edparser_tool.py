@@ -59,6 +59,36 @@ def _terminate_pid(pid: int, force: bool) -> bool:
     return not _pid_running(pid)
 
 
+def _find_pid_by_command_tokens(tokens: list[str]) -> int | None:
+    clean = [t.strip().lower() for t in tokens if t and t.strip()]
+    if not clean:
+        return None
+    for token in clean:
+        try:
+            ps_token = token.replace("'", "''")
+            ps = (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.CommandLine -and ($_.Name -eq 'python.exe' -or $_.Name -eq 'node.exe') } | "
+                f"Where-Object {{ $_.CommandLine.ToLowerInvariant().Contains('{ps_token}') }} | "
+                "Select-Object -ExpandProperty ProcessId"
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            for raw in (result.stdout or "").splitlines():
+                txt = raw.strip()
+                if txt.isdigit():
+                    pid = int(txt)
+                    if pid > 0:
+                        return pid
+        except Exception:
+            continue
+    return None
+
+
 class EDParserTool:
     def __init__(self, db_service: Any | None = None) -> None:
         self.db_service = db_service
@@ -122,6 +152,21 @@ class EDParserTool:
         self._last_stopped_utc = utc_now_iso()
         self._process = None
 
+    def _detected_external_pid(self) -> int | None:
+        if self.command:
+            return None
+        if not self.script_path.exists():
+            return None
+        tokens = [str(self.script_path)]
+        if self.script_path.name.lower() == "edparser_compat.mjs":
+            vnext_script = self.script_path.with_name("edparser_vnext.py")
+            tokens.append(str(vnext_script))
+        for token in tokens:
+            pid = _find_pid_by_command_tokens([token])
+            if isinstance(pid, int) and _pid_running(pid):
+                return pid
+        return None
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             self._refresh_local_process()
@@ -141,6 +186,12 @@ class EDParserTool:
                     running = True
                     pid = state_pid
                     managed_by = "external"
+                else:
+                    detected_pid = self._detected_external_pid()
+                    if isinstance(detected_pid, int) and _pid_running(detected_pid):
+                        running = True
+                        pid = detected_pid
+                        managed_by = "external-detected"
 
             return {
                 "enabled": self.enabled,
@@ -220,6 +271,10 @@ class EDParserTool:
                 state_pid = self._pid_from_state()
                 if isinstance(state_pid, int) and _pid_running(state_pid):
                     stopped = _terminate_pid(state_pid, force=force)
+                if not stopped:
+                    detected_pid = self._detected_external_pid()
+                    if isinstance(detected_pid, int) and _pid_running(detected_pid):
+                        stopped = _terminate_pid(detected_pid, force=force)
 
             self._last_stopped_utc = utc_now_iso()
             if not stopped:

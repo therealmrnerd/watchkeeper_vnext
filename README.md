@@ -114,6 +114,21 @@ Once the base is solid:
 - Expose clean endpoints for user context and recent events
 - Add operator tooling for debugging ("why did it say that?")
 
+### 4) External Elite Dangerous providers
+
+The next integration slice is external ED world data:
+
+- `spansh` for primary topology lookups
+- `edsm` as read-only fallback
+- `inara` as opt-in commander/location sync
+- `edsy` as static ship-build reference data
+
+This is being built contract-first:
+
+- normalized provider health for the UI
+- policy-gated provider tool calls for the LLM
+- local world-model caching so Watchkeeper does not depend on live requests for every answer
+
 ---
 
 ## Design principles

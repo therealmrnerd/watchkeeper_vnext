@@ -1,0 +1,177 @@
+import json
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_EVENT_FIELD_MAP: dict[str, dict[str, list[str]]] = {
+    "CHAT": {
+        "user_id": ["WK_Readchat.chat_user_id"],
+        "login_name": ["WK_Readchat.chat_messageuser", "WK_Readchat.chat_user_name"],
+        "display_name": ["WK_Readchat.chat_user_name", "WK_Readchat.chat_messageuser"],
+        "message_id": [],
+        "message_text": ["WK_Readchat.chat_message"],
+        "flags_json": [],
+        "is_vip": ["WK_Readchat.chat_is_vip"],
+        "is_mod": [],
+        "is_sub": ["WK_Readchat.chat_is_subscriber"],
+        "is_broadcaster": ["WK_Readchat.chat_is_broadcaster"],
+    },
+    "REDEEM": {
+        "user_id": ["Twitch_Redeem.twitchredeem_user_id", "twitchredeem_user_id"],
+        "login_name": ["Twitch_Redeem.twitchredeem_user_name", "twitchredeem_user_name"],
+        "display_name": ["Twitch_Redeem.twitchredeem_display_name", "twitchredeem_display_name"],
+        "reward_id": ["Twitch_Redeem.twitchredeem_redeem_name", "twitchredeem_redeem_name"],
+        "reward_title": ["Twitch_Redeem.twitchredeem_redeem_name", "twitchredeem_redeem_name"],
+        "cost": ["Twitch_Redeem.twitchredeem_cost", "twitchredeem_cost"],
+        "redeem_id": [],
+    },
+    "BITS": {
+        "user_id": ["Twitch_Bits.new_bits_userid", "new_bits_userid"],
+        "login_name": ["Twitch_Bits.new_bits_username", "new_bits_username"],
+        "display_name": ["Twitch_Bits.new_bits_display", "new_bits_display"],
+        "amount": ["Twitch_Bits.new_bits_amount", "new_bits_amount"],
+        "cheer_id": ["Twitch_Bits.new_bits_type", "new_bits_type"],
+    },
+    "FOLLOW": {
+        "user_id": ["Twitch_Follow.new_follow_userid", "new_follow_userid"],
+        "login_name": ["Twitch_Follow.new_follow_username", "new_follow_username"],
+        "display_name": ["Twitch_Follow.new_follow_display", "new_follow_display"],
+    },
+    "SUB": {
+        "user_id": ["Twitch_Sub.new_sub_userid", "new_sub_userid"],
+        "login_name": ["Twitch_Sub.new_sub_username", "new_sub_username"],
+        "display_name": ["Twitch_Sub.new_sub_display", "new_sub_display"],
+        "tier": ["Twitch_Sub.new_sub_tier", "new_sub_tier"],
+        "is_gift": ["Twitch_Sub.new_sub_is_gift", "new_sub_is_gift"],
+        "months_total": ["Twitch_Sub.new_sub_months_total", "new_sub_months_total"],
+    },
+    "RAID": {
+        "user_id": ["Twitch_Raid.new_raid_userid", "new_raid_userid"],
+        "login_name": ["Twitch_Raid.new_raid_username", "new_raid_username"],
+        "display_name": ["Twitch_Raid.new_raid_display", "new_raid_display"],
+        "viewer_count": ["Twitch_Raid.new_raid_viewers", "new_raid_viewers"],
+    },
+    "HYPE_TRAIN": {
+        "user_id": ["Twitch_HypeTrain.new_hype_userid", "new_hype_userid"],
+        "login_name": ["Twitch_HypeTrain.new_hype_username", "new_hype_username"],
+        "display_name": ["Twitch_HypeTrain.new_hype_display", "new_hype_display"],
+        "level": ["Twitch_HypeTrain.new_hype_level", "new_hype_level"],
+        "progress": ["Twitch_HypeTrain.new_hype_progress", "new_hype_progress"],
+        "goal": ["Twitch_HypeTrain.new_hype_goal", "new_hype_goal"],
+    },
+    "POLL": {
+        "user_id": ["Twitch_Poll.new_poll_userid", "new_poll_userid"],
+        "login_name": ["Twitch_Poll.new_poll_username", "new_poll_username"],
+        "display_name": ["Twitch_Poll.new_poll_display", "new_poll_display"],
+        "poll_id": ["Twitch_Poll.new_poll_id", "new_poll_id"],
+        "title": ["Twitch_Poll.new_poll_title", "new_poll_title"],
+        "status": ["Twitch_Poll.new_poll_status", "new_poll_status"],
+    },
+    "PREDICTION": {
+        "user_id": ["Twitch_Prediction.new_prediction_userid", "new_prediction_userid"],
+        "login_name": ["Twitch_Prediction.new_prediction_username", "new_prediction_username"],
+        "display_name": ["Twitch_Prediction.new_prediction_display", "new_prediction_display"],
+        "prediction_id": ["Twitch_Prediction.new_prediction_id", "new_prediction_id"],
+        "title": ["Twitch_Prediction.new_prediction_title", "new_prediction_title"],
+        "status": ["Twitch_Prediction.new_prediction_status", "new_prediction_status"],
+    },
+    "SHOUTOUT": {
+        "user_id": ["Twitch_Shoutout.new_shoutout_userid", "new_shoutout_userid"],
+        "login_name": ["Twitch_Shoutout.new_shoutout_username", "new_shoutout_username"],
+        "display_name": ["Twitch_Shoutout.new_shoutout_display", "new_shoutout_display"],
+        "target_user_id": ["Twitch_Shoutout.new_shoutout_target_userid", "new_shoutout_target_userid"],
+        "target_login_name": ["Twitch_Shoutout.new_shoutout_target_username", "new_shoutout_target_username"],
+        "target_display_name": ["Twitch_Shoutout.new_shoutout_target_display", "new_shoutout_target_display"],
+    },
+    "POWER_UPS": {
+        "user_id": ["Twitch_PowerUps.new_powerups_userid", "new_powerups_userid"],
+        "login_name": ["Twitch_PowerUps.new_powerups_username", "new_powerups_username"],
+        "display_name": ["Twitch_PowerUps.new_powerups_display", "new_powerups_display"],
+        "powerup_type": ["Twitch_PowerUps.new_powerups_type", "new_powerups_type"],
+        "amount": ["Twitch_PowerUps.new_powerups_amount", "new_powerups_amount"],
+    },
+    "HYPE": {
+        "user_id": ["wk.hype.user_id"],
+        "login_name": ["wk.hype.user_name"],
+        "display_name": ["wk.hype.display_name"],
+        "amount": ["wk.hype.amount"],
+        "level": ["wk.hype.level"],
+    },
+}
+
+DEFAULT_EVENT_COMMIT_KEYS: dict[str, list[str]] = {
+    "CHAT": [],
+    "REDEEM": [],
+    "BITS": [],
+    "FOLLOW": [],
+    "SUB": [],
+    "RAID": [],
+    "HYPE_TRAIN": [],
+    "POLL": [],
+    "PREDICTION": [],
+    "SHOUTOUT": [],
+    "POWER_UPS": [],
+    "HYPE": ["wk.hype.ts"],
+}
+
+
+def _clone_default_fields() -> dict[str, dict[str, list[str]]]:
+    out: dict[str, dict[str, list[str]]] = {}
+    for event_name, fields in DEFAULT_EVENT_FIELD_MAP.items():
+        out[event_name] = {field_name: list(var_names) for field_name, var_names in fields.items()}
+    return out
+
+
+def _clone_default_commit_keys() -> dict[str, list[str]]:
+    return {event_name: list(var_names) for event_name, var_names in DEFAULT_EVENT_COMMIT_KEYS.items()}
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def load_twitch_variable_index(path: str | Path | None) -> tuple[dict[str, dict[str, list[str]]], dict[str, list[str]]]:
+    field_map = _clone_default_fields()
+    commit_keys = _clone_default_commit_keys()
+    if path is None:
+        return field_map, commit_keys
+
+    index_path = Path(path)
+    if not index_path.exists():
+        return field_map, commit_keys
+
+    try:
+        raw = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return field_map, commit_keys
+
+    twitch_root = raw.get("twitch")
+    if not isinstance(twitch_root, dict):
+        return field_map, commit_keys
+
+    for event_name, spec in twitch_root.items():
+        event_key = str(event_name or "").strip().upper()
+        if event_key not in field_map:
+            continue
+        if not isinstance(spec, dict):
+            continue
+
+        fields = spec.get("fields")
+        if isinstance(fields, dict):
+            merged_fields: dict[str, list[str]] = {}
+            for field_name, existing in field_map[event_key].items():
+                override = _as_str_list(fields.get(field_name))
+                merged_fields[field_name] = override if (field_name in fields and isinstance(fields.get(field_name), list)) else list(existing)
+            field_map[event_key] = merged_fields
+
+        if "commit_keys" in spec:
+            commit_keys[event_key] = _as_str_list(spec.get("commit_keys"))
+
+    return field_map, commit_keys
