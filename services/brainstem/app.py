@@ -5,6 +5,7 @@ from http.server import ThreadingHTTPServer
 from handlers import BrainstemHandler
 from runtime import (
     DB_SERVICE,
+    ED_PROVIDER_HEALTH_SCHEDULER,
     HOST,
     PORT,
     TWITCH_INGEST_SERVICE,
@@ -48,6 +49,7 @@ def _hide_console_window() -> None:
 def main() -> None:
     _hide_console_window()
     ensure_db()
+    ED_PROVIDER_HEALTH_SCHEDULER.start()
     twitch_listener = TwitchDoorbellListener(
         ingest_service=TWITCH_INGEST_SERVICE,
         host=TWITCH_UDP_HOST,
@@ -69,6 +71,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        ED_PROVIDER_HEALTH_SCHEDULER.stop()
         twitch_listener.stop()
         server.server_close()
 

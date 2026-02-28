@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EDProviderQuery",
+  "type": "object",
+  "required": ["tool", "provider", "operation", "params", "requirements", "trace"],
+  "properties": {
+    "tool": {
+      "type": "string",
+      "enum": ["ed.provider_query"]
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["spansh", "edsm", "inara", "edsy"]
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "system_lookup",
+        "bodies_lookup",
+        "stations_lookup",
+        "commander_profile_lookup",
+        "commander_location_push",
+        "ship_build_reference"
+      ]
+    },
+    "params": {
+      "type": "object"
+    },
+    "requirements": {
+      "type": "object",
+      "required": ["max_age_s", "allow_stale_if_error"],
+      "properties": {
+        "max_age_s": { "type": "integer", "minimum": 0 },
+        "allow_stale_if_error": { "type": "boolean" }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "required": ["reason"],
+      "properties": {
+        "incident_id": { "type": ["string", "null"] },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

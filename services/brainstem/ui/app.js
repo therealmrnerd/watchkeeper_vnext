@@ -49,14 +49,27 @@
     quickSitrep: document.getElementById("quickSitrep"),
     quickNowPlaying: document.getElementById("quickNowPlaying"),
     quickNowPlayingValue: document.getElementById("quickNowPlayingValue"),
+    quickEdSummary: document.getElementById("quickEdSummary"),
     quickAppElite: document.getElementById("quickAppElite"),
     quickAppJinx: document.getElementById("quickAppJinx"),
     quickAppSammi: document.getElementById("quickAppSammi"),
     quickAppYtmd: document.getElementById("quickAppYtmd"),
-    quickAppEliteState: document.getElementById("quickAppEliteState"),
-    quickAppJinxState: document.getElementById("quickAppJinxState"),
-    quickAppSammiState: document.getElementById("quickAppSammiState"),
-    quickAppYtmdState: document.getElementById("quickAppYtmdState"),
+    providerSpanshBtn: document.getElementById("providerSpanshBtn"),
+    providerSpanshStatus: document.getElementById("providerSpanshStatus"),
+    providerSpanshLatency: document.getElementById("providerSpanshLatency"),
+    providerEdsmBtn: document.getElementById("providerEdsmBtn"),
+    providerEdsmStatus: document.getElementById("providerEdsmStatus"),
+    providerEdsmLatency: document.getElementById("providerEdsmLatency"),
+    refreshEdStatusBtn: document.getElementById("refreshEdStatusBtn"),
+    edStatusMeta: document.getElementById("edStatusMeta"),
+    edSystemBadges: document.getElementById("edSystemBadges"),
+    edSystemSummary: document.getElementById("edSystemSummary"),
+    edBodiesBadges: document.getElementById("edBodiesBadges"),
+    edBodiesMeta: document.getElementById("edBodiesMeta"),
+    edBodiesList: document.getElementById("edBodiesList"),
+    edStationsBadges: document.getElementById("edStationsBadges"),
+    edStationsMeta: document.getElementById("edStationsMeta"),
+    edStationsList: document.getElementById("edStationsList"),
     servicesTable: document.getElementById("servicesTable"),
     runtimeInfo: document.getElementById("runtimeInfo"),
     handoverInfo: document.getElementById("handoverInfo"),
@@ -219,16 +232,331 @@
     }
   }
 
-  function setQuickAppState(stateNode, appButton, running) {
-    if (!stateNode || !appButton) {
+  function setQuickAppState(appButton, running) {
+    if (!appButton) {
       return;
     }
     const up = Boolean(running);
-    stateNode.textContent = up ? "✓" : "✗";
-    stateNode.classList.toggle("is-up", up);
-    stateNode.classList.toggle("is-down", !up);
+    appButton.dataset.status = up ? "ok" : "down";
     appButton.classList.toggle("is-running", up);
     appButton.classList.toggle("is-stopped", !up);
+  }
+
+  function setProviderHealthButton(buttonNode, statusNode, latencyNode, item) {
+    if (!buttonNode || !statusNode || !latencyNode) {
+      return;
+    }
+    const health = item && typeof item.health === "object" ? item.health : null;
+    const status = String((health && health.status) || "unknown").trim().toLowerCase() || "unknown";
+    const latencyMs = health && typeof health.latency_ms === "number" ? health.latency_ms : null;
+    buttonNode.dataset.status = status;
+    statusNode.textContent = status;
+    setLatency(latencyNode, latencyMs);
+    const url = String((item && item.base_url) || "").trim();
+    const message = String((health && health.message) || "").trim();
+    buttonNode.title = [url, message].filter(Boolean).join("\n");
+  }
+
+  function renderProviderHealth(data) {
+    const providers = data && typeof data.providers === "object" ? data.providers : {};
+    setProviderHealthButton(
+      el.providerSpanshBtn,
+      el.providerSpanshStatus,
+      el.providerSpanshLatency,
+      providers.spansh || null
+    );
+    setProviderHealthButton(
+      el.providerEdsmBtn,
+      el.providerEdsmStatus,
+      el.providerEdsmLatency,
+      providers.edsm || null
+    );
+  }
+
+  async function loadProviderHealth() {
+    try {
+      const data = await apiGet("/providers/health");
+      renderProviderHealth(data);
+    } catch (err) {
+      renderProviderHealth({ providers: {} });
+    }
+  }
+
+  function openProviderSite(providerId) {
+    const provider = String(providerId || "").trim().toLowerCase();
+    const targets = {
+      spansh: "https://www.spansh.co.uk",
+      edsm: "https://www.edsm.net",
+    };
+    if (targets[provider]) {
+      window.open(targets[provider], "_blank", "noopener");
+    }
+  }
+
+  function formatInteger(value) {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+    const asNum = Number(value);
+    if (Number.isFinite(asNum)) {
+      return asNum.toLocaleString();
+    }
+    return String(value);
+  }
+
+  function formatDecimal(value, digits) {
+    const asNum = Number(value);
+    if (!Number.isFinite(asNum)) {
+      return "-";
+    }
+    return asNum.toFixed(digits);
+  }
+
+  function formatProviderTimestamp(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return "-";
+    }
+    const parsed = Date.parse(text);
+    if (!Number.isFinite(parsed)) {
+      return text;
+    }
+    return new Date(parsed).toLocaleString();
+  }
+
+  function setEdMeta(text) {
+    if (el.edStatusMeta) {
+      el.edStatusMeta.textContent = String(text || "");
+    }
+  }
+
+  function setQuickEdSummary(text) {
+    if (el.quickEdSummary) {
+      el.quickEdSummary.textContent = String(text || "");
+    }
+  }
+
+  function clearNode(node) {
+    if (node) {
+      node.innerHTML = "";
+    }
+  }
+
+  function appendSummaryItem(node, label, value) {
+    if (!node) {
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = "ed-summary-item";
+
+    const title = document.createElement("div");
+    title.className = "ed-summary-label";
+    title.textContent = label;
+
+    const body = document.createElement("div");
+    body.className = "ed-summary-value";
+    body.textContent = value;
+
+    item.appendChild(title);
+    item.appendChild(body);
+    node.appendChild(item);
+  }
+
+  function renderEdCardList(node, items, buildCard) {
+    if (!node) {
+      return;
+    }
+    node.innerHTML = "";
+    if (!Array.isArray(items) || !items.length) {
+      const empty = document.createElement("div");
+      empty.className = "ed-empty";
+      empty.textContent = "No data.";
+      node.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      node.appendChild(buildCard(item));
+    }
+  }
+
+  function renderEdBadges(node, result) {
+    if (!node) {
+      return;
+    }
+    node.innerHTML = "";
+    if (!result || !result.ok) {
+      return;
+    }
+    const badges = [];
+    const provider = String(result.provider || "").trim();
+    if (provider) {
+      badges.push({ text: provider.toUpperCase(), tone: "info" });
+    }
+    if (result.cache && result.cache.hit) {
+      badges.push({ text: result.cache.stale_served ? "STALE" : "CACHED", tone: result.cache.stale_served ? "warn" : "ok" });
+    } else {
+      badges.push({ text: "LIVE", tone: "accent" });
+    }
+    const httpCode = result.provenance && result.provenance.http_code;
+    if (httpCode) {
+      badges.push({ text: `HTTP ${httpCode}`, tone: "muted" });
+    }
+    for (const badge of badges) {
+      const item = document.createElement("span");
+      item.className = `ed-badge ed-badge-${badge.tone}`;
+      item.textContent = badge.text;
+      node.appendChild(item);
+    }
+  }
+
+  function renderEdSystemSummary(result) {
+    clearNode(el.edSystemSummary);
+    renderEdBadges(el.edSystemBadges, result);
+    if (!result || !result.ok || !result.data) {
+      appendSummaryItem(el.edSystemSummary, "Status", "Unavailable");
+      return;
+    }
+    const data = result.data || {};
+    const coords = data.coords && typeof data.coords === "object" ? data.coords : {};
+    appendSummaryItem(el.edSystemSummary, "System", String(data.name || result.current_system_state?.system_name || "-"));
+    appendSummaryItem(el.edSystemSummary, "Address", formatInteger(data.system_address || result.current_system_state?.system_address));
+    appendSummaryItem(el.edSystemSummary, "Source", String(result.provider || "-").toUpperCase());
+    appendSummaryItem(el.edSystemSummary, "Cached", result.cache && result.cache.hit ? "Yes" : "No");
+    appendSummaryItem(el.edSystemSummary, "Bodies", formatInteger(data.body_count));
+    appendSummaryItem(el.edSystemSummary, "Stations", formatInteger(data.station_count));
+    appendSummaryItem(el.edSystemSummary, "Primary Economy", String(data.primary_economy || "-"));
+    appendSummaryItem(el.edSystemSummary, "Security", String(data.security || "-"));
+    appendSummaryItem(el.edSystemSummary, "Population", formatInteger(data.population));
+    appendSummaryItem(
+      el.edSystemSummary,
+      "Coordinates",
+      `${formatDecimal(coords.x, 2)}, ${formatDecimal(coords.y, 2)}, ${formatDecimal(coords.z, 2)}`
+    );
+    appendSummaryItem(el.edSystemSummary, "Permit", data.needs_permit ? String(data.known_permit || "Required") : "No");
+    appendSummaryItem(el.edSystemSummary, "Fetched", formatProviderTimestamp(result.fetched_at));
+  }
+
+  function renderBodyCard(item) {
+    const card = document.createElement("div");
+    card.className = "ed-data-card";
+
+    const name = document.createElement("div");
+    name.className = "ed-data-card-title";
+    name.textContent = String(item.name || "-");
+
+    const meta = document.createElement("div");
+    meta.className = "ed-data-card-meta";
+    meta.textContent = `${String(item.body_type || "-")} | ${String(item.subtype || "-")}`;
+
+    const detail = document.createElement("div");
+    detail.className = "ed-data-card-detail";
+    detail.textContent = `Arrival ${formatDecimal(item.distance_to_arrival_ls, 1)} ls | Gravity ${formatDecimal(item.gravity, 2)}`;
+
+    card.appendChild(name);
+    card.appendChild(meta);
+    card.appendChild(detail);
+    return card;
+  }
+
+  function renderStationCard(item) {
+    const card = document.createElement("div");
+    card.className = "ed-data-card";
+
+    const name = document.createElement("div");
+    name.className = "ed-data-card-title";
+    name.textContent = String(item.name || "-");
+
+    const meta = document.createElement("div");
+    meta.className = "ed-data-card-meta";
+    meta.textContent = `${String(item.station_type || "-")} | ${formatDecimal(item.distance_to_arrival_ls, 1)} ls`;
+
+    const services = Array.isArray(item.services) ? item.services.slice(0, 4) : [];
+    const detail = document.createElement("div");
+    detail.className = "ed-data-card-detail";
+    detail.textContent = services.length ? services.join(", ") : (item.has_docking ? "Docking available" : "No service data");
+
+    card.appendChild(name);
+    card.appendChild(meta);
+    card.appendChild(detail);
+    return card;
+  }
+
+  function renderEdLookupResult(targetMetaNode, targetListNode, result, noun, buildCard) {
+    if (!targetMetaNode || !targetListNode) {
+      return;
+    }
+    if (!result || !result.ok || !result.data) {
+      targetMetaNode.textContent = result && result.error ? `${noun} unavailable: ${result.error}` : `${noun} unavailable.`;
+      renderEdCardList(targetListNode, [], buildCard);
+      return;
+    }
+    const data = result.data || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    const source = String(result.provider || "-").toUpperCase();
+    const stale = result.cache && result.cache.stale_served ? " | stale" : "";
+    targetMetaNode.textContent = `${items.length} ${noun} from ${source}${stale}`;
+    renderEdCardList(targetListNode, items.slice(0, 12), buildCard);
+  }
+
+  async function loadEdStatus() {
+    setEdMeta("Refreshing ED provider data...");
+    try {
+      const current = await apiGet("/providers/current-system");
+      renderEdSystemSummary(current);
+      if (!current.ok || !current.data) {
+        setEdMeta(current.error ? `Current system unavailable: ${current.error}` : "Current system unavailable.");
+        renderEdBadges(el.edBodiesBadges, null);
+        renderEdBadges(el.edStationsBadges, null);
+        renderEdLookupResult(el.edBodiesMeta, el.edBodiesList, null, "bodies", renderBodyCard);
+        renderEdLookupResult(el.edStationsMeta, el.edStationsList, null, "stations", renderStationCard);
+        setQuickEdSummary("ED external: unavailable");
+        return;
+      }
+
+      const [bodiesResult, stationsResult] = await Promise.allSettled([
+        apiGet("/providers/current-system/bodies?limit=20&max_age_s=86400&allow_stale_if_error=true"),
+        apiGet("/providers/current-system/stations?limit=20&max_age_s=86400&allow_stale_if_error=true"),
+      ]);
+
+      const bodiesPayload = bodiesResult.status === "fulfilled"
+        ? bodiesResult.value
+        : { ok: false, error: String(bodiesResult.reason?.message || bodiesResult.reason || "request_failed") };
+      const stationsPayload = stationsResult.status === "fulfilled"
+        ? stationsResult.value
+        : { ok: false, error: String(stationsResult.reason?.message || stationsResult.reason || "request_failed") };
+
+      renderEdBadges(el.edBodiesBadges, bodiesPayload);
+      renderEdBadges(el.edStationsBadges, stationsPayload);
+      renderEdLookupResult(
+        el.edBodiesMeta,
+        el.edBodiesList,
+        bodiesPayload,
+        "bodies",
+        renderBodyCard
+      );
+      renderEdLookupResult(
+        el.edStationsMeta,
+        el.edStationsList,
+        stationsPayload,
+        "stations",
+        renderStationCard
+      );
+
+      const currentSource = String(current.provider || "-").toUpperCase();
+      setEdMeta(`Current system resolved via ${currentSource}.`);
+      const bodyCount = bodiesPayload && bodiesPayload.data ? formatInteger(bodiesPayload.data.body_count) : "-";
+      const stationCount = stationsPayload && stationsPayload.data ? formatInteger(stationsPayload.data.station_count) : "-";
+      const systemName = String(current.data.name || current.current_system_state?.system_name || "-").trim() || "-";
+      setQuickEdSummary(`ED external: ${systemName} | bodies ${bodyCount} | stations ${stationCount}`);
+    } catch (err) {
+      renderEdSystemSummary(null);
+      renderEdBadges(el.edBodiesBadges, null);
+      renderEdBadges(el.edStationsBadges, null);
+      renderEdLookupResult(el.edBodiesMeta, el.edBodiesList, null, "bodies", renderBodyCard);
+      renderEdLookupResult(el.edStationsMeta, el.edStationsList, null, "stations", renderStationCard);
+      setEdMeta(`ED provider query failed: ${String(err.message || err)}`);
+      setQuickEdSummary("ED external: unavailable");
+    }
   }
 
   async function openQuickApp(appId, buttonNode) {
@@ -1076,19 +1404,19 @@
   function eventIconMeta(eventType) {
     const key = String(eventType || "").toUpperCase();
     const table = {
-      CHAT: { glyph: "C", css: "evt-chat", label: "Chat" },
-      BITS: { glyph: "B", css: "evt-bits", label: "Bits" },
-      FOLLOW: { glyph: "F", css: "evt-follow", label: "Follow" },
-      REDEEM: { glyph: "R", css: "evt-redeem", label: "Redeem" },
-      SUB: { glyph: "S", css: "evt-sub", label: "Sub" },
-      RAID: { glyph: "D", css: "evt-raid", label: "Raid" },
-      SHOUTOUT: { glyph: "O", css: "evt-shoutout", label: "Shoutout" },
-      POLL: { glyph: "P", css: "evt-poll", label: "Poll" },
-      PREDICTION: { glyph: "P", css: "evt-prediction", label: "Prediction" },
-      HYPE_TRAIN: { glyph: "H", css: "evt-hype", label: "Hype Train" },
-      POWER_UPS: { glyph: "U", css: "evt-powerups", label: "Power Ups" },
+      CHAT: { glyph: "C", css: "evt-chat", cardTone: "card-chat", label: "Chat" },
+      BITS: { glyph: "B", css: "evt-bits", cardTone: "card-bits", label: "Bits" },
+      FOLLOW: { glyph: "F", css: "evt-follow", cardTone: "card-follow", label: "Follow" },
+      REDEEM: { glyph: "R", css: "evt-redeem", cardTone: "card-redeem", label: "Redeem" },
+      SUB: { glyph: "S", css: "evt-sub", cardTone: "card-sub", label: "Sub" },
+      RAID: { glyph: "D", css: "evt-raid", cardTone: "card-raid", label: "Raid" },
+      SHOUTOUT: { glyph: "O", css: "evt-shoutout", cardTone: "card-shoutout", label: "Shoutout" },
+      POLL: { glyph: "P", css: "evt-poll", cardTone: "card-poll", label: "Poll" },
+      PREDICTION: { glyph: "P", css: "evt-prediction", cardTone: "card-prediction", label: "Prediction" },
+      HYPE_TRAIN: { glyph: "H", css: "evt-hype", cardTone: "card-hype", label: "Hype Train" },
+      POWER_UPS: { glyph: "U", css: "evt-powerups", cardTone: "card-powerups", label: "Power Ups" },
     };
-    return table[key] || { glyph: "?", css: "evt-unknown", label: key || "Event" };
+    return table[key] || { glyph: "?", css: "evt-unknown", cardTone: "card-unknown", label: key || "Event" };
   }
 
   function summarizeTwitchItem(item) {
@@ -1161,7 +1489,7 @@
       const normalized = normalizeTwitchItem(item);
       const meta = eventIconMeta(normalized.eventType);
       const card = document.createElement("div");
-      card.className = "quick-twitch-event-card";
+      card.className = `quick-twitch-event-card ${meta.cardTone || "card-unknown"}`;
 
       const icon = document.createElement("span");
       icon.className = `quick-twitch-event-icon ${meta.css}`;
@@ -1241,10 +1569,10 @@
     const handover = data.handover || {};
     const music = handover.music_state || {};
     const apps = handover.apps || {};
-    setQuickAppState(el.quickAppEliteState, el.quickAppElite, Boolean(apps.ed_running ?? handover.ed_running));
-    setQuickAppState(el.quickAppJinxState, el.quickAppJinx, Boolean(apps.jinx_running));
-    setQuickAppState(el.quickAppSammiState, el.quickAppSammi, Boolean(apps.sammi_running));
-    setQuickAppState(el.quickAppYtmdState, el.quickAppYtmd, Boolean(apps.ytmd_running));
+    setQuickAppState(el.quickAppElite, Boolean(apps.ed_running ?? handover.ed_running));
+    setQuickAppState(el.quickAppJinx, Boolean(apps.jinx_running));
+    setQuickAppState(el.quickAppSammi, Boolean(apps.sammi_running));
+    setQuickAppState(el.quickAppYtmd, Boolean(apps.ytmd_running));
     if (el.quickNowPlayingValue) {
       el.quickNowPlayingValue.textContent = `${music.title || "-"}${music.artist ? ` / ${music.artist}` : ""}`;
     }
@@ -1506,6 +1834,15 @@
     if (el.quickAppYtmd) {
       el.quickAppYtmd.addEventListener("click", () => openQuickApp("ytmd", el.quickAppYtmd));
     }
+    if (el.providerSpanshBtn) {
+      el.providerSpanshBtn.addEventListener("click", () => openProviderSite("spansh"));
+    }
+    if (el.providerEdsmBtn) {
+      el.providerEdsmBtn.addEventListener("click", () => openProviderSite("edsm"));
+    }
+    if (el.refreshEdStatusBtn) {
+      el.refreshEdStatusBtn.addEventListener("click", loadEdStatus);
+    }
     if (el.modeAutoBtn) {
       el.modeAutoBtn.addEventListener("click", () => {
         state.manualAssistMode = null;
@@ -1551,15 +1888,20 @@
     }
 
     await loadSitrep();
+    await loadProviderHealth();
+    await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();
     await loadLogTail();
     await loadEvents();
     startEventStream();
     setInterval(loadSitrep, 10000);
+    setInterval(loadProviderHealth, 60000);
+    setInterval(loadEdStatus, 15000);
     setInterval(loadTwitchRecent, 6000);
     setInterval(updateConfirmExpiryLabels, 500);
   }
 
   init();
 })();
+

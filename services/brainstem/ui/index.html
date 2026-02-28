@@ -11,7 +11,9 @@
   <header class="topbar">
     <div class="brand-block">
       <div class="brand-title-row">
-        <img class="brand-logo" src="icons/watchkeeper_logo.png" alt="Watchkeeper logo">
+        <span class="brand-logo-frame">
+          <img class="brand-logo" src="icons/watchkeeper_logo.png" alt="Watchkeeper logo">
+        </span>
       </div>
     </div>
     <div class="bridge-panel">
@@ -53,6 +55,7 @@
   <nav class="tabs">
     <div class="tabs-left">
       <button class="tab-btn active" data-tab="console">Console</button>
+      <button class="tab-btn" data-tab="edstatus">ED Status</button>
       <button class="tab-btn" data-tab="logs">Logs & Diagnostics</button>
     </div>
     <div class="tabs-right">
@@ -69,11 +72,11 @@
           <div class="panel">
             <div class="row response-head">
               <h2>Response</h2>
-              <button id="copyResponseBtn" class="secondary">Copy Response</button>
             </div>
             <div class="row incident-row">
               <span class="muted">Incident:</span>
               <code id="incidentId" class="incident-id">-</code>
+              <button id="copyResponseBtn" class="secondary header-chip">Copy Response</button>
               <button id="copyIncidentBtn" class="secondary">Copy Incident ID</button>
               <button id="openIncidentLogsBtn" class="secondary">Open in Logs</button>
             </div>
@@ -121,31 +124,27 @@
           <div class="panel">
             <h2>Quick SitRep</h2>
             <div id="quickSitrep" class="quick-sitrep-icons">
-              <button id="quickAppElite" class="quick-app-chip" data-app-id="elite" title="Open Elite Dangerous">
+              <button id="quickAppElite" class="quick-app-chip" data-app-id="elite" data-status="down" title="Open Elite Dangerous">
                 <span class="quick-app-icon-wrap">
                   <img class="quick-app-icon" src="icons/elite-dangerous-logo.png" alt="Elite icon">
-                  <span id="quickAppEliteState" class="quick-app-state is-down">x</span>
                 </span>
                 <span class="quick-app-name">Elite Dangerous</span>
               </button>
-              <button id="quickAppJinx" class="quick-app-chip" data-app-id="jinx" title="Open Jinx">
+              <button id="quickAppJinx" class="quick-app-chip" data-app-id="jinx" data-status="down" title="Open Jinx">
                 <span class="quick-app-icon-wrap">
                   <img class="quick-app-icon" src="icons/jinx.svg" alt="Jinx icon">
-                  <span id="quickAppJinxState" class="quick-app-state is-down">x</span>
                 </span>
                 <span class="quick-app-name">!Jinx</span>
               </button>
-              <button id="quickAppSammi" class="quick-app-chip" data-app-id="sammi" title="Open SAMMI">
+              <button id="quickAppSammi" class="quick-app-chip" data-app-id="sammi" data-status="down" title="Open SAMMI">
                 <span class="quick-app-icon-wrap">
                   <img class="quick-app-icon" src="icons/sammi.png" alt="Sammi icon">
-                  <span id="quickAppSammiState" class="quick-app-state is-down">x</span>
                 </span>
                 <span class="quick-app-name">Sammi</span>
               </button>
-              <button id="quickAppYtmd" class="quick-app-chip" data-app-id="ytmd" title="Open YTMD">
+              <button id="quickAppYtmd" class="quick-app-chip" data-app-id="ytmd" data-status="down" title="Open YTMD">
                 <span class="quick-app-icon-wrap">
                   <img class="quick-app-icon" src="icons/YT_Music.svg.png" alt="YTMD icon">
-                  <span id="quickAppYtmdState" class="quick-app-state is-down">x</span>
                 </span>
                 <span class="quick-app-name">YTMD</span>
               </button>
@@ -153,6 +152,20 @@
             <div id="quickNowPlaying" class="quick-now-playing">
               <span class="quick-now-playing-label">Now playing:</span>
               <span id="quickNowPlayingValue" class="quick-now-playing-value">-</span>
+            </div>
+            <div id="quickEdSummary" class="quick-ed-summary">ED external: -</div>
+            <h3 class="subhead">ED Providers</h3>
+            <div id="providerHealthButtons" class="provider-health-grid">
+              <button id="providerSpanshBtn" class="provider-health-btn" type="button" data-provider="spansh">
+                <span class="provider-health-name">Spansh</span>
+                <span id="providerSpanshStatus" class="provider-health-state">unknown</span>
+                <span id="providerSpanshLatency" class="provider-health-latency">-</span>
+              </button>
+              <button id="providerEdsmBtn" class="provider-health-btn" type="button" data-provider="edsm">
+                <span class="provider-health-name">EDSM</span>
+                <span id="providerEdsmStatus" class="provider-health-state">unknown</span>
+                <span id="providerEdsmLatency" class="provider-health-latency">-</span>
+              </button>
             </div>
             <h3 class="subhead">Twitch Chat (Live)</h3>
             <div class="streamlabs-chat-wrap">
@@ -168,6 +181,35 @@
             <h3 class="subhead">Twitch Events (Latest 3)</h3>
             <div id="quickTwitchEvents" class="quick-twitch-events"></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-edstatus" class="tab-panel">
+      <div class="panel">
+        <div class="row ed-status-head">
+          <h2>External ED Status</h2>
+          <button id="refreshEdStatusBtn" class="secondary header-chip">Refresh</button>
+        </div>
+        <div id="edStatusMeta" class="muted">Waiting for provider data.</div>
+        <div id="edSystemBadges" class="ed-badge-row"></div>
+      </div>
+      <div class="ed-status-grid">
+        <div class="panel">
+          <h2>Current System</h2>
+          <div id="edSystemSummary" class="ed-summary-grid"></div>
+        </div>
+        <div class="panel">
+          <h2>Bodies</h2>
+          <div id="edBodiesBadges" class="ed-badge-row"></div>
+          <div id="edBodiesMeta" class="muted">No data yet.</div>
+          <div id="edBodiesList" class="ed-card-list"></div>
+        </div>
+        <div class="panel">
+          <h2>Stations</h2>
+          <div id="edStationsBadges" class="ed-badge-row"></div>
+          <div id="edStationsMeta" class="muted">No data yet.</div>
+          <div id="edStationsList" class="ed-card-list"></div>
         </div>
       </div>
     </section>

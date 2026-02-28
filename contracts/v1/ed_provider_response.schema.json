@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EDProviderResponse",
+  "type": "object",
+  "required": [
+    "ok",
+    "provider",
+    "operation",
+    "fetched_at",
+    "cache",
+    "health_observed",
+    "data",
+    "provenance",
+    "error"
+  ],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "provider": {
+      "type": "string",
+      "enum": ["spansh", "edsm", "inara", "edsy"]
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "system_lookup",
+        "bodies_lookup",
+        "stations_lookup",
+        "commander_profile_lookup",
+        "commander_location_push",
+        "ship_build_reference"
+      ]
+    },
+    "fetched_at": { "type": "string" },
+    "cache": {
+      "type": "object",
+      "required": ["hit", "age_s", "ttl_s", "stale_served"],
+      "properties": {
+        "hit": { "type": "boolean" },
+        "age_s": { "type": ["integer", "null"], "minimum": 0 },
+        "ttl_s": { "type": ["integer", "null"], "minimum": 0 },
+        "stale_served": { "type": "boolean" }
+      }
+    },
+    "health_observed": { "$ref": "provider_health.schema.json" },
+    "data": { "type": ["object", "null"] },
+    "provenance": {
+      "type": "object",
+      "required": ["endpoint", "http_code"],
+      "properties": {
+        "endpoint": { "type": ["string", "null"] },
+        "http_code": { "type": ["integer", "null"] }
+      }
+    },
+    "error": { "type": ["string", "null"] },
+    "deny_reason": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "provider_down",
+        "misconfigured",
+        "rate_limited",
+        "no_intent",
+        "write_requires_confirm",
+        "call_budget_exceeded"
+      ]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProviderHealthListResponse",
+  "type": "object",
+  "required": ["ok", "providers"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["enabled", "base_url", "features", "health"],
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "base_url": { "type": ["string", "null"] },
+          "features": { "type": "object" },
+          "health": {
+            "anyOf": [
+              { "type": "null" },
+              { "$ref": "provider_health.schema.json" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

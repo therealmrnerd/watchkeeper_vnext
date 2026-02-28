@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProviderConfig",
+  "type": "object",
+  "required": ["schema_version", "provider_priority", "providers"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "provider_priority": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["spansh", "edsm", "inara", "edsy"]
+        }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "required": ["spansh", "edsm", "inara", "edsy"],
+      "properties": {
+        "spansh": { "$ref": "#/definitions/providerHttpConfig" },
+        "edsm": { "$ref": "#/definitions/providerHttpConfig" },
+        "inara": { "$ref": "#/definitions/providerHttpConfig" },
+        "edsy": { "$ref": "#/definitions/providerStaticConfig" }
+      }
+    }
+  },
+  "definitions": {
+    "providerHttpConfig": {
+      "type": "object",
+      "required": ["enabled", "base_url", "timeouts_ms", "rate_limit", "cache", "features"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "base_url": { "type": "string" },
+        "timeouts_ms": {
+          "type": "object",
+          "required": ["connect", "read"],
+          "properties": {
+            "connect": { "type": "integer", "minimum": 1 },
+            "read": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "rate_limit": {
+          "type": "object",
+          "required": ["mode", "burst", "max_concurrent", "cooldown_on_fail_s"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["client"] },
+            "rps": { "type": "number", "minimum": 0 },
+            "rpm": { "type": "number", "minimum": 0 },
+            "burst": { "type": "integer", "minimum": 1 },
+            "max_concurrent": { "type": "integer", "minimum": 1 },
+            "cooldown_on_fail_s": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "cache": {
+          "type": "object",
+          "required": ["default_ttl_s", "stale_if_error_s"],
+          "properties": {
+            "default_ttl_s": { "type": "integer", "minimum": 0 },
+            "stale_if_error_s": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "auth": { "type": ["object", "null"] },
+        "features": { "type": "object" },
+        "mode": { "type": "string" },
+        "version": { "type": ["string", "null"] }
+      }
+    },
+    "providerStaticConfig": {
+      "type": "object",
+      "required": ["enabled", "mode", "features"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "type": "string", "enum": ["vendored_static"] },
+        "version": { "type": ["string", "null"] },
+        "features": { "type": "object" }
+      }
+    }
+  }
+}

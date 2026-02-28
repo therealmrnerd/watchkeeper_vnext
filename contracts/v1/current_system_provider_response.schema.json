@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CurrentSystemProviderResponse",
+  "type": "object",
+  "required": ["ok", "provider", "operation", "fetched_at", "cache", "health_observed", "data", "provenance", "error", "current_system_state"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "provider": {
+      "type": "string",
+      "enum": ["spansh", "edsm", "inara", "edsy"]
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["system_lookup"]
+    },
+    "fetched_at": { "type": "string" },
+    "cache": {
+      "type": "object",
+      "required": ["hit", "age_s", "ttl_s", "stale_served"],
+      "properties": {
+        "hit": { "type": "boolean" },
+        "age_s": { "type": ["integer", "null"] },
+        "ttl_s": { "type": ["integer", "null"] },
+        "stale_served": { "type": "boolean" }
+      }
+    },
+    "health_observed": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "provider_health.schema.json" }
+      ]
+    },
+    "data": { "type": ["object", "null"] },
+    "provenance": {
+      "type": "object",
+      "required": ["endpoint", "http_code"],
+      "properties": {
+        "endpoint": { "type": ["string", "null"] },
+        "http_code": { "type": ["integer", "null"] }
+      }
+    },
+    "error": { "type": ["string", "null"] },
+    "current_system_state": {
+      "type": "object",
+      "required": ["system_name", "system_address"],
+      "properties": {
+        "system_name": { "type": ["string", "null"] },
+        "system_address": { "type": ["integer", "string", "null"] }
+      }
+    }
+  }
+}

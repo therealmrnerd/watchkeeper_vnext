@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProviderHealth",
+  "type": "object",
+  "required": [
+    "provider",
+    "status",
+    "checked_at",
+    "latency_ms",
+    "http",
+    "rate_limit",
+    "capabilities",
+    "message"
+  ],
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": ["spansh", "edsm", "inara", "edsy"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "degraded", "throttled", "down", "misconfigured"]
+    },
+    "checked_at": { "type": "string" },
+    "latency_ms": { "type": ["integer", "null"], "minimum": 0 },
+    "http": {
+      "type": "object",
+      "required": ["code"],
+      "properties": {
+        "code": { "type": ["integer", "null"] }
+      }
+    },
+    "rate_limit": {
+      "type": "object",
+      "required": ["state", "retry_after_s"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["ok", "unknown", "throttled", "cooldown"]
+        },
+        "retry_after_s": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["tool_calls_allowed", "degraded_readonly"],
+      "properties": {
+        "tool_calls_allowed": { "type": "boolean" },
+        "degraded_readonly": { "type": "boolean" }
+      }
+    },
+    "message": { "type": "string" }
+  }
+}

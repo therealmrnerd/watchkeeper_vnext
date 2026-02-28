@@ -68,6 +68,7 @@ class UIServedTests(unittest.TestCase):
         self.assertIn("Bridge Watch Panel", body)
         self.assertIn("watchkeeper_logo.png", body)
         self.assertIn("Console", body)
+        self.assertIn("ED Status", body)
 
     def test_ui_asset_served(self) -> None:
         status, body = self._request("/app.js")

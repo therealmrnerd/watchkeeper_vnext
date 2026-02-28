@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "provider_priority": {
+    "system_lookup": ["spansh", "edsm"],
+    "bodies_lookup": ["spansh", "edsm"],
+    "stations_lookup": ["spansh", "edsm"],
+    "commander_location_push": ["inara"],
+    "ship_build_reference": ["edsy"]
+  },
+  "providers": {
+    "spansh": {
+      "enabled": true,
+      "base_url": "https://www.spansh.co.uk",
+      "timeouts_ms": {
+        "connect": 1500,
+        "read": 4000
+      },
+      "rate_limit": {
+        "mode": "client",
+        "rps": 1.0,
+        "burst": 2,
+        "max_concurrent": 1,
+        "cooldown_on_fail_s": 30
+      },
+      "cache": {
+        "default_ttl_s": 86400,
+        "stale_if_error_s": 604800
+      },
+      "features": {
+        "system_lookup": true,
+        "stations_lookup": true,
+        "bodies_lookup": true,
+        "bulk_dumps": true,
+        "read_only": true
+      }
+    },
+    "edsm": {
+      "enabled": true,
+      "base_url": "https://www.edsm.net",
+      "timeouts_ms": {
+        "connect": 1500,
+        "read": 4000
+      },
+      "rate_limit": {
+        "mode": "client",
+        "rps": 0.5,
+        "burst": 1,
+        "max_concurrent": 1,
+        "cooldown_on_fail_s": 30
+      },
+      "cache": {
+        "default_ttl_s": 86400,
+        "stale_if_error_s": 604800
+      },
+      "auth": {
+        "mode": "none_or_user_key",
+        "commander_name": null,
+        "api_key": null
+      },
+      "features": {
+        "system_lookup": true,
+        "stations_lookup": false,
+        "bodies_lookup": true,
+        "journal_submit": false,
+        "logs_private": false,
+        "read_only": true
+      }
+    },
+    "inara": {
+      "enabled": false,
+      "base_url": "https://inara.cz",
+      "timeouts_ms": {
+        "connect": 1500,
+        "read": 5000
+      },
+      "rate_limit": {
+        "mode": "client",
+        "rpm": 2,
+        "burst": 1,
+        "max_concurrent": 1,
+        "cooldown_on_fail_s": 60
+      },
+      "cache": {
+        "default_ttl_s": 3600,
+        "stale_if_error_s": 86400
+      },
+      "auth": {
+        "mode": "app_whitelist",
+        "app_name": null,
+        "app_key": null
+      },
+      "features": {
+        "commander_profile": true,
+        "commander_location_push": true,
+        "read_only": false
+      }
+    },
+    "edsy": {
+      "enabled": false,
+      "mode": "vendored_static",
+      "version": null,
+      "features": {
+        "ship_build_reference": true,
+        "read_only": true
+      }
+    }
+  }
+}

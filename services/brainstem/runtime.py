@@ -20,6 +20,9 @@ from core.policy.twitch_policy import TwitchPolicyEngine
 from core.tool_router import ToolRouter
 from db.logbook import Logbook
 from db.twitch_repo import TwitchRepository
+from provider_config import DEFAULT_PROVIDER_CONFIG_PATH
+from provider_health import ProviderHealthScheduler, build_provider_health_probes
+from provider_query import ProviderQueryService
 from sammi_client import SammiClient
 from twitch_ingest import TwitchIngestService
 
@@ -219,6 +222,19 @@ TWITCH_DEV_INGEST_ENABLED = os.getenv("WKV_TWITCH_DEV_INGEST_ENABLED", "0").stri
     "true",
     "yes",
 }
+PROVIDER_CONFIG_PATH = Path(os.getenv("WKV_PROVIDER_CONFIG_PATH", DEFAULT_PROVIDER_CONFIG_PATH))
+PROVIDER_HEALTH_ENABLED = os.getenv("WKV_PROVIDER_HEALTH_ENABLED", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PROVIDER_HEALTH_MIN_SEC = int(os.getenv("WKV_PROVIDER_HEALTH_MIN_SEC", "1800"))
+PROVIDER_HEALTH_MAX_SEC = int(os.getenv("WKV_PROVIDER_HEALTH_MAX_SEC", "3600"))
+PROVIDER_HEALTH_STARTUP_PROBE = os.getenv("WKV_PROVIDER_HEALTH_STARTUP_PROBE", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 VK_MEDIA_NEXT_TRACK = 0xB0
 VK_MEDIA_PLAY_PAUSE = 0xB3
@@ -295,4 +311,18 @@ TWITCH_INGEST_SERVICE = TwitchIngestService(
     debounce_ms_by_event=TWITCH_DEBOUNCE_MS_BY_EVENT,
     ack_only=TWITCH_UDP_ACK_ONLY,
     variable_index_path=TWITCH_VARIABLE_INDEX_PATH,
+)
+ED_PROVIDER_HEALTH_PROBES = (
+    build_provider_health_probes(PROVIDER_CONFIG_PATH) if PROVIDER_HEALTH_ENABLED else []
+)
+ED_PROVIDER_HEALTH_SCHEDULER = ProviderHealthScheduler(
+    db_path=DB_PATH,
+    probes=ED_PROVIDER_HEALTH_PROBES,
+    min_interval_sec=PROVIDER_HEALTH_MIN_SEC,
+    max_interval_sec=PROVIDER_HEALTH_MAX_SEC,
+    startup_probe=PROVIDER_HEALTH_STARTUP_PROBE,
+)
+ED_PROVIDER_QUERY_SERVICE = ProviderQueryService(
+    db_path=DB_PATH,
+    config_path=PROVIDER_CONFIG_PATH,
 )

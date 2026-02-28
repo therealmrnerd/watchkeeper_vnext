@@ -1,5 +1,6 @@
 import ctypes
 import json
+import os
 import sqlite3
 import subprocess
 import time
@@ -15,6 +16,7 @@ from runtime import (
     ADVISORY_URL,
     DB_SERVICE,
     DEFAULT_WATCH_CONDITION,
+    ED_PROVIDER_QUERY_SERVICE,
     EDPARSER_TOOL,
     ENABLE_ACTUATORS,
     ENABLE_KEYPRESS,
@@ -24,8 +26,15 @@ from runtime import (
     LIGHTS_WEBHOOK_URL,
     LIGHTS_WEBHOOK_URL_TEMPLATE,
     LOGBOOK,
+    SAMMI_CLIENT,
     SPECIAL_VK_MAP,
     TOOL_ROUTER,
+    TWITCH_DEV_INGEST_ENABLED,
+    TWITCH_CHAT_SEND_BUTTON,
+    TWITCH_CHAT_STRICT_CONFIRM,
+    TWITCH_CHAT_SEND_VAR,
+    TWITCH_INGEST_SERVICE,
+    TWITCH_REPO,
     VK_MEDIA_NEXT_TRACK,
     VK_MEDIA_PLAY_PAUSE,
     connect_db,
@@ -34,6 +43,9 @@ from runtime import (
     parse_json,
     utc_now_iso,
 )
+from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
+
+NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _list_process_names() -> set[str]:
@@ -43,6 +55,7 @@ def _list_process_names() -> set[str]:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         names: set[str] = set()
         for raw_line in result.stdout.splitlines():
@@ -79,6 +92,7 @@ def _get_foreground_process_name() -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            creationflags=NO_WINDOW_FLAGS,
         )
         for raw_line in result.stdout.splitlines():
             line = raw_line.strip()
@@ -549,11 +563,335 @@ def record_feedback(payload: dict[str, Any], source: str) -> dict[str, Any]:
     return {"feedback_id": feedback_id, "request_id": request_id, "rating": rating}
 
 
+def ingest_twitch_mock(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    if not TWITCH_DEV_INGEST_ENABLED:
+        raise ValueError("twitch dev ingest endpoint is disabled")
+    event_type = str(payload.get("event_type") or "").strip().upper()
+    if not event_type:
+        raise ValueError("event_type is required")
+    event_payload = payload.get("payload")
+    if not isinstance(event_payload, dict):
+        event_payload = dict(payload)
+        event_payload.pop("event_type", None)
+    result = TWITCH_INGEST_SERVICE.ingest_mock(event_type, event_payload)
+    emit_event(
+        con=None,
+        event_type="TWITCH_DEV_INGEST",
+        source=source,
+        payload={
+            "event_type": event_type,
+            "processed": bool(result.get("processed")),
+            "user_id": result.get("user_id"),
+            "commit_ts": result.get("commit_ts"),
+        },
+        tags=["twitch", "dev", "ingest"],
+    )
+    return result
+
+
+def _state_value_text(key: str) -> str:
+    row = DB_SERVICE.get_state(str(key or "").strip())
+    if not row:
+        return ""
+    value = row.get("state_value")
+    return str(value or "").strip()
+
+
+def _normalize_app_open_target(app_id: str, target: str) -> str:
+    text = str(target or "").strip()
+    if not text:
+        return ""
+    if app_id == "ytmd" and text.lower().startswith("ytmd_api://"):
+        return "http://" + text.split("://", 1)[1]
+    return text
+
+
+def open_external_app(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+
+    app_id = str(payload.get("app_id") or "").strip().lower()
+    if app_id not in {"elite", "jinx", "sammi", "ytmd"}:
+        raise ValueError("app_id must be one of: elite, jinx, sammi, ytmd")
+
+    target_map: dict[str, list[str]] = {
+        "elite": ["app.ed.path", "app.elite.path", "app.ed_ahk.path"],
+        "jinx": ["app.jinx.path"],
+        "sammi": ["app.sammi.path"],
+        "ytmd": ["app.ytmd.path", "music.app.path", "music.source_path"],
+    }
+    target = ""
+    for key in target_map.get(app_id, []):
+        raw = _state_value_text(key)
+        if not raw:
+            continue
+        normalized = _normalize_app_open_target(app_id, raw)
+        if normalized:
+            target = normalized
+            break
+
+    if not target and app_id == "ytmd":
+        target = "http://127.0.0.1:9863"
+
+    if not target:
+        raise ValueError(f"no launch target configured for app_id={app_id}")
+
+    if os.name != "nt":
+        raise ValueError("app launching is only supported on Windows in this build")
+
+    try:
+        os.startfile(target)  # type: ignore[attr-defined]
+    except Exception as exc:
+        raise RuntimeError(f"failed to open target '{target}': {exc}") from exc
+
+    emit_event(
+        con=None,
+        event_type="APP_OPEN_REQUESTED",
+        source=source,
+        payload={"app_id": app_id, "target": target},
+        severity="info",
+        tags=["ui", "app_open", app_id],
+    )
+    return {"app_id": app_id, "target": target, "launched": True}
+
+
+def send_twitch_chat(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        raise ValueError("message is required")
+    if len(message) > 500:
+        raise ValueError("message must be <= 500 characters")
+
+    mode = str(payload.get("mode") or "standby").strip().lower() or "standby"
+    watch_condition_input = payload.get("watch_condition")
+    if watch_condition_input is not None and (
+        not isinstance(watch_condition_input, str) or not watch_condition_input.strip()
+    ):
+        raise ValueError("watch_condition must be a non-empty string when supplied")
+    watch_condition = _resolve_watch_condition(
+        str(watch_condition_input or "").strip().upper() if watch_condition_input else None,
+        mode,
+    )
+
+    incident_id = str(payload.get("incident_id") or "").strip() or f"twitch-chat-{uuid.uuid4().hex[:12]}"
+    stt_confidence = payload.get("stt_confidence")
+    if stt_confidence is not None:
+        if not isinstance(stt_confidence, (int, float)) or stt_confidence < 0 or stt_confidence > 1:
+            raise ValueError("stt_confidence must be number 0..1 when supplied")
+        stt_confidence = float(stt_confidence)
+    user_confirmed = bool(payload.get("user_confirmed", False))
+    user_confirm_token = str(
+        payload.get("user_confirm_token") or payload.get("confirm_token") or ""
+    ).strip() or None
+    confirmed_at_utc = payload.get("confirmed_at_utc")
+    confirmed_at_epoch: float | None = None
+    if confirmed_at_utc is not None:
+        if not isinstance(confirmed_at_utc, str) or not confirmed_at_utc.strip():
+            raise ValueError("confirmed_at_utc must be non-empty string when supplied")
+        parse_iso8601_utc(confirmed_at_utc)
+        confirmed_at_epoch = iso8601_utc_to_epoch(confirmed_at_utc)
+
+    if TWITCH_CHAT_STRICT_CONFIRM and user_confirmed:
+        raise ValueError(
+            "strict confirm mode enabled: call /confirm first, then resend with incident_id + confirm_token"
+        )
+
+    routed = TOOL_ROUTER.evaluate_action(
+        incident_id=incident_id,
+        watch_condition=watch_condition,
+        tool_name="twitch.send_chat",
+        args={"message_len": len(message)},
+        source=source,
+        stt_confidence=stt_confidence,
+        foreground_process=None,
+        user_confirmed=False if TWITCH_CHAT_STRICT_CONFIRM else user_confirmed,
+        user_confirm_token=user_confirm_token,
+        action_requires_confirmation=False,
+        now_ts=time.time(),
+        confirmation_ts=confirmed_at_epoch,
+        req_context={
+            "mode": mode,
+            "watch_condition": watch_condition,
+            "message_len": len(message),
+        },
+    )
+    decision = routed["decision"]
+    if not decision.get("allowed"):
+        emit_event(
+            con=None,
+            event_type="TWITCH_CHAT_SEND_DENIED",
+            source=source,
+            payload={
+                "incident_id": incident_id,
+                "watch_condition": watch_condition,
+                "reason_code": decision.get("deny_reason_code"),
+                "reason_text": decision.get("deny_reason_text"),
+                "requires_confirmation": bool(decision.get("requires_confirmation")),
+                "confirm_token": routed.get("confirm_token"),
+            },
+            mode=mode,
+            severity="warn",
+            tags=["twitch", "send_chat", "denied"],
+        )
+        return {
+            "accepted": False,
+            "sent": False,
+            "incident_id": incident_id,
+            "tool_name": "twitch.send_chat",
+            "watch_condition": watch_condition,
+            "policy": decision,
+            "confirm_token": routed.get("confirm_token"),
+        }
+
+    ok_set, set_result = SAMMI_CLIENT.call(
+        "setVariable",
+        {"name": TWITCH_CHAT_SEND_VAR, "value": message},
+    )
+    if not ok_set:
+        raise RuntimeError(f"setVariable failed for {TWITCH_CHAT_SEND_VAR}: {set_result}")
+
+    ok_trigger, trigger_result = SAMMI_CLIENT.call(
+        "triggerButton",
+        {"buttonID": TWITCH_CHAT_SEND_BUTTON},
+    )
+    if not ok_trigger:
+        raise RuntimeError(f"triggerButton failed for {TWITCH_CHAT_SEND_BUTTON}: {trigger_result}")
+
+    emit_event(
+        con=None,
+        event_type="TWITCH_CHAT_SENT",
+        source=source,
+        payload={
+            "incident_id": incident_id,
+            "watch_condition": watch_condition,
+            "message_len": len(message),
+            "var_name": TWITCH_CHAT_SEND_VAR,
+            "button_id": TWITCH_CHAT_SEND_BUTTON,
+        },
+        mode=mode,
+        tags=["twitch", "send_chat"],
+    )
+    return {
+        "accepted": True,
+        "sent": True,
+        "incident_id": incident_id,
+        "tool_name": "twitch.send_chat",
+        "watch_condition": watch_condition,
+        "var_name": TWITCH_CHAT_SEND_VAR,
+        "button_id": TWITCH_CHAT_SEND_BUTTON,
+        "policy": decision,
+        "sammi": {
+            "set_variable": set_result,
+            "trigger_button": trigger_result,
+        },
+    }
+
+
+def _safe_twitch_context_pack(payload: dict[str, Any]) -> dict[str, Any]:
+    context = payload.get("context")
+    if not isinstance(context, dict):
+        return {}
+    user_id = str(context.get("twitch_user_id") or context.get("user_id") or "").strip()
+    if not user_id:
+        return {}
+
+    try:
+        user_ctx = TWITCH_REPO.get_user_context(user_id, redeem_limit=5)
+    except Exception:
+        return {}
+
+    user = user_ctx.get("user") or {}
+    stats = user_ctx.get("stats") or {}
+    last_messages = user_ctx.get("last_messages") or []
+    top_redeems = user_ctx.get("top_redeems") or []
+    tags: list[str] = []
+
+    redeem_total = int(stats.get("redeem_total") or 0)
+    message_count = int(user.get("message_count") or 0)
+    bits_total = int(stats.get("bits_total") or 0)
+    if redeem_total >= 3:
+        tags.append("usual_redeem_candidate")
+    if message_count >= 20:
+        tags.append("frequent_chatter")
+    if bits_total > 0 and str(stats.get("last_bits_ts_utc") or "").strip():
+        tags.append("recent_supporter")
+
+    return {
+        "user_id": user_id,
+        "display_name": user.get("display_name"),
+        "flags": user.get("flags") if isinstance(user.get("flags"), dict) else {},
+        "last_messages": last_messages[:5] if isinstance(last_messages, list) else [],
+        "top_redeems": top_redeems[:5] if isinstance(top_redeems, list) else [],
+        "stats": stats if isinstance(stats, dict) else {},
+        "heuristic_tags": tags,
+    }
+
+
+def _resolve_tool_from_assist_events(incident_id: str, confirm_token: str) -> str | None:
+    token = confirm_token.strip()
+    if not token:
+        return None
+
+    issued_events = DB_SERVICE.list_events(limit=500, event_type="ASSIST_CONFIRM_ISSUED")
+    for row in issued_events:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        if str(payload.get("incident_id") or "").strip() != incident_id:
+            continue
+        if str(payload.get("confirm_token") or "").strip() != token:
+            continue
+        tool_name = str(payload.get("tool_name") or "").strip()
+        if tool_name:
+            return TOOL_ROUTER.policy_engine.canonical_tool_name(tool_name)
+
+    preview_events = DB_SERVICE.list_events(limit=500, event_type="ASSIST_POLICY_PREVIEW")
+    for row in preview_events:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        if str(payload.get("incident_id") or "").strip() != incident_id:
+            continue
+        actions = payload.get("actions")
+        if not isinstance(actions, list):
+            continue
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            if str(action.get("confirm_token") or "").strip() != token:
+                continue
+            tool_name = str(action.get("tool_name") or "").strip()
+            if tool_name:
+                return TOOL_ROUTER.policy_engine.canonical_tool_name(tool_name)
+    return None
+
+
+def _resolve_tool_name_for_confirmation(
+    incident_id: str,
+    tool_name: str,
+    confirm_token: str,
+) -> str:
+    tool_text = tool_name.strip()
+    if tool_text:
+        return TOOL_ROUTER.policy_engine.canonical_tool_name(tool_text)
+
+    from_events = _resolve_tool_from_assist_events(incident_id, confirm_token)
+    if from_events:
+        return from_events
+
+    token = confirm_token.strip()
+    if token.startswith("confirm-"):
+        parts = token.split("-", 2)
+        if len(parts) == 3 and parts[1] and parts[2]:
+            return TOOL_ROUTER.policy_engine.canonical_tool_name(parts[2].replace("-", "."))
+
+    raise ValueError("tool_name could not be resolved from confirm_token")
+
+
 def record_confirmation(payload: dict[str, Any], source: str) -> dict[str, Any]:
     incident_id = payload["incident_id"].strip()
-    tool_name = payload["tool_name"].strip()
-    tool_key = TOOL_ROUTER.policy_engine.canonical_tool_name(tool_name)
-    confirm_token = (payload.get("user_confirm_token") or "").strip()
+    confirm_token = (payload.get("confirm_token") or payload.get("user_confirm_token") or "").strip()
+    tool_name = str(payload.get("tool_name") or "").strip()
+    tool_key = _resolve_tool_name_for_confirmation(incident_id, tool_name, confirm_token)
     if not confirm_token:
         confirm_token = TOOL_ROUTER.build_confirmation_token(incident_id, tool_key)
 
@@ -1065,6 +1403,14 @@ def _fetch_advisory_proposal(payload: dict[str, Any]) -> tuple[dict[str, Any], d
 
 
 def assist_with_advisory(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    payload_for_advisory = dict(payload)
+    twitch_context_pack = _safe_twitch_context_pack(payload)
+    if twitch_context_pack:
+        context = payload.get("context")
+        context_obj = dict(context) if isinstance(context, dict) else {}
+        context_obj["twitch_context_pack"] = twitch_context_pack
+        payload_for_advisory["context"] = context_obj
+
     request_id_hint = str(payload.get("request_id") or f"req-{uuid.uuid4().hex[:12]}")
     mode_hint = str(payload.get("mode") or "standby")
     emit_event(
@@ -1079,7 +1425,8 @@ def assist_with_advisory(payload: dict[str, Any], source: str) -> dict[str, Any]
             "watch_condition": payload.get("watch_condition"),
             "max_actions": payload.get("max_actions"),
             "user_text_chars": len(str(payload.get("user_text") or "")),
-            "has_context": isinstance(payload.get("context"), dict),
+            "has_context": isinstance(payload_for_advisory.get("context"), dict),
+            "has_twitch_context_pack": bool(twitch_context_pack),
         },
         session_id=payload.get("session_id"),
         correlation_id=request_id_hint,
@@ -1087,7 +1434,7 @@ def assist_with_advisory(payload: dict[str, Any], source: str) -> dict[str, Any]
         tags=["assist", "request"],
     )
 
-    proposal, advisory_meta = _fetch_advisory_proposal(payload)
+    proposal, advisory_meta = _fetch_advisory_proposal(payload_for_advisory)
     request_id = proposal["request_id"]
     incident_id = (payload.get("incident_id") or f"inc-{request_id}").strip()
     emit_event(
@@ -1278,3 +1625,41 @@ def assist_with_advisory(payload: dict[str, Any], source: str) -> dict[str, Any]
         "needs_confirmation": needs_confirmation,
         "advisory": advisory_meta,
     }
+
+
+def execute_provider_query(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    requirements = payload.get("requirements") if isinstance(payload.get("requirements"), dict) else {}
+    trace = payload.get("trace") if isinstance(payload.get("trace"), dict) else {}
+    request_obj = ProviderQuery(
+        provider=ProviderId(str(payload.get("provider") or "").strip().lower()),
+        operation=ProviderOperationId(str(payload.get("operation") or "").strip().lower()),
+        params=dict(payload.get("params") or {}),
+        max_age_s=int(requirements.get("max_age_s", 0)),
+        allow_stale_if_error=bool(requirements.get("allow_stale_if_error", False)),
+        incident_id=str(trace.get("incident_id") or "").strip() or None,
+        reason=str(trace.get("reason") or "api_query").strip() or "api_query",
+    )
+    result = ED_PROVIDER_QUERY_SERVICE.execute(request_obj)
+    emit_event(
+        con=None,
+        event_type="ED_PROVIDER_QUERY",
+        source=source,
+        payload={
+            "provider": request_obj.provider.value,
+            "operation": request_obj.operation.value,
+            "incident_id": request_obj.incident_id,
+            "reason": request_obj.reason,
+            "ok": result.ok,
+            "cache": {
+                "hit": result.cache.hit,
+                "age_s": result.cache.age_s,
+                "ttl_s": result.cache.ttl_s,
+                "stale_served": result.cache.stale_served,
+            },
+            "deny_reason": result.deny_reason.value if result.deny_reason else None,
+            "error": result.error,
+        },
+        correlation_id=request_obj.incident_id,
+        tags=["provider", request_obj.provider.value, request_obj.operation.value],
+    )
+    return {"ok": result.ok, **result.to_dict()}
