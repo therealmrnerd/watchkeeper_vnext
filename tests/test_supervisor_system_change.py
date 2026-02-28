@@ -34,9 +34,10 @@ class _FakeDB:
 
 
 class _FakeProviderService:
-    def __init__(self, *, ok: bool = True) -> None:
+    def __init__(self, *, ok: bool = True, inara_enabled: bool = False) -> None:
         self.ok = ok
         self.calls = []
+        self.config = {"providers": {"inara": {"enabled": inara_enabled}}}
 
     def execute_priority(
         self,
@@ -61,10 +62,18 @@ class _FakeProviderService:
         return ProviderResult(
             ok=self.ok,
             provider=ProviderId.SPANSH,
-            operation=ProviderOperationId.SYSTEM_LOOKUP,
+            operation=operation,
             fetched_at="2026-02-28T12:35:56.000000Z",
             cache=ProviderCacheMeta(hit=not self.ok, age_s=4 if not self.ok else 0, stale_served=not self.ok),
-            data={"name": params.get("system_name"), "system_address": params.get("system_address")},
+            data=(
+                {
+                    "name": params.get("system_name"),
+                    "system_address": params.get("system_address"),
+                    "sync_skipped": False,
+                }
+                if operation == ProviderOperationId.COMMANDER_LOCATION_PUSH
+                else {"name": params.get("system_name"), "system_address": params.get("system_address")}
+            ),
             provenance=ProviderProvenance(endpoint="https://spansh.invalid/system", http_code=200 if self.ok else 503),
             error=None if self.ok else "provider unavailable",
             deny_reason=None,
@@ -161,6 +170,32 @@ class SupervisorSystemChangeTests(unittest.TestCase):
         self.assertEqual(failure_events[0]["payload"]["system_name"], "Achenar")
         self.assertEqual(failure_events[0]["payload"]["previous_system_name"], "Sol")
         self.assertEqual(failure_events[0]["payload"]["error"], "provider unavailable")
+
+    def test_process_ed_triggers_inara_sync_when_enabled(self):
+        self._set_collect(
+            {
+                "ed.running": True,
+                "ed.process_name": "EliteDangerous64.exe",
+                "ed.telemetry.system_name": "Lave",
+                "ed.telemetry.system_address": 123456789,
+            }
+        )
+        db = _FakeDB()
+        provider = _FakeProviderService(ok=True, inara_enabled=True)
+
+        running, current_system = supervisor.process_ed(
+            db,
+            previous_running=True,
+            previous_system=("Sol", 10477373803),
+            provider_query_service=provider,
+        )
+
+        self.assertTrue(running)
+        self.assertEqual(current_system, ("Lave", 123456789))
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[0]["operation"], ProviderOperationId.SYSTEM_LOOKUP)
+        self.assertEqual(provider.calls[1]["operation"], ProviderOperationId.COMMANDER_LOCATION_PUSH)
+        self.assertIn("INARA_LOCATION_SYNCED", [event["event_type"] for event in db.events])
 
 
 if __name__ == "__main__":

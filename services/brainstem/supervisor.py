@@ -475,6 +475,71 @@ def _ensure_current_system_cached(
     )
 
 
+def _inara_sync_enabled(provider_query_service: ProviderQueryService) -> bool:
+    providers = provider_query_service.config.get("providers", {})
+    provider_cfg = providers.get("inara")
+    return isinstance(provider_cfg, dict) and bool(provider_cfg.get("enabled"))
+
+
+def _sync_current_system_to_inara(
+    *,
+    db: BrainstemDB,
+    correlation_id: str,
+    values: dict[str, Any],
+    system_identity: tuple[str | None, int | None],
+    previous_system: tuple[str | None, int | None] | None,
+    provider_query_service: ProviderQueryService,
+) -> None:
+    system_name, system_address = system_identity
+    params: dict[str, Any] = {"system_name": system_name}
+    if system_address is not None:
+        params["system_address"] = system_address
+    station_name = str(values.get("ed.telemetry.station_name") or "").strip()
+    if station_name:
+        params["station_name"] = station_name
+    result = provider_query_service.execute_priority(
+        operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+        params=params,
+        max_age_s=0,
+        allow_stale_if_error=False,
+        incident_id=correlation_id,
+        reason="system_change",
+    )
+    sync_skipped = bool((result.data or {}).get("sync_skipped")) if isinstance(result.data, dict) else False
+    event_type = "INARA_LOCATION_SYNC_FAILED"
+    severity = "warn"
+    if result.ok and sync_skipped:
+        event_type = "INARA_LOCATION_SYNC_SKIPPED"
+        severity = "info"
+    elif result.ok:
+        event_type = "INARA_LOCATION_SYNCED"
+        severity = "info"
+    db.append_event(
+        event_id=str(uuid.uuid4()),
+        timestamp_utc=utc_now_iso(),
+        event_type=event_type,
+        source="ed_supervisor",
+        payload={
+            "system_name": system_name,
+            "system_address": system_address,
+            "previous_system_name": previous_system[0] if previous_system else None,
+            "previous_system_address": previous_system[1] if previous_system else None,
+            "provider": result.provider.value,
+            "operation": result.operation.value,
+            "sync_skipped": sync_skipped,
+            "sync_reason": (result.data or {}).get("sync_reason") if isinstance(result.data, dict) else None,
+            "error": result.error,
+            "deny_reason": result.deny_reason.value if result.deny_reason else None,
+        },
+        profile=PROFILE,
+        session_id=SESSION_ID,
+        correlation_id=correlation_id,
+        mode="game",
+        severity=severity,
+        tags=["ed", "providers", "inara"],
+    )
+
+
 def _hide_console_window() -> None:
     if os.name != "nt":
         return
@@ -1944,6 +2009,15 @@ def process_ed(
             previous_system=previous_system,
             provider_query_service=provider_query_service or ED_PROVIDER_QUERY_SERVICE,
         )
+        if _inara_sync_enabled(provider_query_service or ED_PROVIDER_QUERY_SERVICE):
+            _sync_current_system_to_inara(
+                db=db,
+                correlation_id=correlation_id,
+                values=values,
+                system_identity=current_system,
+                previous_system=previous_system,
+                provider_query_service=provider_query_service or ED_PROVIDER_QUERY_SERVICE,
+            )
 
     if previous_running is None:
         return running, (current_system or previous_system if running else None)

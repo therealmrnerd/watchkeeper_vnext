@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,7 +26,12 @@ from core.ed_provider_types import (
     ProviderResult,
 )
 from provider_config import load_provider_config
-from provider_health import HttpProviderHealthProbe, list_provider_health, upsert_provider_health
+from provider_health import (
+    HttpProviderHealthProbe,
+    InaraHealthProbe,
+    list_provider_health,
+    upsert_provider_health,
+)
 
 
 def _utc_now() -> datetime:
@@ -372,6 +378,99 @@ class EdsmSystemLookupAdapter:
         }
 
 
+@dataclass
+class InaraLocationSyncAdapter:
+    base_url: str
+    timeout_sec: float
+    app_name: str
+    app_key: str
+    commander_name: str
+    frontier_id: str | None
+    opener: Callable[..., Any] = urllib.request.urlopen
+
+    def _endpoint_url(self) -> str:
+        return f"{str(self.base_url or '').rstrip('/')}/inapi/v1/"
+
+    def sync_location(self, request: ProviderQuery) -> tuple[dict[str, Any], dict[str, Any]]:
+        system_name = str(request.params.get("system_name") or "").strip()
+        if not system_name:
+            raise ValueError("params.system_name is required for inara commander_location_push")
+
+        header = {
+            "appName": self.app_name,
+            "appVersion": "watchkeeper-vnext",
+            "APIkey": self.app_key,
+            "commanderName": self.commander_name,
+        }
+        if str(self.frontier_id or "").strip():
+            header["commanderFrontierID"] = str(self.frontier_id).strip()
+
+        event_data: dict[str, Any] = {"starsystemName": system_name}
+        if request.params.get("system_address") is not None:
+            try:
+                event_data["systemAddress"] = int(request.params.get("system_address"))
+            except Exception:
+                pass
+        if str(request.params.get("station_name") or "").strip():
+            event_data["stationName"] = str(request.params.get("station_name")).strip()
+
+        payload = {
+            "header": header,
+            "events": [
+                {
+                    "eventName": "setCommanderTravelLocation",
+                    "eventTimestamp": _utc_now_iso(),
+                    "eventData": event_data,
+                }
+            ],
+        }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        endpoint_url = self._endpoint_url()
+        req = urllib.request.Request(
+            endpoint_url,
+            method="POST",
+            data=raw,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "watchkeeper-vnext",
+            },
+        )
+        with self.opener(req, timeout=self.timeout_sec) as resp:
+            status = int(getattr(resp, "status", 200))
+            body = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(body) if body else {}
+        event_status = None
+        event_status_text = ""
+        if isinstance(parsed, dict):
+            events = parsed.get("events")
+            if isinstance(events, list) and events and isinstance(events[0], dict):
+                event_status = events[0].get("eventStatus")
+                event_status_text = str(events[0].get("eventStatusText") or "")
+        if event_status is not None:
+            try:
+                event_code = int(event_status)
+            except Exception as exc:
+                raise RuntimeError("inara returned invalid eventStatus") from exc
+            if event_code < 200 or event_code >= 300:
+                raise RuntimeError(event_status_text or f"inara eventStatus={event_code}")
+        fetched_at = _utc_now_iso()
+        normalized = {
+            "commander_name": self.commander_name,
+            "frontier_id": self.frontier_id,
+            "system_name": system_name,
+            "system_address": request.params.get("system_address"),
+            "station_name": request.params.get("station_name"),
+            "sync_skipped": False,
+            "synced_at": fetched_at,
+        }
+        return normalized, {
+            "endpoint": endpoint_url,
+            "http_code": status,
+            "raw": parsed,
+            "fetched_at": fetched_at,
+        }
+
+
 class ProviderQueryService:
     def __init__(
         self,
@@ -386,6 +485,7 @@ class ProviderQueryService:
         self.opener = opener
         self._spansh = self._build_spansh_adapter()
         self._edsm = self._build_edsm_adapter()
+        self._inara = self._build_inara_adapter()
         self._probes = self._build_probes()
 
     def _build_spansh_adapter(self) -> SpanshSystemLookupAdapter | None:
@@ -418,8 +518,28 @@ class ProviderQueryService:
             opener=self.opener,
         )
 
-    def _build_probes(self) -> dict[str, HttpProviderHealthProbe]:
-        probes: dict[str, HttpProviderHealthProbe] = {}
+    def _build_inara_adapter(self) -> InaraLocationSyncAdapter | None:
+        cfg = self.config.get("providers", {}).get("inara")
+        if not isinstance(cfg, dict) or not bool(cfg.get("enabled")):
+            return None
+        timeout_ms = cfg.get("timeouts_ms", {}).get("read", 5000)
+        try:
+            timeout_sec = max(0.1, float(timeout_ms) / 1000.0)
+        except Exception:
+            timeout_sec = 5.0
+        auth = cfg.get("auth", {}) if isinstance(cfg.get("auth"), dict) else {}
+        return InaraLocationSyncAdapter(
+            base_url=str(cfg.get("base_url") or "").strip(),
+            timeout_sec=timeout_sec,
+            app_name=str(auth.get("app_name") or "").strip(),
+            app_key=str(auth.get("app_key") or "").strip(),
+            commander_name=str(auth.get("commander_name") or "").strip(),
+            frontier_id=(str(auth.get("frontier_id")).strip() if auth.get("frontier_id") is not None else None),
+            opener=self.opener,
+        )
+
+    def _build_probes(self) -> dict[str, Any]:
+        probes: dict[str, Any] = {}
         providers = self.config.get("providers", {})
         for provider_name in ("spansh", "edsm"):
             cfg = providers.get(provider_name)
@@ -437,13 +557,399 @@ class ProviderQueryService:
                 read_only=bool(cfg.get("features", {}).get("read_only", True)),
                 opener=self.opener,
             )
+        inara_cfg = providers.get("inara")
+        if isinstance(inara_cfg, dict) and bool(inara_cfg.get("enabled")):
+            timeout_ms = inara_cfg.get("timeouts_ms", {}).get("read", 5000)
+            try:
+                timeout_sec = max(0.1, float(timeout_ms) / 1000.0)
+            except Exception:
+                timeout_sec = 5.0
+            auth = inara_cfg.get("auth", {}) if isinstance(inara_cfg.get("auth"), dict) else {}
+            probes["inara"] = InaraHealthProbe(
+                provider_id=ProviderId.INARA,
+                base_url=str(inara_cfg.get("base_url") or "").strip(),
+                timeout_sec=timeout_sec,
+                app_name=str(auth.get("app_name") or "").strip(),
+                app_key=str(auth.get("app_key") or "").strip(),
+                commander_name=str(auth.get("commander_name") or "").strip(),
+                opener=self.opener,
+            )
         return probes
+
+    def _append_provider_event(self, *, event_type: str, severity: str, payload: dict[str, Any]) -> None:
+        with _connect(self.db_path) as con:
+            con.execute(
+                """
+                INSERT INTO event_log(
+                    event_id,timestamp_utc,event_type,source,profile,session_id,correlation_id,
+                    mode,severity,payload_json,tags_json
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    _utc_now_iso(),
+                    event_type,
+                    "provider_query",
+                    "watchkeeper",
+                    None,
+                    payload.get("incident_id"),
+                    "game",
+                    severity,
+                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(["providers", str(payload.get("provider") or ""), str(payload.get("operation") or "")]),
+                ),
+            )
+            con.commit()
+
+    def _recent_write_count(self, *, provider: ProviderId, operation: ProviderOperationId, window_s: int) -> int:
+        cutoff = (_utc_now() - timedelta(seconds=max(1, int(window_s)))).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        count = 0
+        with _connect(self.db_path) as con:
+            rows = con.execute(
+                """
+                SELECT payload_json
+                FROM event_log
+                WHERE source='provider_query'
+                  AND event_type='PROVIDER_WRITE_EXECUTED'
+                  AND timestamp_utc>=?
+                ORDER BY id DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except Exception:
+                continue
+            if payload.get("provider") == provider.value and payload.get("operation") == operation.value:
+                count += 1
+        return count
+
+    def _last_successful_write(
+        self,
+        *,
+        provider: ProviderId,
+        operation: ProviderOperationId,
+    ) -> dict[str, Any] | None:
+        with _connect(self.db_path) as con:
+            rows = con.execute(
+                """
+                SELECT payload_json
+                FROM event_log
+                WHERE source='provider_query'
+                  AND event_type='PROVIDER_WRITE_EXECUTED'
+                ORDER BY id DESC
+                LIMIT 20
+                """
+            ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+            except Exception:
+                continue
+            if payload.get("provider") == provider.value and payload.get("operation") == operation.value:
+                return payload
+        return None
+
+    def _handle_inara_write(self, request: ProviderQuery, provider_cfg: dict[str, Any]) -> ProviderResult:
+        health = self._get_health(request.provider)
+        if health and health.status in {
+            ProviderHealthStatus.DOWN,
+            ProviderHealthStatus.MISCONFIGURED,
+            ProviderHealthStatus.THROTTLED,
+        }:
+            deny_reason = ProviderDenyReason.PROVIDER_DOWN
+            if health.status == ProviderHealthStatus.MISCONFIGURED:
+                deny_reason = ProviderDenyReason.MISCONFIGURED
+            elif health.status == ProviderHealthStatus.THROTTLED:
+                deny_reason = ProviderDenyReason.RATE_LIMITED
+            self._append_provider_event(
+                event_type="PROVIDER_WRITE_DENIED",
+                severity="warn",
+                payload={
+                    "provider": request.provider.value,
+                    "operation": request.operation.value,
+                    "incident_id": request.incident_id,
+                    "reason": request.reason,
+                    "system_name": request.params.get("system_name"),
+                    "system_address": request.params.get("system_address"),
+                    "deny_reason": deny_reason.value,
+                    "message": health.message if health else "",
+                },
+            )
+            return ProviderResult(
+                ok=False,
+                provider=request.provider,
+                operation=request.operation,
+                fetched_at=_utc_now_iso(),
+                cache=ProviderCacheMeta(),
+                health_observed=health,
+                data=None,
+                provenance=ProviderProvenance(endpoint=None, http_code=None),
+                error=health.message if health else "provider unavailable",
+                deny_reason=deny_reason,
+            )
+
+        if self._inara is None:
+            return ProviderResult(
+                ok=False,
+                provider=request.provider,
+                operation=request.operation,
+                fetched_at=_utc_now_iso(),
+                cache=ProviderCacheMeta(),
+                health_observed=health,
+                data=None,
+                provenance=ProviderProvenance(endpoint=None, http_code=None),
+                error="inara adapter is not configured",
+                deny_reason=ProviderDenyReason.MISCONFIGURED,
+            )
+
+        sync_cfg = provider_cfg.get("sync", {}) if isinstance(provider_cfg.get("sync"), dict) else {}
+        debounce_s = max(0, int(sync_cfg.get("location_debounce_s", 300)))
+        last_success = self._last_successful_write(
+            provider=request.provider,
+            operation=request.operation,
+        )
+        if debounce_s > 0 and isinstance(last_success, dict):
+            same_system = (
+                last_success.get("system_name") == request.params.get("system_name")
+                and last_success.get("system_address") == request.params.get("system_address")
+            )
+            last_timestamp = _parse_iso8601(last_success.get("timestamp_utc"))
+            if same_system and last_timestamp is not None:
+                age_s = int((_utc_now() - last_timestamp).total_seconds())
+                if age_s < debounce_s:
+                    payload = {
+                        "provider": request.provider.value,
+                        "operation": request.operation.value,
+                        "incident_id": request.incident_id,
+                        "reason": request.reason,
+                        "system_name": request.params.get("system_name"),
+                        "system_address": request.params.get("system_address"),
+                        "timestamp_utc": _utc_now_iso(),
+                        "skip_reason": "debounced",
+                        "debounce_s": debounce_s,
+                        "age_s": age_s,
+                    }
+                    self._append_provider_event(
+                        event_type="PROVIDER_WRITE_SKIPPED",
+                        severity="info",
+                        payload=payload,
+                    )
+                    return ProviderResult(
+                        ok=True,
+                        provider=request.provider,
+                        operation=request.operation,
+                        fetched_at=payload["timestamp_utc"],
+                        cache=ProviderCacheMeta(),
+                        health_observed=health,
+                        data={
+                            "sync_skipped": True,
+                            "sync_reason": "debounced",
+                            "system_name": request.params.get("system_name"),
+                            "system_address": request.params.get("system_address"),
+                            "debounce_s": debounce_s,
+                            "age_s": age_s,
+                        },
+                        provenance=ProviderProvenance(endpoint=None, http_code=None),
+                        error=None,
+                        deny_reason=None,
+                    )
+
+        rpm_limit = int(provider_cfg.get("rate_limit", {}).get("rpm", 0) or 0)
+        if rpm_limit > 0:
+            recent_count = self._recent_write_count(
+                provider=request.provider,
+                operation=request.operation,
+                window_s=60,
+            )
+            if recent_count >= rpm_limit:
+                observed = ProviderHealth(
+                    provider=request.provider,
+                    status=ProviderHealthStatus.THROTTLED,
+                    checked_at=_utc_now_iso(),
+                    latency_ms=None,
+                    http_code=429,
+                    rate_limit_state=ProviderRateLimitState.THROTTLED,
+                    retry_after_s=60,
+                    tool_calls_allowed=False,
+                    degraded_readonly=False,
+                    message="client_rpm_limit",
+                )
+                upsert_provider_health(self.db_path, observed)
+                self._append_provider_event(
+                    event_type="PROVIDER_WRITE_DENIED",
+                    severity="warn",
+                    payload={
+                        "provider": request.provider.value,
+                        "operation": request.operation.value,
+                        "incident_id": request.incident_id,
+                        "reason": request.reason,
+                        "system_name": request.params.get("system_name"),
+                        "system_address": request.params.get("system_address"),
+                        "deny_reason": ProviderDenyReason.RATE_LIMITED.value,
+                        "message": "client_rpm_limit",
+                        "recent_count": recent_count,
+                        "rpm_limit": rpm_limit,
+                    },
+                )
+                return ProviderResult(
+                    ok=False,
+                    provider=request.provider,
+                    operation=request.operation,
+                    fetched_at=_utc_now_iso(),
+                    cache=ProviderCacheMeta(),
+                    health_observed=observed,
+                    data=None,
+                    provenance=ProviderProvenance(endpoint=None, http_code=429),
+                    error="client_rpm_limit",
+                    deny_reason=ProviderDenyReason.RATE_LIMITED,
+                )
+
+        started = time.time()
+        try:
+            normalized, meta = self._inara.sync_location(request)
+            observed = ProviderHealth(
+                provider=request.provider,
+                status=ProviderHealthStatus.OK,
+                checked_at=_utc_now_iso(),
+                latency_ms=int((time.time() - started) * 1000),
+                http_code=int(meta.get("http_code") or 200),
+                rate_limit_state=ProviderRateLimitState.OK,
+                retry_after_s=None,
+                tool_calls_allowed=True,
+                degraded_readonly=False,
+                message="healthy",
+            )
+            upsert_provider_health(self.db_path, observed)
+            self._append_provider_event(
+                event_type="PROVIDER_WRITE_EXECUTED",
+                severity="info",
+                payload={
+                    "provider": request.provider.value,
+                    "operation": request.operation.value,
+                    "incident_id": request.incident_id,
+                    "reason": request.reason,
+                    "timestamp_utc": str(meta.get("fetched_at") or _utc_now_iso()),
+                    "system_name": normalized.get("system_name"),
+                    "system_address": normalized.get("system_address"),
+                    "station_name": normalized.get("station_name"),
+                },
+            )
+            return ProviderResult(
+                ok=True,
+                provider=request.provider,
+                operation=request.operation,
+                fetched_at=str(meta.get("fetched_at") or _utc_now_iso()),
+                cache=ProviderCacheMeta(),
+                health_observed=observed,
+                data=normalized,
+                provenance=ProviderProvenance(
+                    endpoint=str(meta.get("endpoint") or ""),
+                    http_code=int(meta.get("http_code") or 200),
+                ),
+                error=None,
+                deny_reason=None,
+            )
+        except urllib.error.HTTPError as exc:
+            observed = ProviderHealth(
+                provider=request.provider,
+                status=ProviderHealthStatus.THROTTLED if int(exc.code) == 429 else ProviderHealthStatus.DOWN,
+                checked_at=_utc_now_iso(),
+                latency_ms=int((time.time() - started) * 1000),
+                http_code=int(exc.code),
+                rate_limit_state=(
+                    ProviderRateLimitState.THROTTLED if int(exc.code) == 429 else ProviderRateLimitState.UNKNOWN
+                ),
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message=f"http_{int(exc.code)}",
+            )
+            upsert_provider_health(self.db_path, observed)
+            self._append_provider_event(
+                event_type="PROVIDER_WRITE_FAILED",
+                severity="warn",
+                payload={
+                    "provider": request.provider.value,
+                    "operation": request.operation.value,
+                    "incident_id": request.incident_id,
+                    "reason": request.reason,
+                    "system_name": request.params.get("system_name"),
+                    "system_address": request.params.get("system_address"),
+                    "message": f"http_{int(exc.code)}",
+                },
+            )
+            return ProviderResult(
+                ok=False,
+                provider=request.provider,
+                operation=request.operation,
+                fetched_at=_utc_now_iso(),
+                cache=ProviderCacheMeta(),
+                health_observed=observed,
+                data=None,
+                provenance=ProviderProvenance(endpoint=None, http_code=int(exc.code)),
+                error=f"provider HTTP {int(exc.code)}",
+                deny_reason=ProviderDenyReason.RATE_LIMITED if int(exc.code) == 429 else ProviderDenyReason.PROVIDER_DOWN,
+            )
+        except Exception as exc:
+            observed = ProviderHealth(
+                provider=request.provider,
+                status=ProviderHealthStatus.DOWN,
+                checked_at=_utc_now_iso(),
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message=str(exc),
+            )
+            upsert_provider_health(self.db_path, observed)
+            self._append_provider_event(
+                event_type="PROVIDER_WRITE_FAILED",
+                severity="warn",
+                payload={
+                    "provider": request.provider.value,
+                    "operation": request.operation.value,
+                    "incident_id": request.incident_id,
+                    "reason": request.reason,
+                    "system_name": request.params.get("system_name"),
+                    "system_address": request.params.get("system_address"),
+                    "message": str(exc),
+                },
+            )
+            return ProviderResult(
+                ok=False,
+                provider=request.provider,
+                operation=request.operation,
+                fetched_at=_utc_now_iso(),
+                cache=ProviderCacheMeta(),
+                health_observed=observed,
+                data=None,
+                provenance=ProviderProvenance(endpoint=None, http_code=None),
+                error=str(exc),
+                deny_reason=ProviderDenyReason.PROVIDER_DOWN,
+            )
 
     def _get_health(self, provider: ProviderId) -> ProviderHealth | None:
         raw = get_provider_health_map(self.db_path).get(provider.value)
         parsed = _as_provider_health(raw)
         if parsed is not None:
-            return parsed
+            if (
+                parsed.status == ProviderHealthStatus.THROTTLED
+                and isinstance(parsed.retry_after_s, int)
+                and parsed.retry_after_s >= 0
+            ):
+                checked_at = _parse_iso8601(parsed.checked_at)
+                if checked_at is not None:
+                    age_s = int((_utc_now() - checked_at).total_seconds())
+                    if age_s < parsed.retry_after_s:
+                        return parsed
+                # retry window elapsed: re-probe instead of leaving the provider stuck throttled
+            else:
+                return parsed
         probe = self._probes.get(provider.value)
         if probe is None:
             return None
@@ -828,6 +1334,8 @@ class ProviderQueryService:
                 error=f"{request.provider.value} adapter does not implement {request.operation.value}",
                 deny_reason=ProviderDenyReason.NO_INTENT,
             )
+        if request.provider == ProviderId.INARA and request.operation == ProviderOperationId.COMMANDER_LOCATION_PUSH:
+            return self._handle_inara_write(request, provider_cfg)
 
         cache_cfg = provider_cfg.get("cache", {})
         ttl_s = int(cache_cfg.get("default_ttl_s", 86400))

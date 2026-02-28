@@ -107,6 +107,18 @@ Policy:
 - strict rate caps
 - never auto-enabled by the LLM
 
+Current vNext implementation:
+
+- Inara location sync is the first write-ish slice
+- triggered only from ED system-change truth in Brainstem
+- debounced to avoid duplicate writes on restart or repeated transition detection
+- hard client-side RPM cap enforced before outbound call
+- audited at both provider and supervisor layers
+- enabled only when Inara config includes:
+  - `auth.app_name`
+  - `auth.app_key`
+  - `auth.commander_name`
+
 ### D. Ship builds / reference
 
 Provider:

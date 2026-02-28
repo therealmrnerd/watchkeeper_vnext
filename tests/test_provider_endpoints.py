@@ -266,6 +266,28 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(body.get("operation"), "stations_lookup")
         self.assertEqual(body.get("data", {}).get("station_count"), 1)
 
+    def test_post_providers_query_supports_inara_location_push(self) -> None:
+        status, body = self._request(
+            "POST",
+            "/providers/query",
+            {
+                "tool": "ed.provider_query",
+                "provider": "inara",
+                "operation": "commander_location_push",
+                "params": {
+                    "system_name": "Sol",
+                    "system_address": 10477373803,
+                },
+                "requirements": {"max_age_s": 0, "allow_stale_if_error": False},
+                "trace": {"incident_id": "inc-http-inara", "reason": "endpoint_test_inara"},
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body.get("provider"), "inara")
+        self.assertEqual(body.get("operation"), "commander_location_push")
+
     def test_get_current_system_routes_through_priority_service(self) -> None:
         status, body = self._request("GET", "/providers/current-system")
         self.assertEqual(status, 200)

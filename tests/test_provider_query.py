@@ -44,9 +44,23 @@ class ProviderQueryTests(unittest.TestCase):
         self.db = BrainstemDB(self.db_path, self.schema_path)
         self.db.ensure_schema()
         self.calls = []
+        self._temp_config_paths: list[Path] = []
 
     def tearDown(self) -> None:
+        for path in self._temp_config_paths:
+            try:
+                path.unlink()
+            except Exception:
+                pass
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _write_config(self, mutator):
+        payload = json.loads(self.config_path.read_text(encoding="utf-8"))
+        mutator(payload)
+        path = self.temp_dir / f"providers_{len(self._temp_config_paths)}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._temp_config_paths.append(path)
+        return path
 
     def _opener(self, req, timeout=0):
         url = req.full_url
@@ -54,6 +68,8 @@ class ProviderQueryTests(unittest.TestCase):
         if url == "https://www.spansh.co.uk":
             return _FakeResponse({"ok": True}, status=200)
         if url == "https://www.edsm.net":
+            return _FakeResponse({"ok": True}, status=200)
+        if url == "https://inara.cz":
             return _FakeResponse({"ok": True}, status=200)
         if url == "https://www.spansh.co.uk/api/search/systems?q=Sol":
             return _FakeResponse(
@@ -131,6 +147,21 @@ class ProviderQueryTests(unittest.TestCase):
                         "economy": "Refinery",
                         "secondEconomy": "Service",
                     },
+                }
+            )
+        if url == "https://inara.cz/inapi/v1/":
+            body = json.loads(req.data.decode("utf-8"))
+            event = body["events"][0]
+            return _FakeResponse(
+                {
+                    "header": {"eventStatus": 200},
+                    "events": [
+                        {
+                            "eventName": event["eventName"],
+                            "eventStatus": 200,
+                            "eventStatusText": "OK",
+                        }
+                    ],
                 }
             )
         raise AssertionError(f"unexpected URL: {url}")
@@ -286,6 +317,203 @@ class ProviderQueryTests(unittest.TestCase):
         self.assertEqual(result.provider, ProviderId.EDSM)
         self.assertEqual(result.data["name"], "Sol")
         self.assertIn("https://www.edsm.net/api-v1/system?systemName=Sol&showCoordinates=1&showInformation=1&showPermit=1&showId=1", self.calls)
+
+    def test_inara_location_push_executes_when_enabled_and_configured(self) -> None:
+        config_path = self._write_config(
+            lambda payload: payload["providers"]["inara"].update(
+                {
+                    "enabled": True,
+                    "auth": {
+                        "mode": "app_whitelist",
+                        "app_name": "WK",
+                        "app_key": "secret-key",
+                        "commander_name": "Cmdr Test",
+                        "frontier_id": "12345",
+                    },
+                    "sync": {"location_debounce_s": 300},
+                }
+            )
+        )
+        service = ProviderQueryService(
+            db_path=self.db_path,
+            config_path=config_path,
+            opener=self._opener,
+        )
+
+        result = service.execute(
+            ProviderQuery(
+                provider=ProviderId.INARA,
+                operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+                params={"system_name": "Sol", "system_address": 10477373803},
+                max_age_s=0,
+                allow_stale_if_error=False,
+                incident_id="inc-inara-sync",
+                reason="unit_test_inara_sync",
+            )
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.provider, ProviderId.INARA)
+        self.assertFalse(result.data["sync_skipped"])
+        self.assertEqual(result.data["system_name"], "Sol")
+        self.assertIn("https://inara.cz/inapi/v1/", self.calls)
+
+    def test_inara_location_push_debounces_same_system(self) -> None:
+        config_path = self._write_config(
+            lambda payload: payload["providers"]["inara"].update(
+                {
+                    "enabled": True,
+                    "auth": {
+                        "mode": "app_whitelist",
+                        "app_name": "WK",
+                        "app_key": "secret-key",
+                        "commander_name": "Cmdr Test",
+                        "frontier_id": "12345",
+                    },
+                    "sync": {"location_debounce_s": 300},
+                }
+            )
+        )
+        service = ProviderQueryService(
+            db_path=self.db_path,
+            config_path=config_path,
+            opener=self._opener,
+        )
+        request_obj = ProviderQuery(
+            provider=ProviderId.INARA,
+            operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+            params={"system_name": "Sol", "system_address": 10477373803},
+            max_age_s=0,
+            allow_stale_if_error=False,
+            incident_id="inc-inara-sync",
+            reason="unit_test_inara_sync",
+        )
+
+        first = service.execute(request_obj)
+        second = service.execute(request_obj)
+
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        self.assertFalse(first.data["sync_skipped"])
+        self.assertTrue(second.data["sync_skipped"])
+        self.assertEqual(self.calls.count("https://inara.cz/inapi/v1/"), 1)
+
+    def test_inara_location_push_is_rate_limited_after_configured_budget(self) -> None:
+        config_path = self._write_config(
+            lambda payload: payload["providers"]["inara"].update(
+                {
+                    "enabled": True,
+                    "auth": {
+                        "mode": "app_whitelist",
+                        "app_name": "WK",
+                        "app_key": "secret-key",
+                        "commander_name": "Cmdr Test",
+                        "frontier_id": "12345",
+                    },
+                    "rate_limit": {
+                        "mode": "client",
+                        "rpm": 2,
+                        "burst": 1,
+                        "max_concurrent": 1,
+                        "cooldown_on_fail_s": 60,
+                    },
+                    "sync": {"location_debounce_s": 0},
+                }
+            )
+        )
+        service = ProviderQueryService(
+            db_path=self.db_path,
+            config_path=config_path,
+            opener=self._opener,
+        )
+        req1 = ProviderQuery(
+            provider=ProviderId.INARA,
+            operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+            params={"system_name": "Sol", "system_address": 10477373803},
+            max_age_s=0,
+            allow_stale_if_error=False,
+            incident_id="inc-inara-1",
+            reason="unit_test_inara_rate",
+        )
+        req2 = ProviderQuery(
+            provider=ProviderId.INARA,
+            operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+            params={"system_name": "Achenar", "system_address": 6289501754786},
+            max_age_s=0,
+            allow_stale_if_error=False,
+            incident_id="inc-inara-2",
+            reason="unit_test_inara_rate",
+        )
+        req3 = ProviderQuery(
+            provider=ProviderId.INARA,
+            operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+            params={"system_name": "Shinrarta Dezhra", "system_address": 3932277478106},
+            max_age_s=0,
+            allow_stale_if_error=False,
+            incident_id="inc-inara-3",
+            reason="unit_test_inara_rate",
+        )
+
+        self.assertTrue(service.execute(req1).ok)
+        self.assertTrue(service.execute(req2).ok)
+        third = service.execute(req3)
+
+        self.assertFalse(third.ok)
+        self.assertEqual(third.deny_reason.value, "rate_limited")
+        self.assertEqual(third.error, "client_rpm_limit")
+
+    def test_inara_throttle_recovers_after_retry_window(self) -> None:
+        config_path = self._write_config(
+            lambda payload: payload["providers"]["inara"].update(
+                {
+                    "enabled": True,
+                    "auth": {
+                        "mode": "app_whitelist",
+                        "app_name": "WK",
+                        "app_key": "secret-key",
+                        "commander_name": "Cmdr Test",
+                        "frontier_id": "12345",
+                    },
+                    "sync": {"location_debounce_s": 0},
+                }
+            )
+        )
+        service = ProviderQueryService(
+            db_path=self.db_path,
+            config_path=config_path,
+            opener=self._opener,
+        )
+        upsert_provider_health(
+            self.db_path,
+            ProviderHealth(
+                provider=ProviderId.INARA,
+                status=ProviderHealthStatus.THROTTLED,
+                checked_at="2000-01-01T00:00:00.000000Z",
+                latency_ms=None,
+                http_code=429,
+                rate_limit_state=ProviderRateLimitState.THROTTLED,
+                retry_after_s=60,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message="expired_throttle",
+            ),
+        )
+
+        result = service.execute(
+            ProviderQuery(
+                provider=ProviderId.INARA,
+                operation=ProviderOperationId.COMMANDER_LOCATION_PUSH,
+                params={"system_name": "Sol", "system_address": 10477373803},
+                max_age_s=0,
+                allow_stale_if_error=False,
+                incident_id="inc-inara-recover",
+                reason="unit_test_inara_recover",
+            )
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.provider, ProviderId.INARA)
+        self.assertIn("https://inara.cz", self.calls)
 
 
 if __name__ == "__main__":

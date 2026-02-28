@@ -190,6 +190,34 @@ Write-ish integrations remain disabled by default:
 - `inara`
 - commander-linked `edsm` features
 
+### Inara Location Sync
+
+Current vNext slice:
+
+- opt-in only
+- triggered on ED current-system change
+- debounced by provider config:
+  - `providers.inara.sync.location_debounce_s`
+- hard rate-capped by provider config:
+  - `providers.inara.rate_limit.rpm`
+- requires:
+  - `providers.inara.enabled=true`
+  - `providers.inara.auth.app_name`
+  - `providers.inara.auth.app_key`
+  - `providers.inara.auth.commander_name`
+
+Audit trail:
+
+- provider-layer events:
+  - `PROVIDER_WRITE_EXECUTED`
+  - `PROVIDER_WRITE_SKIPPED`
+  - `PROVIDER_WRITE_DENIED`
+  - `PROVIDER_WRITE_FAILED`
+- supervisor-layer events:
+  - `INARA_LOCATION_SYNCED`
+  - `INARA_LOCATION_SYNC_SKIPPED`
+  - `INARA_LOCATION_SYNC_FAILED`
+
 ## Run
 
 1. Initialize DB (once): `scripts/create_db.ps1`

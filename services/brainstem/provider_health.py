@@ -190,7 +190,123 @@ class HttpProviderHealthProbe:
             )
 
 
-def build_provider_health_probes(config_path: str | Path | None = None) -> list[HttpProviderHealthProbe]:
+@dataclass
+class InaraHealthProbe:
+    provider_id: ProviderId
+    base_url: str
+    timeout_sec: float
+    app_name: str
+    app_key: str
+    commander_name: str
+    opener: Callable[..., Any] = urllib.request.urlopen
+
+    def probe(self) -> ProviderHealth:
+        checked_at = _utc_now_iso()
+        if not str(self.base_url or "").strip():
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.MISCONFIGURED,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message="base_url missing",
+            )
+        if not str(self.app_name or "").strip():
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.MISCONFIGURED,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message="auth.app_name missing",
+            )
+        if not str(self.app_key or "").strip():
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.MISCONFIGURED,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message="auth.app_key missing",
+            )
+        if not str(self.commander_name or "").strip():
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.MISCONFIGURED,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message="auth.commander_name missing",
+            )
+        req = urllib.request.Request(str(self.base_url).strip(), method="GET")
+        started = time.time()
+        try:
+            with self.opener(req, timeout=self.timeout_sec) as resp:
+                code = int(getattr(resp, "status", 200))
+                resp.read(1)
+            latency_ms = int((time.time() - started) * 1000)
+            status = ProviderHealthStatus.OK if code < 400 else ProviderHealthStatus.DEGRADED
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=status,
+                checked_at=checked_at,
+                latency_ms=latency_ms,
+                http_code=code,
+                rate_limit_state=ProviderRateLimitState.OK,
+                retry_after_s=None,
+                tool_calls_allowed=status in {ProviderHealthStatus.OK, ProviderHealthStatus.DEGRADED},
+                degraded_readonly=False,
+                message="healthy" if status == ProviderHealthStatus.OK else f"http_{code}",
+            )
+        except urllib.error.HTTPError as exc:
+            code = int(exc.code)
+            latency_ms = int((time.time() - started) * 1000)
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.THROTTLED if code == 429 else ProviderHealthStatus.DOWN,
+                checked_at=checked_at,
+                latency_ms=latency_ms,
+                http_code=code,
+                rate_limit_state=(
+                    ProviderRateLimitState.THROTTLED if code == 429 else ProviderRateLimitState.UNKNOWN
+                ),
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message=f"http_{code}",
+            )
+        except Exception as exc:
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.DOWN,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=False,
+                message=str(exc),
+            )
+
+
+def build_provider_health_probes(config_path: str | Path | None = None) -> list[Any]:
     config = load_provider_config(config_path)
     providers = config.get("providers", {})
     probes: list[HttpProviderHealthProbe] = []
@@ -213,6 +329,24 @@ def build_provider_health_probes(config_path: str | Path | None = None) -> list[
                 base_url=str(provider_cfg.get("base_url") or "").strip(),
                 timeout_sec=timeout_sec,
                 read_only=read_only,
+            )
+        )
+    inara_cfg = providers.get("inara")
+    if isinstance(inara_cfg, dict) and bool(inara_cfg.get("enabled")):
+        timeout_ms = inara_cfg.get("timeouts_ms", {}).get("read", 5000)
+        try:
+            timeout_sec = max(0.1, float(timeout_ms) / 1000.0)
+        except Exception:
+            timeout_sec = 5.0
+        auth = inara_cfg.get("auth", {}) if isinstance(inara_cfg.get("auth"), dict) else {}
+        probes.append(
+            InaraHealthProbe(
+                provider_id=ProviderId.INARA,
+                base_url=str(inara_cfg.get("base_url") or "").strip(),
+                timeout_sec=timeout_sec,
+                app_name=str(auth.get("app_name") or "").strip(),
+                app_key=str(auth.get("app_key") or "").strip(),
+                commander_name=str(auth.get("commander_name") or "").strip(),
             )
         )
     return probes

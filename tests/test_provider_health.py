@@ -13,7 +13,12 @@ if str(BRAINSTEM_DIR) not in sys.path:
 
 from core.ed_provider_types import ProviderHealthStatus, ProviderId, ProviderRateLimitState
 from db_service import BrainstemDB
-from provider_health import HttpProviderHealthProbe, ProviderHealthScheduler, list_provider_health
+from provider_health import (
+    HttpProviderHealthProbe,
+    InaraHealthProbe,
+    ProviderHealthScheduler,
+    list_provider_health,
+)
 
 
 class _FakeResponse:
@@ -127,6 +132,23 @@ class ProviderHealthTests(unittest.TestCase):
         self.assertEqual(sorted(stored.keys()), ["edsm", "spansh"])
         self.assertEqual(stored["spansh"]["status"], "ok")
         self.assertEqual(stored["edsm"]["status"], "ok")
+
+    def test_inara_probe_without_credentials_is_misconfigured(self) -> None:
+        probe = InaraHealthProbe(
+            provider_id=ProviderId.INARA,
+            base_url="https://inara.cz",
+            timeout_sec=1.0,
+            app_name="",
+            app_key="",
+            commander_name="",
+            opener=lambda req, timeout=0: _FakeResponse(status=200),
+        )
+
+        result = probe.probe()
+
+        self.assertEqual(result.status, ProviderHealthStatus.MISCONFIGURED)
+        self.assertFalse(result.tool_calls_allowed)
+        self.assertIn("auth.app_name missing", result.message)
 
 
 if __name__ == "__main__":

@@ -87,7 +87,12 @@
       "auth": {
         "mode": "app_whitelist",
         "app_name": null,
-        "app_key": null
+        "app_key": null,
+        "commander_name": null,
+        "frontier_id": null
+      },
+      "sync": {
+        "location_debounce_s": 300
       },
       "features": {
         "commander_profile": true,
