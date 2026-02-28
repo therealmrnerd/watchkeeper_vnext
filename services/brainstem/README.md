@@ -190,6 +190,20 @@ Write-ish integrations remain disabled by default:
 - `inara`
 - commander-linked `edsm` features
 
+EDSM credential boundary:
+
+- Current vNext `edsm` usage is public read-only system lookup only.
+- That means:
+  - no credentials are required for the active `edsm` adapter path
+  - the UI must not ask for `edsm` credentials for topology reads
+- If Watchkeeper later adds commander/private `edsm` features, treat that as a separate credentialed subsystem.
+- Required handling for any future commander-linked `edsm` slice:
+  - explicit enablement
+  - encrypted persistent credential storage
+  - `misconfigured` provider health when enabled without valid credentials
+  - no raw secret values returned to the browser
+  - separate operations/contracts/tests from the public read-only adapter
+
 ### Inara Location Sync
 
 Current vNext slice:

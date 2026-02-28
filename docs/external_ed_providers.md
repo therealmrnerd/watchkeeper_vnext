@@ -35,6 +35,24 @@ That gives Brainstem, the UI, and later adapter implementations one stable surfa
   - read-only topology is allowed by default
   - commander-linked calls remain disabled unless explicitly configured
 
+Credential handling note:
+
+- Current vNext usage of `edsm` is public read-only topology lookup only.
+- That path must remain credential-free:
+  - no API key prompt
+  - no commander-name prompt
+  - no secret storage requirement
+- If Watchkeeper later adds commander/private EDSM features, credentials must be handled as a separate opt-in slice.
+- When that happens, use the same pattern as Inara:
+  - explicit enablement
+  - encrypted persistent storage
+  - health state should show `misconfigured` when enabled without valid credentials
+  - no secret values returned to the browser
+  - no automatic migration from plaintext config into long-term storage without operator awareness
+- Practical rule:
+  - public galaxy data stays "boring"
+  - commander-linked EDSM behavior becomes a deliberate credentialed subsystem, not an accidental extension of the read-only adapter
+
 ### Inara
 
 - Provider ID: `inara`
@@ -118,6 +136,13 @@ Current vNext implementation:
   - `auth.app_name`
   - `auth.app_key`
   - `auth.commander_name`
+- EDSM commander-linked features are explicitly deferred
+  - if added later, they must not reuse the public-read path implicitly
+  - they should get:
+    - their own operations
+    - their own auth summary
+    - encrypted credential storage
+    - separate docs and tests
 
 ### D. Ship builds / reference
 
