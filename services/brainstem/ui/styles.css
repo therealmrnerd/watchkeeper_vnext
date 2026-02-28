@@ -1193,6 +1193,7 @@ label {
   margin-bottom: 6px;
 }
 
+input,
 textarea,
 select {
   width: 100%;
@@ -1239,6 +1240,46 @@ button.secondary {
   max-height: 280px;
   overflow: auto;
   margin: 0;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.config-head {
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.config-note-list {
+  display: grid;
+  gap: 10px;
+}
+
+.config-note-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(102, 124, 147, 0.45);
+  border-radius: 8px;
+  background: rgba(12, 18, 26, 0.6);
+}
+
+.config-note-item strong {
+  color: #e8edf5;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.config-note-item span {
+  color: #b7c7d8;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .policy-item {
@@ -1579,6 +1620,10 @@ a {
   }
 
   .provider-health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .config-grid {
     grid-template-columns: 1fr;
   }
 

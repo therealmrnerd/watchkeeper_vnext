@@ -17,6 +17,7 @@ from actions import (
     record_confirmation,
     record_feedback,
     save_inara_credentials,
+    save_openai_credentials,
     send_twitch_chat,
     upsert_intent,
 )
@@ -29,6 +30,7 @@ from queries import (
     query_current_system_provider,
     query_current_system_stations,
     query_inara_credentials,
+    query_openai_credentials,
     query_providers_health,
     query_sitrep,
     query_state,
@@ -56,6 +58,7 @@ from validators import (
     validate_feedback,
     validate_inara_credentials_update,
     validate_intent,
+    validate_openai_credentials_update,
     validate_provider_query,
     validate_state_ingest,
 )
@@ -236,6 +239,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 self._send_json(200, query_inara_credentials(query))
                 return
 
+            if parsed.path == "/config/openai/credentials":
+                self._send_json(200, query_openai_credentials(query))
+                return
+
             if parsed.path == "/providers/current-system":
                 self._send_json(200, query_current_system_provider(query))
                 return
@@ -344,6 +351,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 validate_inara_credentials_update(body)
                 result = save_inara_credentials(body, source=source)
+                self._send_json(200, result)
+                return
+
+            if parsed.path == "/config/openai/credentials":
+                body = self._read_json_body()
+                validate_openai_credentials_update(body)
+                result = save_openai_credentials(body, source=source)
                 self._send_json(200, result)
                 return
 

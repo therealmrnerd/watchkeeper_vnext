@@ -216,3 +216,29 @@ def save_inara_secret_entry(
 
     save_provider_secret_store(store, path, codec=codec)
     return entry
+
+
+def save_openai_secret_entry(
+    *,
+    api_key: Any,
+    path: str | Path | None = None,
+    codec: SecretCodec | None = None,
+) -> dict[str, Any]:
+    store = load_provider_secret_store(path, codec=codec)
+    providers = store.setdefault("providers", {})
+    existing = providers.get("openai") if isinstance(providers.get("openai"), dict) else {}
+    entry: dict[str, Any] = {}
+
+    api_key_text = str(api_key or "").strip()
+    if api_key_text:
+        entry["api_key"] = api_key_text
+    elif isinstance(existing, dict) and str(existing.get("api_key") or "").strip():
+        entry["api_key"] = str(existing.get("api_key") or "").strip()
+
+    if entry:
+        providers["openai"] = entry
+    else:
+        providers.pop("openai", None)
+
+    save_provider_secret_store(store, path, codec=codec)
+    return entry

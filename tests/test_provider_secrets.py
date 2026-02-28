@@ -14,6 +14,7 @@ from provider_secrets import (
     get_provider_secret_entry,
     load_provider_secret_store,
     save_inara_secret_entry,
+    save_openai_secret_entry,
 )
 
 
@@ -71,6 +72,19 @@ class ProviderSecretsTests(unittest.TestCase):
         )
         loaded = get_provider_secret_entry("inara", self.secret_path, codec=self.codec)
         self.assertEqual(loaded["app_key"], "secret-api-key")
+
+    def test_save_openai_secret_entry_encrypts_at_rest(self) -> None:
+        entry = save_openai_secret_entry(
+            api_key="openai-secret-key",
+            path=self.secret_path,
+            codec=self.codec,
+        )
+        self.assertEqual(entry["api_key"], "openai-secret-key")
+        raw = self.secret_path.read_bytes()
+        self.assertNotIn(b"openai-secret-key", raw)
+
+        loaded = get_provider_secret_entry("openai", self.secret_path, codec=self.codec)
+        self.assertEqual(loaded["api_key"], "openai-secret-key")
 
 
 if __name__ == "__main__":

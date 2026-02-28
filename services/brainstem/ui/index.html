@@ -56,6 +56,7 @@
     <div class="tabs-left">
       <button class="tab-btn active" data-tab="console">Console</button>
       <button class="tab-btn" data-tab="edstatus">ED Status</button>
+      <button class="tab-btn" data-tab="config">Config</button>
       <button class="tab-btn" data-tab="logs">Logs & Diagnostics</button>
     </div>
     <div class="tabs-right">
@@ -219,6 +220,58 @@
           <div id="edStationsBadges" class="ed-badge-row"></div>
           <div id="edStationsMeta" class="muted">No data yet.</div>
           <div id="edStationsList" class="ed-card-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-config" class="tab-panel">
+      <div class="config-grid">
+        <div class="panel">
+          <div class="row config-head">
+            <h2>Inara Credentials</h2>
+            <span id="configInaraState" class="muted">Loading...</span>
+          </div>
+          <label for="configInaraCommanderInput">Commander Name</label>
+          <input id="configInaraCommanderInput" type="text" placeholder="Commander name">
+          <label for="configInaraFrontierInput">Frontier ID</label>
+          <input id="configInaraFrontierInput" type="text" placeholder="Frontier ID">
+          <label for="configInaraApiKeyInput">API Key</label>
+          <input id="configInaraApiKeyInput" type="password" placeholder="Enter API key">
+          <div class="row">
+            <button id="configInaraSaveBtn">Save Securely</button>
+          </div>
+          <div id="configInaraMeta" class="muted"></div>
+        </div>
+
+        <div class="panel">
+          <div class="row config-head">
+            <h2>OpenAI Credentials</h2>
+            <span id="configOpenAiState" class="muted">Loading...</span>
+          </div>
+          <label for="configOpenAiApiKeyInput">API Key</label>
+          <input id="configOpenAiApiKeyInput" type="password" placeholder="Enter OpenAI API key">
+          <div class="row">
+            <button id="configOpenAiSaveBtn">Save Securely</button>
+          </div>
+          <div id="configOpenAiMeta" class="muted"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Credential Notes</h2>
+          <div class="config-note-list">
+            <div class="config-note-item">
+              <strong>Spansh</strong>
+              <span>Current read-only topology path requires no credentials.</span>
+            </div>
+            <div class="config-note-item">
+              <strong>EDSM</strong>
+              <span>Current public read-only system lookup requires no credentials. Commander/private features will get their own secure flow later.</span>
+            </div>
+            <div class="config-note-item">
+              <strong>Storage</strong>
+              <span>Saved values are written to the local encrypted keystore, not back into tracked config files.</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>

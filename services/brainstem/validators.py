@@ -442,3 +442,15 @@ def validate_inara_credentials_update(payload: dict[str, Any]) -> None:
     api_key = payload.get("api_key")
     if api_key is not None and not isinstance(api_key, str):
         raise ValueError("api_key must be a string when supplied")
+
+
+def validate_openai_credentials_update(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    allowed = {"api_key"}
+    _check_extra_keys(payload, allowed, "openai_credentials")
+    if "api_key" not in payload:
+        raise ValueError("openai_credentials.api_key is required")
+    api_key = payload.get("api_key")
+    if api_key is not None and not isinstance(api_key, str):
+        raise ValueError("api_key must be a string when supplied")

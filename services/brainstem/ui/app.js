@@ -10,9 +10,10 @@
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
     inaraCredentials: null,
-    inaraCredentialDraft: null,
     inaraManualAction: null,
-    inaraCredentialAction: null,
+    configOpenAiCredentials: null,
+    configInaraAction: null,
+    configOpenAiAction: null,
     demoEnabled: false,
     demoScenario: "none",
     demoPreviewItems: null,
@@ -80,6 +81,16 @@
     edStationsBadges: document.getElementById("edStationsBadges"),
     edStationsMeta: document.getElementById("edStationsMeta"),
     edStationsList: document.getElementById("edStationsList"),
+    configInaraCommanderInput: document.getElementById("configInaraCommanderInput"),
+    configInaraFrontierInput: document.getElementById("configInaraFrontierInput"),
+    configInaraApiKeyInput: document.getElementById("configInaraApiKeyInput"),
+    configInaraSaveBtn: document.getElementById("configInaraSaveBtn"),
+    configInaraState: document.getElementById("configInaraState"),
+    configInaraMeta: document.getElementById("configInaraMeta"),
+    configOpenAiApiKeyInput: document.getElementById("configOpenAiApiKeyInput"),
+    configOpenAiSaveBtn: document.getElementById("configOpenAiSaveBtn"),
+    configOpenAiState: document.getElementById("configOpenAiState"),
+    configOpenAiMeta: document.getElementById("configOpenAiMeta"),
     servicesTable: document.getElementById("servicesTable"),
     runtimeInfo: document.getElementById("runtimeInfo"),
     handoverInfo: document.getElementById("handoverInfo"),
@@ -334,28 +345,6 @@
     return labels;
   }
 
-  function inaraCredentialValues() {
-    const payload = state.inaraCredentials && typeof state.inaraCredentials === "object"
-      ? state.inaraCredentials
-      : {};
-    const credentials = payload.credentials && typeof payload.credentials === "object"
-      ? payload.credentials
-      : {};
-    const auth = payload.auth && typeof payload.auth === "object" ? payload.auth : {};
-    const storage = payload.storage && typeof payload.storage === "object" ? payload.storage : {};
-    const draft = state.inaraCredentialDraft && typeof state.inaraCredentialDraft === "object"
-      ? state.inaraCredentialDraft
-      : {};
-    return { credentials, auth, storage, draft };
-  }
-
-  function updateInaraCredentialDraft(field, value) {
-    const current = state.inaraCredentialDraft && typeof state.inaraCredentialDraft === "object"
-      ? state.inaraCredentialDraft
-      : {};
-    state.inaraCredentialDraft = Object.assign({}, current, { [field]: String(value || "") });
-  }
-
   async function loadInaraCredentials() {
     try {
       const data = await apiGet("/providers/inara/credentials");
@@ -369,7 +358,110 @@
         storage: {},
       };
     }
+    renderConfigTab();
     renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
+  }
+
+  async function loadOpenAiCredentials() {
+    try {
+      const data = await apiGet("/config/openai/credentials");
+      state.configOpenAiCredentials = data && typeof data === "object" ? data : null;
+    } catch (err) {
+      state.configOpenAiCredentials = {
+        ok: false,
+        error: String(err.message || err),
+        credentials: {},
+        usage: {},
+        storage: {},
+      };
+    }
+    renderConfigTab();
+  }
+
+  function renderConfigTab() {
+    const inaraPayload = state.inaraCredentials && typeof state.inaraCredentials === "object"
+      ? state.inaraCredentials
+      : {};
+    const inaraCredentials = inaraPayload.credentials && typeof inaraPayload.credentials === "object"
+      ? inaraPayload.credentials
+      : {};
+    const inaraAuth = inaraPayload.auth && typeof inaraPayload.auth === "object"
+      ? inaraPayload.auth
+      : {};
+    const inaraStorage = inaraPayload.storage && typeof inaraPayload.storage === "object"
+      ? inaraPayload.storage
+      : {};
+    if (el.configInaraCommanderInput) {
+      el.configInaraCommanderInput.value = String(inaraCredentials.commander_name || "");
+    }
+    if (el.configInaraFrontierInput) {
+      el.configInaraFrontierInput.value = String(inaraCredentials.frontier_id || "");
+    }
+    if (el.configInaraApiKeyInput) {
+      el.configInaraApiKeyInput.value = "";
+      el.configInaraApiKeyInput.placeholder = inaraCredentials.api_key_present
+        ? "Stored securely. Enter a new key to replace it."
+        : "Enter API key";
+    }
+    if (el.configInaraState) {
+      if (!inaraPayload.ok) {
+        el.configInaraState.textContent = "Unavailable";
+      } else if (!inaraPayload.enabled) {
+        el.configInaraState.textContent = "Disabled";
+      } else if (inaraAuth.configured) {
+        el.configInaraState.textContent = "Configured";
+      } else {
+        el.configInaraState.textContent = "Needs auth";
+      }
+    }
+    if (el.configInaraMeta) {
+      const metaParts = [];
+      const appName = String(inaraAuth.app_name || "").trim();
+      metaParts.push(appName ? `App: ${appName}` : "App name still lives in providers.json");
+      metaParts.push(inaraStorage.encrypted ? "Stored in encrypted keystore" : "Secure store unavailable");
+      if (state.configInaraAction && state.configInaraAction.text) {
+        metaParts.push(state.configInaraAction.text);
+      }
+      el.configInaraMeta.textContent = metaParts.join(" | ");
+    }
+
+    const openAiPayload = state.configOpenAiCredentials && typeof state.configOpenAiCredentials === "object"
+      ? state.configOpenAiCredentials
+      : {};
+    const openAiCredentials = openAiPayload.credentials && typeof openAiPayload.credentials === "object"
+      ? openAiPayload.credentials
+      : {};
+    const openAiStorage = openAiPayload.storage && typeof openAiPayload.storage === "object"
+      ? openAiPayload.storage
+      : {};
+    const openAiUsage = openAiPayload.usage && typeof openAiPayload.usage === "object"
+      ? openAiPayload.usage
+      : {};
+    if (el.configOpenAiApiKeyInput) {
+      el.configOpenAiApiKeyInput.value = "";
+      el.configOpenAiApiKeyInput.placeholder = openAiCredentials.api_key_present
+        ? "Stored securely. Enter a new key to replace it."
+        : "Enter OpenAI API key";
+    }
+    if (el.configOpenAiState) {
+      if (!openAiPayload.ok) {
+        el.configOpenAiState.textContent = "Unavailable";
+      } else if (openAiCredentials.api_key_present) {
+        el.configOpenAiState.textContent = "Stored";
+      } else {
+        el.configOpenAiState.textContent = "Missing";
+      }
+    }
+    if (el.configOpenAiMeta) {
+      const metaParts = [
+        openAiStorage.encrypted ? "Stored in encrypted keystore" : "Secure store unavailable",
+        openAiUsage.note ? String(openAiUsage.note) : "Stored for future OpenAI fallback wiring.",
+      ];
+      if (state.configOpenAiAction && state.configOpenAiAction.text) {
+        metaParts.push(state.configOpenAiAction.text);
+      }
+      el.configOpenAiMeta.textContent = metaParts.join(" | ");
+    }
   }
 
   function renderEdProviderCards(providers) {
@@ -465,84 +557,6 @@
       });
       actions.appendChild(openBtn);
       if (providerId === "inara") {
-        const { credentials, auth: inaraAuth, storage, draft } = inaraCredentialValues();
-        const form = document.createElement("div");
-        form.className = "ed-provider-form";
-
-        const commanderField = document.createElement("label");
-        commanderField.className = "ed-provider-field";
-        const commanderLabel = document.createElement("span");
-        commanderLabel.className = "ed-provider-field-label";
-        commanderLabel.textContent = "Commander Name";
-        const commanderInput = document.createElement("input");
-        commanderInput.type = "text";
-        commanderInput.className = "ed-provider-input";
-        commanderInput.value = String(
-          draft.commander_name !== undefined ? draft.commander_name : (credentials.commander_name || "")
-        );
-        commanderInput.placeholder = "Commander name";
-        commanderInput.addEventListener("input", () => updateInaraCredentialDraft("commander_name", commanderInput.value));
-        commanderField.appendChild(commanderLabel);
-        commanderField.appendChild(commanderInput);
-
-        const frontierField = document.createElement("label");
-        frontierField.className = "ed-provider-field";
-        const frontierLabel = document.createElement("span");
-        frontierLabel.className = "ed-provider-field-label";
-        frontierLabel.textContent = "Frontier ID";
-        const frontierInput = document.createElement("input");
-        frontierInput.type = "text";
-        frontierInput.className = "ed-provider-input";
-        frontierInput.value = String(
-          draft.frontier_id !== undefined ? draft.frontier_id : (credentials.frontier_id || "")
-        );
-        frontierInput.placeholder = "Frontier ID";
-        frontierInput.addEventListener("input", () => updateInaraCredentialDraft("frontier_id", frontierInput.value));
-        frontierField.appendChild(frontierLabel);
-        frontierField.appendChild(frontierInput);
-
-        const keyField = document.createElement("label");
-        keyField.className = "ed-provider-field ed-provider-field-wide";
-        const keyLabel = document.createElement("span");
-        keyLabel.className = "ed-provider-field-label";
-        keyLabel.textContent = "API Key";
-        const keyInput = document.createElement("input");
-        keyInput.type = "password";
-        keyInput.className = "ed-provider-input";
-        keyInput.value = String(draft.api_key || "");
-        keyInput.placeholder = credentials.api_key_present ? "Stored securely. Enter a new key to replace it." : "Enter API key";
-        keyInput.addEventListener("input", () => updateInaraCredentialDraft("api_key", keyInput.value));
-        keyField.appendChild(keyLabel);
-        keyField.appendChild(keyInput);
-
-        const helper = document.createElement("div");
-        helper.className = "ed-provider-form-note";
-        const appNameText = inaraAuth && inaraAuth.app_name ? `App: ${inaraAuth.app_name}` : "App name is still configured in providers.json";
-        const storageText = storage && storage.encrypted ? "Stored with Windows encryption for this user." : "No encrypted store active.";
-        helper.textContent = `${appNameText} | ${storageText}`;
-
-        form.appendChild(commanderField);
-        form.appendChild(frontierField);
-        form.appendChild(keyField);
-        form.appendChild(helper);
-        card.appendChild(form);
-
-        const saveBtn = document.createElement("button");
-        saveBtn.type = "button";
-        saveBtn.className = "secondary header-chip ed-provider-save-btn";
-        saveBtn.textContent = "Save Securely";
-        saveBtn.addEventListener("click", async (evt) => {
-          evt.preventDefault();
-          evt.stopPropagation();
-          await saveInaraCredentials({
-            commander_name: commanderInput.value,
-            frontier_id: frontierInput.value,
-            api_key: keyInput.value,
-          }, saveBtn);
-          keyInput.value = "";
-        });
-        actions.appendChild(saveBtn);
-
         const syncBtn = document.createElement("button");
         syncBtn.type = "button";
         syncBtn.className = "secondary header-chip ed-provider-sync-btn";
@@ -556,19 +570,6 @@
         });
         actions.appendChild(syncBtn);
         card.appendChild(actions);
-        if (state.inaraCredentialAction && state.inaraCredentialAction.text) {
-          const credNode = document.createElement("div");
-          credNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraCredentialAction.status || "idle"}`;
-          const credState = document.createElement("div");
-          credState.className = "ed-provider-action-result-state";
-          credState.textContent = String(state.inaraCredentialAction.status || "idle").toUpperCase();
-          const credText = document.createElement("div");
-          credText.className = "ed-provider-action-result-text";
-          credText.textContent = state.inaraCredentialAction.text;
-          credNode.appendChild(credState);
-          credNode.appendChild(credText);
-          card.appendChild(credNode);
-        }
         if (state.inaraManualAction && state.inaraManualAction.text) {
           const resultNode = document.createElement("div");
           resultNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraManualAction.status || "idle"}`;
@@ -594,20 +595,37 @@
       buttonNode.disabled = true;
     }
     setInaraCredentialActionStatus("executing", "Saving Inara credentials securely...");
-    renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
-    setEdMeta("Saving Inara credentials securely...");
+    renderConfigTab();
     try {
       const result = await apiPost("/providers/inara/credentials", payload);
       state.inaraCredentials = result;
-      state.inaraCredentialDraft = null;
       setInaraCredentialActionStatus("completed", "Encrypted Inara credentials saved.");
-      setEdMeta("Encrypted Inara credentials saved.");
       await loadProviderHealth();
       await loadInaraCredentials();
     } catch (err) {
       setInaraCredentialActionStatus("failed", `Credential save failed: ${String(err.message || err)}`);
-      setEdMeta(`Credential save failed: ${String(err.message || err)}`);
-      renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
+      renderConfigTab();
+    } finally {
+      if (buttonNode) {
+        buttonNode.disabled = false;
+      }
+    }
+  }
+
+  async function saveOpenAiCredentials(payload, buttonNode) {
+    if (buttonNode) {
+      buttonNode.disabled = true;
+    }
+    setConfigOpenAiActionStatus("executing", "Saving OpenAI API key securely...");
+    renderConfigTab();
+    try {
+      const result = await apiPost("/config/openai/credentials", payload);
+      state.configOpenAiCredentials = result;
+      setConfigOpenAiActionStatus("completed", "Encrypted OpenAI API key saved.");
+      await loadOpenAiCredentials();
+    } catch (err) {
+      setConfigOpenAiActionStatus("failed", `Credential save failed: ${String(err.message || err)}`);
+      renderConfigTab();
     } finally {
       if (buttonNode) {
         buttonNode.disabled = false;
@@ -723,7 +741,15 @@
   }
 
   function setInaraCredentialActionStatus(status, text) {
-    state.inaraCredentialAction = {
+    state.configInaraAction = {
+      status: String(status || "idle").trim().toLowerCase(),
+      text: String(text || "").trim(),
+      at: nowIso(),
+    };
+  }
+
+  function setConfigOpenAiActionStatus(status, text) {
+    state.configOpenAiAction = {
       status: String(status || "idle").trim().toLowerCase(),
       text: String(text || "").trim(),
       at: nowIso(),
@@ -2255,6 +2281,28 @@
     if (el.refreshEdStatusBtn) {
       el.refreshEdStatusBtn.addEventListener("click", loadEdStatus);
     }
+    if (el.configInaraSaveBtn) {
+      el.configInaraSaveBtn.addEventListener("click", async () => {
+        await saveInaraCredentials(
+          {
+            commander_name: el.configInaraCommanderInput ? el.configInaraCommanderInput.value : "",
+            frontier_id: el.configInaraFrontierInput ? el.configInaraFrontierInput.value : "",
+            api_key: el.configInaraApiKeyInput ? el.configInaraApiKeyInput.value : "",
+          },
+          el.configInaraSaveBtn
+        );
+      });
+    }
+    if (el.configOpenAiSaveBtn) {
+      el.configOpenAiSaveBtn.addEventListener("click", async () => {
+        await saveOpenAiCredentials(
+          {
+            api_key: el.configOpenAiApiKeyInput ? el.configOpenAiApiKeyInput.value : "",
+          },
+          el.configOpenAiSaveBtn
+        );
+      });
+    }
     if (el.modeAutoBtn) {
       el.modeAutoBtn.addEventListener("click", () => {
         state.manualAssistMode = null;
@@ -2302,6 +2350,7 @@
     await loadSitrep();
     await loadProviderHealth();
     await loadInaraCredentials();
+    await loadOpenAiCredentials();
     await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();

@@ -49,7 +49,7 @@ from runtime import (
 )
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
 from provider_health import build_provider_health_probes
-from provider_secrets import save_inara_secret_entry
+from provider_secrets import save_inara_secret_entry, save_openai_secret_entry
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -828,6 +828,30 @@ def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, An
     from queries import query_inara_credentials
 
     result = query_inara_credentials({})
+    result["saved_securely"] = True
+    return result
+
+
+def save_openai_credentials(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    entry = save_openai_secret_entry(
+        api_key=payload.get("api_key"),
+        path=PROVIDER_SECRETS_PATH,
+    )
+    emit_event(
+        con=None,
+        event_type="PROVIDER_CREDENTIALS_UPDATED",
+        source=source,
+        payload={
+            "provider": "openai",
+            "api_key_present": bool(str(entry.get("api_key") or "").strip()),
+            "storage_path": str(PROVIDER_SECRETS_PATH),
+        },
+        tags=["provider", "openai", "credentials"],
+    )
+
+    from queries import query_openai_credentials
+
+    result = query_openai_credentials({})
     result["saved_securely"] = True
     return result
 

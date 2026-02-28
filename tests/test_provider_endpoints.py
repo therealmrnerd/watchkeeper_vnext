@@ -260,6 +260,28 @@ class ProviderEndpointsTests(unittest.TestCase):
             "2026-02-28T12:20:00.000000Z",
         )
 
+    def test_openai_credentials_round_trip_uses_secure_store(self) -> None:
+        status, body = self._request("GET", "/config/openai/credentials")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertFalse(body["credentials"]["api_key_present"])
+
+        status, body = self._request(
+            "POST",
+            "/config/openai/credentials",
+            {"api_key": "openai-test-key"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertTrue(body["credentials"]["api_key_present"])
+        self.assertTrue(self.secrets_path.exists())
+        self.assertNotIn(b"openai-test-key", self.secrets_path.read_bytes())
+
+        status, body = self._request("GET", "/config/openai/credentials")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["credentials"]["api_key_present"])
+        self.assertEqual(body["credentials"]["api_key_source"], "secure_store")
+
     def test_get_inara_credentials_returns_secure_summary(self) -> None:
         status, body = self._request("GET", "/providers/inara/credentials")
         self.assertEqual(status, 200)

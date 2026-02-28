@@ -271,6 +271,29 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
     }
 
 
+def query_openai_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
+    secure_auth = get_provider_secret_entry("openai", PROVIDER_SECRETS_PATH)
+    api_key_present = bool(str(secure_auth.get("api_key") or "").strip())
+    return {
+        "ok": True,
+        "provider": "openai",
+        "storage": {
+            "encrypted": True,
+            "path": str(Path(PROVIDER_SECRETS_PATH).resolve()),
+            "exists": Path(PROVIDER_SECRETS_PATH).exists(),
+            "secure_store_present": bool(secure_auth),
+        },
+        "credentials": {
+            "api_key_present": api_key_present,
+            "api_key_source": "secure_store" if api_key_present else None,
+        },
+        "usage": {
+            "wired": False,
+            "note": "Stored for future OpenAI fallback wiring; current advisory runtime does not consume it yet.",
+        },
+    }
+
+
 def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]:
     state = _state_map()
     system_name = _first_present(

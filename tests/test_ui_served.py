@@ -71,6 +71,7 @@ class UIServedTests(unittest.TestCase):
         self.assertIn("watchkeeper_logo.png", body)
         self.assertIn("Console", body)
         self.assertIn("ED Status", body)
+        self.assertIn("Config", body)
 
     def test_ui_asset_served(self) -> None:
         status, body = self._request("/app.js")
