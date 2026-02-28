@@ -14,8 +14,10 @@ from typing import Any
 from urllib import error, parse, request
 
 THIS_DIR = Path(__file__).resolve().parent
-if str(THIS_DIR) not in sys.path:
-    sys.path.insert(0, str(THIS_DIR))
+ROOT_DIR = Path(__file__).resolve().parents[2]
+for p in (THIS_DIR, ROOT_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 from core.ed_provider_types import ProviderOperationId
 from db_service import BrainstemDB
 from edparser_tool import EDParserTool
@@ -24,8 +26,6 @@ from provider_query import ProviderQueryService
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
 DB_PATH = Path(os.getenv("WKV_DB_PATH", ROOT_DIR / "data" / "watchkeeper_vnext.db"))
 SCHEMA_PATH = Path(
     os.getenv("WKV_SCHEMA_PATH", ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
