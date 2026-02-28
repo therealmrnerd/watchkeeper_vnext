@@ -8,6 +8,8 @@
     eventFilterCorrelationId: null,
     latestSitrep: null,
     latestEdProviderCurrent: null,
+    latestProviderHealth: null,
+    inaraManualAction: null,
     demoEnabled: false,
     demoScenario: "none",
     demoPreviewItems: null,
@@ -263,6 +265,7 @@
   }
 
   function renderProviderHealth(data) {
+    state.latestProviderHealth = data && typeof data === "object" ? data : { providers: {} };
     const providers = data && typeof data.providers === "object" ? data.providers : {};
     setProviderHealthButton(
       el.providerSpanshBtn,
@@ -426,6 +429,19 @@
         });
         actions.appendChild(syncBtn);
         card.appendChild(actions);
+        if (state.inaraManualAction && state.inaraManualAction.text) {
+          const resultNode = document.createElement("div");
+          resultNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraManualAction.status || "idle"}`;
+          const resultState = document.createElement("div");
+          resultState.className = "ed-provider-action-result-state";
+          resultState.textContent = String(state.inaraManualAction.status || "idle").toUpperCase();
+          const resultText = document.createElement("div");
+          resultText.className = "ed-provider-action-result-text";
+          resultText.textContent = state.inaraManualAction.text;
+          resultNode.appendChild(resultState);
+          resultNode.appendChild(resultText);
+          card.appendChild(resultNode);
+        }
       }
       el.edProviderCards.appendChild(card);
     }
@@ -434,11 +450,15 @@
   async function syncCurrentLocationToInara(buttonNode) {
     const current = state.latestEdProviderCurrent;
     if (!current || !current.ok || !current.data) {
+      setInaraManualActionStatus("failed", "Current system is unknown.");
+      renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
       setEdMeta("Inara sync unavailable: current system is unknown.");
       return;
     }
     const systemName = String(current.data.name || current.current_system_state?.system_name || "").trim();
     if (!systemName) {
+      setInaraManualActionStatus("failed", "System name missing.");
+      renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
       setEdMeta("Inara sync unavailable: system name missing.");
       return;
     }
@@ -462,19 +482,28 @@
     if (buttonNode) {
       buttonNode.disabled = true;
     }
+    setInaraManualActionStatus("executing", `Syncing ${systemName} to Inara...`);
+    renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
     setEdMeta(`Syncing ${systemName} to Inara...`);
     try {
       const result = await apiPost("/providers/query", payload);
       if (result.ok) {
         const skipped = Boolean(result.data && result.data.sync_skipped);
+        setInaraManualActionStatus(
+          skipped ? "skipped" : "completed",
+          skipped ? `Sync skipped for ${systemName}.` : `Sync completed for ${systemName}.`
+        );
         setEdMeta(skipped ? `Inara sync skipped for ${systemName}.` : `Inara sync completed for ${systemName}.`);
       } else {
+        setInaraManualActionStatus("failed", `Sync blocked: ${String(result.error || result.deny_reason || "request_failed")}`);
         setEdMeta(`Inara sync blocked: ${String(result.error || result.deny_reason || "request_failed")}`);
       }
     } catch (err) {
+      setInaraManualActionStatus("failed", `Sync failed: ${String(err.message || err)}`);
       setEdMeta(`Inara sync failed: ${String(err.message || err)}`);
     } finally {
       await loadProviderHealth();
+      renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
       if (buttonNode) {
         buttonNode.disabled = false;
       }
@@ -515,6 +544,14 @@
   function formatProviderActivityLabel(prefix, value) {
     const ts = formatProviderTimestamp(value);
     return `${prefix}: ${ts}`;
+  }
+
+  function setInaraManualActionStatus(status, text) {
+    state.inaraManualAction = {
+      status: String(status || "idle").trim().toLowerCase(),
+      text: String(text || "").trim(),
+      at: nowIso(),
+    };
   }
 
   function setEdMeta(text) {
