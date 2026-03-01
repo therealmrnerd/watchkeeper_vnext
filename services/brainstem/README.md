@@ -27,6 +27,7 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `GET /providers/current-system`
 - `GET /providers/current-system/bodies`
 - `GET /providers/current-system/stations`
+- `GET /obs/status`
 - `GET /providers/inara/credentials`
 - `GET /config/openai/credentials`
 - `GET /settings`
@@ -272,6 +273,7 @@ Live-applied settings in this slice:
   - `spansh`
   - `edsm`
   - `inara`
+  - `obs`
 - syncs:
   - `ed_provider_autocache`
   - `inara_location_sync`
@@ -279,10 +281,10 @@ Live-applied settings in this slice:
   - `ytmd_ingest`
   - `sammi_bridge`
   - `twitch_ingest`
+  - `obs_status`
 
 Planned-but-persisted settings in this slice:
 
-- `obs_status`
 - `obs_effect_triggers`
 - `openai` cloud fallback preference
 

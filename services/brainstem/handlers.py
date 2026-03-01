@@ -28,6 +28,7 @@ from queries import (
     query_events,
     query_log_files,
     query_log_tail,
+    query_obs_status,
     query_current_system_provider,
     query_current_system_stations,
     query_inara_credentials,
@@ -248,6 +249,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/settings":
                 self._send_json(200, query_runtime_settings(query))
+                return
+
+            if parsed.path == "/obs/status":
+                self._send_json(200, query_obs_status(query))
                 return
 
             if parsed.path == "/providers/current-system":

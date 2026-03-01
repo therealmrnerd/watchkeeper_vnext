@@ -32,8 +32,9 @@ from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuer
 from provider_config import load_runtime_provider_config
 from provider_health import list_provider_health
 from provider_query import query_provider_health
+from obs_client import fetch_obs_status, OBS_HOST, OBS_PORT, OBS_TIMEOUT_SEC
 from provider_secrets import get_provider_secret_entry
-from settings_store import apply_runtime_settings_overrides, load_runtime_settings
+from settings_store import apply_runtime_settings_overrides, load_runtime_settings, runtime_setting_enabled
 
 try:
     from tools.diag_report import build_diag_report
@@ -326,6 +327,38 @@ def query_runtime_settings(query: dict[str, list[str]]) -> dict[str, Any]:
         "ok": True,
         "settings": settings,
     }
+
+
+def query_obs_status(query: dict[str, list[str]]) -> dict[str, Any]:
+    settings = load_runtime_settings(Path(DB_PATH))
+    obs_provider_enabled = runtime_setting_enabled(settings, "providers", "obs", False)
+    obs_status_enabled = runtime_setting_enabled(settings, "syncs", "obs_status", False)
+    if not obs_provider_enabled or not obs_status_enabled:
+        reasons = []
+        if not obs_provider_enabled:
+            reasons.append("provider disabled")
+        if not obs_status_enabled:
+            reasons.append("status polling disabled")
+        return {
+            "ok": True,
+            "status": "disabled",
+            "enabled": {
+                "provider": obs_provider_enabled,
+                "status_polling": obs_status_enabled,
+            },
+            "endpoint": {
+                "host": OBS_HOST,
+                "port": OBS_PORT,
+            },
+            "message": " | ".join(reasons) if reasons else "disabled by settings",
+        }
+
+    payload = fetch_obs_status(host=OBS_HOST, port=OBS_PORT, timeout_sec=OBS_TIMEOUT_SEC)
+    payload["enabled"] = {
+        "provider": obs_provider_enabled,
+        "status_polling": obs_status_enabled,
+    }
+    return payload
 
 
 def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]:

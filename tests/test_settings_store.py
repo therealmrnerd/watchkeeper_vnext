@@ -38,7 +38,8 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
         self.assertTrue(settings["syncs"]["ytmd_ingest"]["live_applied"])
         self.assertTrue(settings["syncs"]["sammi_bridge"]["live_applied"])
         self.assertTrue(settings["syncs"]["twitch_ingest"]["live_applied"])
-        self.assertFalse(settings["providers"]["obs"]["live_applied"])
+        self.assertTrue(settings["providers"]["obs"]["live_applied"])
+        self.assertTrue(settings["syncs"]["obs_status"]["live_applied"])
 
     def test_save_updates_selected_flags_and_preserves_defaults(self) -> None:
         saved = save_runtime_settings(

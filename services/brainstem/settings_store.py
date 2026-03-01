@@ -16,7 +16,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
         "edsm": {"enabled": None, "live_applied": True, "label": "EDSM"},
         "inara": {"enabled": None, "live_applied": True, "label": "Inara"},
         "openai": {"enabled": False, "live_applied": False, "label": "OpenAI Cloud Fallback"},
-        "obs": {"enabled": False, "live_applied": False, "label": "OBS Status"},
+        "obs": {"enabled": False, "live_applied": True, "label": "OBS Status"},
     },
     "syncs": {
         "ed_provider_autocache": {"enabled": True, "live_applied": True, "label": "ED Provider Autocache"},
@@ -25,7 +25,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
         "ytmd_ingest": {"enabled": True, "live_applied": True, "label": "YTMD Ingest"},
         "sammi_bridge": {"enabled": True, "live_applied": True, "label": "SAMMI Bridge"},
         "twitch_ingest": {"enabled": True, "live_applied": True, "label": "Twitch Ingest"},
-        "obs_status": {"enabled": False, "live_applied": False, "label": "OBS Status Polling"},
+        "obs_status": {"enabled": False, "live_applied": True, "label": "OBS Status Polling"},
         "obs_effect_triggers": {"enabled": False, "live_applied": False, "label": "OBS Effect Triggers"},
     },
 }

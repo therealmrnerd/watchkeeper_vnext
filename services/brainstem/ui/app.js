@@ -9,6 +9,7 @@
     latestSitrep: null,
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
+    latestObsStatus: null,
     inaraCredentials: null,
     runtimeSettings: null,
     inaraManualAction: null,
@@ -95,6 +96,10 @@
     configOpenAiClearBtn: document.getElementById("configOpenAiClearBtn"),
     configOpenAiState: document.getElementById("configOpenAiState"),
     configOpenAiMeta: document.getElementById("configOpenAiMeta"),
+    configObsState: document.getElementById("configObsState"),
+    configObsRefreshBtn: document.getElementById("configObsRefreshBtn"),
+    configObsSummary: document.getElementById("configObsSummary"),
+    configObsMeta: document.getElementById("configObsMeta"),
     configSettingsGrid: document.getElementById("configSettingsGrid"),
     configSettingsSaveBtn: document.getElementById("configSettingsSaveBtn"),
     configSettingsState: document.getElementById("configSettingsState"),
@@ -405,6 +410,20 @@
     renderConfigTab();
   }
 
+  async function loadObsStatus() {
+    try {
+      const data = await apiGet("/obs/status");
+      state.latestObsStatus = data && typeof data === "object" ? data : null;
+    } catch (err) {
+      state.latestObsStatus = {
+        ok: false,
+        status: "down",
+        error: String(err.message || err),
+      };
+    }
+    renderConfigTab();
+  }
+
   function buildSettingsSection(title, sectionName, items) {
     const panel = document.createElement("div");
     panel.className = "settings-section";
@@ -548,6 +567,95 @@
       el.configOpenAiMeta.textContent = metaParts.join(" | ");
     }
 
+    const obsPayload = state.latestObsStatus && typeof state.latestObsStatus === "object"
+      ? state.latestObsStatus
+      : {};
+    const obsEndpoint = obsPayload.endpoint && typeof obsPayload.endpoint === "object"
+      ? obsPayload.endpoint
+      : {};
+    const obsVersions = obsPayload.versions && typeof obsPayload.versions === "object"
+      ? obsPayload.versions
+      : {};
+    const obsStats = obsPayload.stats && typeof obsPayload.stats === "object"
+      ? obsPayload.stats
+      : {};
+    const obsScene = obsPayload.scene && typeof obsPayload.scene === "object"
+      ? obsPayload.scene
+      : {};
+    const obsStream = obsPayload.stream && typeof obsPayload.stream === "object"
+      ? obsPayload.stream
+      : {};
+    const obsRecord = obsPayload.record && typeof obsPayload.record === "object"
+      ? obsPayload.record
+      : {};
+    const obsEnabled = obsPayload.enabled && typeof obsPayload.enabled === "object"
+      ? obsPayload.enabled
+      : {};
+    if (el.configObsState) {
+      const obsStatus = String(obsPayload.status || "").trim().toLowerCase();
+      if (obsStatus === "disabled") {
+        el.configObsState.textContent = "Disabled";
+      } else if (obsPayload.ok) {
+        el.configObsState.textContent = "Connected";
+      } else if (obsStatus === "needs_auth") {
+        el.configObsState.textContent = "Needs Auth";
+      } else if (obsStatus) {
+        el.configObsState.textContent = obsStatus.toUpperCase();
+      } else {
+        el.configObsState.textContent = "Unavailable";
+      }
+    }
+    if (el.configObsSummary) {
+      clearNode(el.configObsSummary);
+      if (obsPayload.ok) {
+        appendSummaryItem(el.configObsSummary, "OBS", String(obsVersions.obs_studio || "-"));
+        appendSummaryItem(el.configObsSummary, "WebSocket", String(obsVersions.obs_websocket || "-"));
+        appendSummaryItem(el.configObsSummary, "Program Scene", String(obsScene.program || "-"));
+        appendSummaryItem(el.configObsSummary, "Studio Mode", obsPayload.studio_mode_enabled ? "On" : "Off");
+        appendSummaryItem(el.configObsSummary, "Streaming", obsStream.active ? "Live" : "Idle");
+        appendSummaryItem(el.configObsSummary, "Recording", obsRecord.active ? "Recording" : "Idle");
+        appendSummaryItem(el.configObsSummary, "Active FPS", formatDecimal(obsStats.active_fps, 1));
+        appendSummaryItem(el.configObsSummary, "CPU", `${formatDecimal(obsStats.cpu_usage, 1)}%`);
+        appendSummaryItem(el.configObsSummary, "Memory", `${formatDecimal(obsStats.memory_usage_mb, 0)} MB`);
+        appendSummaryItem(el.configObsSummary, "Render", `${formatDecimal(obsStats.avg_frame_render_ms, 2)} ms`);
+      } else if (String(obsPayload.status || "").trim().toLowerCase() === "disabled") {
+        appendSummaryItem(el.configObsSummary, "OBS Provider", obsEnabled.provider ? "Enabled" : "Disabled");
+        appendSummaryItem(el.configObsSummary, "Status Polling", obsEnabled.status_polling ? "Enabled" : "Disabled");
+        appendSummaryItem(
+          el.configObsSummary,
+          "Endpoint",
+          `${String(obsEndpoint.host || "127.0.0.1")}:${String(obsEndpoint.port || "4455")}`
+        );
+      } else {
+        appendSummaryItem(el.configObsSummary, "Status", "Unavailable");
+        appendSummaryItem(
+          el.configObsSummary,
+          "Endpoint",
+          `${String(obsEndpoint.host || "127.0.0.1")}:${String(obsEndpoint.port || "4455")}`
+        );
+      }
+    }
+    if (el.configObsMeta) {
+      const metaParts = [];
+      if (obsPayload.ok) {
+        metaParts.push(`Latency: ~${formatInteger(obsEndpoint.latency_ms)}ms`);
+        metaParts.push(
+          `Skipped frames: ${formatInteger(obsStats.render_skipped_frames)}/${formatInteger(obsStats.render_total_frames)}`
+        );
+        metaParts.push(`Disk free: ${formatDecimal(obsStats.disk_free_mb, 0)} MB`);
+        if (Array.isArray(obsPayload.notes) && obsPayload.notes.length) {
+          metaParts.push(String(obsPayload.notes[0]));
+        }
+      } else if (String(obsPayload.status || "").trim().toLowerCase() === "disabled") {
+        metaParts.push(String(obsPayload.message || "OBS status is disabled by runtime settings."));
+      } else if (obsPayload.error) {
+        metaParts.push(String(obsPayload.error));
+      } else {
+        metaParts.push("OBS status unavailable.");
+      }
+      el.configObsMeta.textContent = metaParts.join(" | ");
+    }
+
     if (el.configSettingsGrid) {
       el.configSettingsGrid.innerHTML = "";
       el.configSettingsGrid.appendChild(
@@ -576,7 +684,7 @@
     if (el.configSettingsMeta) {
       const metaParts = [
         "Live toggles apply immediately where Brainstem already supports them.",
-        "Planned toggles are persisted for future integrations such as OBS and the wider stream tab.",
+        "OBS status polling is now live. Remaining planned toggles stay persisted for future stream integrations.",
       ];
       if (state.configSettingsAction && state.configSettingsAction.text) {
         metaParts.push(state.configSettingsAction.text);
@@ -1001,6 +1109,7 @@
       state.runtimeSettings = result && typeof result === "object" ? result.settings || null : null;
       setConfigSettingsActionStatus("completed", "Runtime settings saved.");
       await loadProviderHealth();
+      await loadObsStatus();
     } catch (err) {
       setConfigSettingsActionStatus("failed", `Settings save failed: ${String(err.message || err)}`);
       renderConfigTab();
@@ -2573,6 +2682,11 @@
         await saveRuntimeSettings(el.configSettingsSaveBtn);
       });
     }
+    if (el.configObsRefreshBtn) {
+      el.configObsRefreshBtn.addEventListener("click", async () => {
+        await loadObsStatus();
+      });
+    }
     if (el.modeAutoBtn) {
       el.modeAutoBtn.addEventListener("click", () => {
         state.manualAssistMode = null;
@@ -2622,6 +2736,7 @@
     await loadInaraCredentials();
     await loadOpenAiCredentials();
     await loadRuntimeSettings();
+    await loadObsStatus();
     await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();
@@ -2630,6 +2745,7 @@
     startEventStream();
     setInterval(loadSitrep, 10000);
     setInterval(loadProviderHealth, 60000);
+    setInterval(loadObsStatus, 15000);
     setInterval(loadEdStatus, 15000);
     setInterval(loadTwitchRecent, 6000);
     setInterval(updateConfirmExpiryLabels, 500);

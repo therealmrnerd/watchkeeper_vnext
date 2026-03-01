@@ -320,6 +320,24 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertFalse(body["providers"]["spansh"]["enabled"])
         self.assertFalse(body["providers"]["spansh"]["settings"]["enabled"])
 
+    def test_get_obs_status_route_returns_payload(self) -> None:
+        original_handler_query = self.handlers.query_obs_status
+        try:
+            self.handlers.query_obs_status = lambda _query: {
+                "ok": True,
+                "status": "up",
+                "endpoint": {"host": "127.0.0.1", "port": 4455, "latency_ms": 11},
+                "versions": {"obs_studio": "32.0.4", "obs_websocket": "5.6.3"},
+                "scene": {"program": "Scene - Elite Dangerous"},
+            }
+            status, body = self._request("GET", "/obs/status")
+        finally:
+            self.handlers.query_obs_status = original_handler_query
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["status"], "up")
+        self.assertEqual(body["versions"]["obs_studio"], "32.0.4")
+
     def test_openai_credentials_round_trip_uses_secure_store(self) -> None:
         status, body = self._request("GET", "/config/openai/credentials")
         self.assertEqual(status, 200)
