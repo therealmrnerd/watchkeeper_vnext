@@ -631,13 +631,25 @@
       const auth = item && typeof item.auth_summary === "object" ? item.auth_summary : null;
       const sync = item && typeof item.sync === "object" ? item.sync : null;
       const activity = item && typeof item.activity_summary === "object" ? item.activity_summary : null;
+      const healthDetails = item && typeof item.health_details === "object" ? item.health_details : null;
       const features = item && typeof item.features === "object" ? item.features : {};
 
       const detail = document.createElement("div");
       detail.className = "ed-provider-card-detail";
       if (providerId === "frontier") {
         const message = String((health && health.message) || "").trim();
-        detail.textContent = message || "Frontier auth gateway probe";
+        if (healthDetails && healthDetails.kind === "frontier_connection") {
+          const grade = String(healthDetails.grade || "-").trim() || "-";
+          const ping = formatInteger(healthDetails.ping_ms);
+          const avgLatency = formatInteger(healthDetails.latency_ms);
+          const jitter = formatInteger(healthDetails.jitter_ms);
+          const loss = healthDetails.packet_loss_pct !== undefined && healthDetails.packet_loss_pct !== null
+            ? `${healthDetails.packet_loss_pct}%`
+            : "-";
+          detail.textContent = `Grade ${grade} | ping ${ping}ms | latency ${avgLatency}ms | jitter ${jitter}ms | loss ${loss}`;
+        } else {
+          detail.textContent = message || "Frontier auth gateway probe";
+        }
       } else if (providerId === "inara") {
         const configured = auth && auth.configured ? "configured" : "needs auth";
         const debounce = sync && typeof sync.location_debounce_s === "number"
@@ -651,11 +663,23 @@
 
       const activityNode = document.createElement("div");
       activityNode.className = "ed-provider-card-activity";
-      activityNode.textContent = `${formatProviderActivityLabel("Last ok", activity && activity.last_success_at)} | ${formatProviderActivityLabel("Last issue", activity && activity.last_failure_at)}`;
+      if (providerId === "frontier" && healthDetails && healthDetails.kind === "frontier_connection") {
+        const samples = formatInteger(healthDetails.samples);
+        const successful = formatInteger(healthDetails.successful_samples);
+        const httpCode = healthDetails.http_code !== undefined && healthDetails.http_code !== null
+          ? `HTTP ${healthDetails.http_code}`
+          : "HTTP -";
+        activityNode.textContent = `${successful}/${samples} samples ok | ${httpCode} | ${formatProviderActivityLabel("Last check", health && health.checked_at)}`;
+      } else {
+        activityNode.textContent = `${formatProviderActivityLabel("Last ok", activity && activity.last_success_at)} | ${formatProviderActivityLabel("Last issue", activity && activity.last_failure_at)}`;
+      }
 
       const tags = document.createElement("div");
       tags.className = "ed-provider-card-tags";
       const labels = providerFeatureLabel(providerId, features);
+      if (providerId === "frontier" && healthDetails && healthDetails.kind === "frontier_connection") {
+        labels.unshift(`grade ${String(healthDetails.grade || "-").trim() || "-"}`);
+      }
       if (providerId === "inara" && auth) {
         labels.push(auth.configured ? "auth ready" : "auth missing");
       }

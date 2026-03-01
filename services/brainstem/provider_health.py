@@ -7,6 +7,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,8 @@ FRONTIER_HEALTH_ENABLED = os.getenv("WKV_FRONTIER_HEALTH_ENABLED", "1").strip().
     "yes",
 }
 FRONTIER_HEALTH_URL = os.getenv("WKV_FRONTIER_HEALTH_URL", "https://auth.frontierstore.net/").strip()
+FRONTIER_HEALTH_SAMPLES = max(2, int(os.getenv("WKV_FRONTIER_HEALTH_SAMPLES", "4")))
+FRONTIER_HEALTH_SAMPLE_PAUSE_SEC = max(0.0, float(os.getenv("WKV_FRONTIER_HEALTH_SAMPLE_PAUSE_SEC", "0.12")))
 
 
 def upsert_provider_health(db_path: Path, health: ProviderHealth) -> dict[str, Any]:
@@ -200,6 +203,177 @@ class HttpProviderHealthProbe:
             )
 
 
+def _frontier_jitter_ms(samples: list[int]) -> int:
+    if len(samples) < 2:
+        return 0
+    deltas = [abs(samples[idx] - samples[idx - 1]) for idx in range(1, len(samples))]
+    return int(round(sum(deltas) / len(deltas)))
+
+
+def _frontier_grade(
+    *,
+    status: ProviderHealthStatus,
+    latency_ms: int | None,
+    jitter_ms: int | None,
+    loss_pct: float,
+    http_code: int | None,
+) -> str:
+    if status in {ProviderHealthStatus.DOWN, ProviderHealthStatus.MISCONFIGURED}:
+        return "F"
+    if status == ProviderHealthStatus.THROTTLED:
+        return "D"
+    if http_code is not None and http_code >= 500:
+        return "D"
+    if loss_pct >= 50.0:
+        return "F"
+    if loss_pct >= 25.0:
+        return "D"
+    if latency_ms is None:
+        return "F"
+    jitter_value = jitter_ms or 0
+    if latency_ms <= 90 and jitter_value <= 10 and loss_pct <= 0:
+        return "A+"
+    if latency_ms <= 120 and jitter_value <= 15 and loss_pct <= 0:
+        return "A"
+    if latency_ms <= 160 and jitter_value <= 25 and loss_pct <= 2:
+        return "B"
+    if latency_ms <= 220 and jitter_value <= 40 and loss_pct <= 5:
+        return "C"
+    if latency_ms <= 320 and jitter_value <= 80 and loss_pct <= 15:
+        return "D"
+    return "F"
+
+
+@dataclass
+class FrontierHealthProbe:
+    provider_id: ProviderId
+    base_url: str
+    timeout_sec: float
+    sample_count: int = FRONTIER_HEALTH_SAMPLES
+    sample_pause_sec: float = FRONTIER_HEALTH_SAMPLE_PAUSE_SEC
+    opener: Callable[..., Any] = urllib.request.urlopen
+
+    def probe(self) -> ProviderHealth:
+        checked_at = _utc_now_iso()
+        url = str(self.base_url or "").strip()
+        if not url:
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=ProviderHealthStatus.MISCONFIGURED,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=None,
+                rate_limit_state=ProviderRateLimitState.UNKNOWN,
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=True,
+                message="base_url missing",
+            )
+
+        latencies: list[int] = []
+        observed_codes: list[int] = []
+        last_error: str | None = None
+        throttled = False
+
+        for index in range(max(2, int(self.sample_count))):
+            req = urllib.request.Request(url, method="GET")
+            started = time.perf_counter()
+            try:
+                with self.opener(req, timeout=self.timeout_sec) as resp:
+                    code = int(getattr(resp, "status", 200))
+                    resp.read(1)
+                observed_codes.append(code)
+                latencies.append(int((time.perf_counter() - started) * 1000))
+            except urllib.error.HTTPError as exc:
+                code = int(exc.code)
+                observed_codes.append(code)
+                throttled = throttled or code == 429
+                last_error = f"http_{code}"
+            except Exception as exc:
+                last_error = str(exc)
+            if index + 1 < max(2, int(self.sample_count)) and self.sample_pause_sec > 0:
+                time.sleep(self.sample_pause_sec)
+
+        total_samples = max(2, int(self.sample_count))
+        success_count = len(latencies)
+        loss_pct = round(((total_samples - success_count) / total_samples) * 100.0, 1)
+        http_code = observed_codes[-1] if observed_codes else None
+
+        if success_count <= 0:
+            status = ProviderHealthStatus.THROTTLED if throttled else ProviderHealthStatus.DOWN
+            return ProviderHealth(
+                provider=self.provider_id,
+                status=status,
+                checked_at=checked_at,
+                latency_ms=None,
+                http_code=http_code,
+                rate_limit_state=(
+                    ProviderRateLimitState.THROTTLED if throttled else ProviderRateLimitState.UNKNOWN
+                ),
+                retry_after_s=None,
+                tool_calls_allowed=False,
+                degraded_readonly=True,
+                message=json.dumps(
+                    {
+                        "kind": "frontier_connection",
+                        "grade": _frontier_grade(
+                            status=status,
+                            latency_ms=None,
+                            jitter_ms=None,
+                            loss_pct=loss_pct,
+                            http_code=http_code,
+                        ),
+                        "samples": total_samples,
+                        "successful_samples": success_count,
+                        "packet_loss_pct": loss_pct,
+                        "error": last_error or "probe_failed",
+                        "http_code": http_code,
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+
+        ping_ms = min(latencies)
+        latency_ms = int(round(sum(latencies) / len(latencies)))
+        jitter_ms = _frontier_jitter_ms(latencies)
+        status = ProviderHealthStatus.OK
+        if throttled:
+            status = ProviderHealthStatus.THROTTLED
+        elif loss_pct > 0 or latency_ms > 180 or jitter_ms > 30 or (http_code is not None and http_code >= 400):
+            status = ProviderHealthStatus.DEGRADED
+
+        details = {
+            "kind": "frontier_connection",
+            "grade": _frontier_grade(
+                status=status,
+                latency_ms=latency_ms,
+                jitter_ms=jitter_ms,
+                loss_pct=loss_pct,
+                http_code=http_code,
+            ),
+            "samples": total_samples,
+            "successful_samples": success_count,
+            "packet_loss_pct": loss_pct,
+            "ping_ms": ping_ms,
+            "latency_ms": latency_ms,
+            "jitter_ms": jitter_ms,
+            "http_code": http_code,
+            "status_text": "healthy" if status == ProviderHealthStatus.OK else (last_error or f"http_{http_code}"),
+        }
+        return ProviderHealth(
+            provider=self.provider_id,
+            status=status,
+            checked_at=checked_at,
+            latency_ms=latency_ms,
+            http_code=http_code,
+            rate_limit_state=ProviderRateLimitState.THROTTLED if throttled else ProviderRateLimitState.OK,
+            retry_after_s=None,
+            tool_calls_allowed=status in {ProviderHealthStatus.OK, ProviderHealthStatus.DEGRADED},
+            degraded_readonly=True,
+            message=json.dumps(details, separators=(",", ":")),
+        )
+
+
 @dataclass
 class InaraHealthProbe:
     provider_id: ProviderId
@@ -325,14 +499,13 @@ def build_provider_health_probes(
     if db_path is not None:
         config = apply_runtime_settings_overrides(config, load_runtime_settings(Path(db_path)))
     providers = config.get("providers", {})
-    probes: list[HttpProviderHealthProbe] = []
+    probes: list[Any] = []
     if FRONTIER_HEALTH_ENABLED and str(FRONTIER_HEALTH_URL or "").strip():
         probes.append(
-            HttpProviderHealthProbe(
+            FrontierHealthProbe(
                 provider_id=ProviderId.FRONTIER,
                 base_url=str(FRONTIER_HEALTH_URL).strip(),
                 timeout_sec=4.0,
-                read_only=True,
             )
         )
     for provider_name in ("spansh", "edsm"):

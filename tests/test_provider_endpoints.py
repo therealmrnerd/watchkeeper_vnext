@@ -169,7 +169,21 @@ class ProviderEndpointsTests(unittest.TestCase):
                 retry_after_s=None,
                 tool_calls_allowed=True,
                 degraded_readonly=True,
-                message="healthy",
+                message=json.dumps(
+                    {
+                        "kind": "frontier_connection",
+                        "grade": "A",
+                        "samples": 4,
+                        "successful_samples": 4,
+                        "packet_loss_pct": 0.0,
+                        "ping_ms": 78,
+                        "latency_ms": 85,
+                        "jitter_ms": 6,
+                        "http_code": 200,
+                        "status_text": "healthy",
+                    },
+                    separators=(",", ":"),
+                ),
             ),
         )
         upsert_provider_health(
@@ -262,6 +276,9 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertTrue(body.get("ok"))
         self.assertIn("frontier", body.get("providers", {}))
         self.assertEqual(body["providers"]["frontier"]["health"]["status"], "ok")
+        self.assertEqual(body["providers"]["frontier"]["health_details"]["grade"], "A")
+        self.assertEqual(body["providers"]["frontier"]["health_details"]["ping_ms"], 78)
+        self.assertEqual(body["providers"]["frontier"]["health_details"]["jitter_ms"], 6)
         self.assertIn("spansh", body.get("providers", {}))
         self.assertEqual(body["providers"]["spansh"]["health"]["status"], "ok")
         self.assertEqual(body["providers"]["spansh"]["health"]["latency_ms"], 42)

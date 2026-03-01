@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+import json
 from pathlib import Path
 
 
@@ -14,6 +15,7 @@ if str(BRAINSTEM_DIR) not in sys.path:
 from core.ed_provider_types import ProviderHealthStatus, ProviderId, ProviderRateLimitState
 from db_service import BrainstemDB
 from provider_health import (
+    FrontierHealthProbe,
     HttpProviderHealthProbe,
     InaraHealthProbe,
     ProviderHealthScheduler,
@@ -149,6 +151,43 @@ class ProviderHealthTests(unittest.TestCase):
         self.assertEqual(result.status, ProviderHealthStatus.MISCONFIGURED)
         self.assertFalse(result.tool_calls_allowed)
         self.assertIn("auth.app_name missing", result.message)
+
+    def test_frontier_probe_returns_connection_grade_details(self) -> None:
+        perf_values = iter([0.000, 0.040, 0.100, 0.152, 0.200, 0.247, 0.300, 0.350])
+
+        def _opener(req, timeout=0):
+            return _FakeResponse(status=200)
+
+        import provider_health as provider_health_module
+
+        original_perf_counter = provider_health_module.time.perf_counter
+        original_sleep = provider_health_module.time.sleep
+        try:
+            provider_health_module.time.perf_counter = lambda: next(perf_values)
+            provider_health_module.time.sleep = lambda *_args, **_kwargs: None
+            probe = FrontierHealthProbe(
+                provider_id=ProviderId.FRONTIER,
+                base_url="https://auth.frontierstore.net/",
+                timeout_sec=1.0,
+                sample_count=4,
+                sample_pause_sec=0.0,
+                opener=_opener,
+            )
+            result = probe.probe()
+        finally:
+            provider_health_module.time.perf_counter = original_perf_counter
+            provider_health_module.time.sleep = original_sleep
+
+        self.assertEqual(result.status, ProviderHealthStatus.OK)
+        details = json.loads(result.message)
+        self.assertEqual(details["kind"], "frontier_connection")
+        self.assertIn(details["grade"], {"A+", "A", "B", "C", "D", "F"})
+        self.assertEqual(details["successful_samples"], 4)
+        self.assertEqual(details["samples"], 4)
+        self.assertEqual(details["packet_loss_pct"], 0.0)
+        self.assertIn("ping_ms", details)
+        self.assertIn("latency_ms", details)
+        self.assertIn("jitter_ms", details)
 
 
 if __name__ == "__main__":

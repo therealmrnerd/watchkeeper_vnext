@@ -144,6 +144,19 @@ def _provider_activity_summary(db_path: Path, provider_id: str, health: dict[str
     return summary
 
 
+def _provider_health_message_details(health: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(health, dict):
+        return None
+    raw = str(health.get("message") or "").strip()
+    if not raw or not raw.startswith("{"):
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _as_provider_health(raw: dict[str, Any] | None) -> ProviderHealth | None:
     if not raw or not isinstance(raw, dict):
         return None
@@ -226,6 +239,7 @@ def query_provider_health(
                 else None
             ),
             "health": stored.get(provider_id),
+            "health_details": _provider_health_message_details(stored.get(provider_id)),
             "activity_summary": _provider_activity_summary(db_path, provider_id, stored.get(provider_id)),
         }
     out[ProviderId.FRONTIER.value] = {
@@ -244,6 +258,7 @@ def query_provider_health(
             "system_managed": True,
         },
         "health": stored.get(ProviderId.FRONTIER.value),
+        "health_details": _provider_health_message_details(stored.get(ProviderId.FRONTIER.value)),
         "activity_summary": _provider_activity_summary(
             db_path,
             ProviderId.FRONTIER.value,
