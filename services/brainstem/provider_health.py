@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import sqlite3
 import threading
@@ -33,6 +34,14 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 def _as_provider_id(raw: str) -> ProviderId:
     return ProviderId(str(raw or "").strip().lower())
+
+
+FRONTIER_HEALTH_ENABLED = os.getenv("WKV_FRONTIER_HEALTH_ENABLED", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+FRONTIER_HEALTH_URL = os.getenv("WKV_FRONTIER_HEALTH_URL", "https://auth.frontierstore.net/").strip()
 
 
 def upsert_provider_health(db_path: Path, health: ProviderHealth) -> dict[str, Any]:
@@ -317,6 +326,15 @@ def build_provider_health_probes(
         config = apply_runtime_settings_overrides(config, load_runtime_settings(Path(db_path)))
     providers = config.get("providers", {})
     probes: list[HttpProviderHealthProbe] = []
+    if FRONTIER_HEALTH_ENABLED and str(FRONTIER_HEALTH_URL or "").strip():
+        probes.append(
+            HttpProviderHealthProbe(
+                provider_id=ProviderId.FRONTIER,
+                base_url=str(FRONTIER_HEALTH_URL).strip(),
+                timeout_sec=4.0,
+                read_only=True,
+            )
+        )
     for provider_name in ("spansh", "edsm"):
         provider_cfg = providers.get(provider_name)
         if not isinstance(provider_cfg, dict):

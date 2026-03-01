@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import socket
 import subprocess
 import time
@@ -15,6 +16,7 @@ from urllib import error, request
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BRAINSTEM_BASE_URL = os.getenv("WKV_BRAINSTEM_URL", "http://127.0.0.1:8787").rstrip("/")
+DB_PATH = Path(os.getenv("WKV_DB_PATH", str(ROOT_DIR / "data" / "watchkeeper_vnext.db")))
 PROFILE = os.getenv("WKV_PROFILE", "watchkeeper")
 SESSION_ID = os.getenv("WKV_COLLECTOR_SESSION", "collector-main")
 NOW_PLAYING_DIR = Path(
@@ -63,6 +65,7 @@ ED_IDLE_INTERVAL_SEC = float(os.getenv("WKV_ED_IDLE_INTERVAL_SEC", "8"))
 MUSIC_ACTIVE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_ACTIVE_INTERVAL_SEC", "2"))
 MUSIC_IDLE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_IDLE_INTERVAL_SEC", "12"))
 YTMD_CACHE_MAX_SEC = float(os.getenv("WKV_YTMD_CACHE_MAX_SEC", "8"))
+RUNTIME_SETTINGS_KEY = "runtime_settings"
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -88,6 +91,33 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="ignore").strip()
     except Exception:
         return ""
+
+
+def _runtime_sync_enabled(sync_id: str, default: bool = True) -> bool:
+    try:
+        con = sqlite3.connect(DB_PATH, timeout=1.0)
+        try:
+            row = con.execute(
+                "SELECT value_json FROM config WHERE key=? LIMIT 1",
+                (RUNTIME_SETTINGS_KEY,),
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return bool(default)
+    if not row:
+        return bool(default)
+    try:
+        payload = json.loads(str(row[0]))
+    except Exception:
+        return bool(default)
+    syncs = payload.get("syncs")
+    if not isinstance(syncs, dict):
+        return bool(default)
+    item = syncs.get(sync_id)
+    if not isinstance(item, dict) or "enabled" not in item:
+        return bool(default)
+    return bool(item.get("enabled"))
 
 
 def _port_open(host: str, port: int, timeout_sec: float) -> bool:
@@ -274,9 +304,11 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
     if process_names is None:
         process_names = _list_process_names()
     ytmd_running = _process_running_by_names(process_names, YTMD_PROCESS_NAMES)
+    ytmd_ingest_enabled = _runtime_sync_enabled("ytmd_ingest", True)
     if not ytmd_running:
         return {
             "music.app_running": False,
+            "music.ingest_enabled": ytmd_ingest_enabled,
             "music.playing": False,
             "music.track.title": "",
             "music.track.artist": "",
@@ -293,10 +325,31 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
             },
         }
 
+    if not ytmd_ingest_enabled:
+        return {
+            "music.app_running": True,
+            "music.ingest_enabled": False,
+            "music.playing": False,
+            "music.track.title": "",
+            "music.track.artist": "",
+            "music.source_path": f"ytmd_api://{YTMD_HOST}:{YTMD_PORT}",
+            "music.api_endpoint": f"http://{YTMD_HOST}:{YTMD_PORT}/api/v1/state",
+            "music.api_reachable": False,
+            "music.api_authorized": False,
+            "music.now_playing": {
+                "title": "",
+                "artist": "",
+                "album": "",
+                "now_playing": "",
+                "artwork_path": None,
+            },
+        }
+
     track_payload, api_status = _fetch_ytmd_track()
     if track_payload:
         return {
             "music.app_running": True,
+            "music.ingest_enabled": ytmd_ingest_enabled,
             "music.playing": True,
             "music.track.title": track_payload.get("title", ""),
             "music.track.artist": track_payload.get("artist", ""),
@@ -309,6 +362,7 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
         # Keep prior now-playing state instead of overwriting with empty file values.
         return {
             "music.app_running": True,
+            "music.ingest_enabled": ytmd_ingest_enabled,
             "music.source_path": f"ytmd_api://{YTMD_HOST}:{YTMD_PORT}",
             **api_status,
         }
@@ -349,6 +403,7 @@ def collect_music_state(process_names: set[str] | None = None) -> dict[str, Any]
     playing = any([primary_payload["title"], primary_payload["artist"], primary_payload["now_playing"]])
     return {
         "music.app_running": True,
+        "music.ingest_enabled": ytmd_ingest_enabled,
         "music.playing": playing,
         "music.track.title": primary_payload.get("title", ""),
         "music.track.artist": primary_payload.get("artist", ""),

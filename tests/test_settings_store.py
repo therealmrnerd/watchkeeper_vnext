@@ -34,6 +34,10 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
         settings = load_runtime_settings(self.db_path)
         self.assertIsNone(settings["providers"]["spansh"]["enabled"])
         self.assertTrue(settings["syncs"]["ed_provider_autocache"]["enabled"])
+        self.assertTrue(settings["syncs"]["jinx_lighting"]["live_applied"])
+        self.assertTrue(settings["syncs"]["ytmd_ingest"]["live_applied"])
+        self.assertTrue(settings["syncs"]["sammi_bridge"]["live_applied"])
+        self.assertTrue(settings["syncs"]["twitch_ingest"]["live_applied"])
         self.assertFalse(settings["providers"]["obs"]["live_applied"])
 
     def test_save_updates_selected_flags_and_preserves_defaults(self) -> None:

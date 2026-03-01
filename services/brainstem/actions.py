@@ -52,7 +52,7 @@ from runtime import (
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
 from provider_health import build_provider_health_probes
 from provider_secrets import clear_provider_secret_entry, save_inara_secret_entry, save_openai_secret_entry
-from settings_store import save_runtime_settings
+from settings_store import load_runtime_settings, runtime_setting_enabled, save_runtime_settings
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -707,6 +707,9 @@ def send_twitch_chat(payload: dict[str, Any], source: str) -> dict[str, Any]:
         raise ValueError(
             "strict confirm mode enabled: call /confirm first, then resend with incident_id + confirm_token"
         )
+    settings = load_runtime_settings(Path(DB_PATH))
+    if not runtime_setting_enabled(settings, "syncs", "sammi_bridge", True):
+        raise ValueError("sammi bridge is disabled in runtime settings")
 
     routed = TOOL_ROUTER.evaluate_action(
         incident_id=incident_id,

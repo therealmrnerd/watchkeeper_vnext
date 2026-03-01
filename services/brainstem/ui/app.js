@@ -322,6 +322,7 @@
   function openProviderSite(providerId) {
     const provider = String(providerId || "").trim().toLowerCase();
     const targets = {
+      frontier: "https://customersupport.frontier.co.uk",
       spansh: "https://www.spansh.co.uk",
       edsm: "https://www.edsm.net",
       inara: "https://inara.cz",
@@ -333,6 +334,9 @@
 
   function providerFeatureLabel(providerId, features) {
     const labels = [];
+    if (providerId === "frontier" && features.service_health) {
+      labels.push("server health");
+    }
     if (providerId === "spansh" || providerId === "edsm") {
       if (features.system_lookup) {
         labels.push("systems");
@@ -586,7 +590,9 @@
       return;
     }
     el.edProviderCards.innerHTML = "";
-    const order = ["spansh", "edsm", "inara"];
+    const order = ["frontier", "spansh", "edsm", "inara"];
+    const enabledCards = [];
+    const disabledCards = [];
     for (const providerId of order) {
       const item = providers && typeof providers === "object" ? providers[providerId] : null;
       if (!item) {
@@ -598,6 +604,7 @@
       card.className = "ed-provider-card";
       card.dataset.status = status;
       card.dataset.provider = providerId;
+      card.dataset.enabled = item.enabled === false ? "false" : "true";
 
       const top = document.createElement("div");
       top.className = "ed-provider-card-head";
@@ -628,7 +635,10 @@
 
       const detail = document.createElement("div");
       detail.className = "ed-provider-card-detail";
-      if (providerId === "inara") {
+      if (providerId === "frontier") {
+        const message = String((health && health.message) || "").trim();
+        detail.textContent = message || "Frontier auth gateway probe";
+      } else if (providerId === "inara") {
         const configured = auth && auth.configured ? "configured" : "needs auth";
         const debounce = sync && typeof sync.location_debounce_s === "number"
           ? `${sync.location_debounce_s}s debounce`
@@ -703,7 +713,33 @@
       } else {
         card.appendChild(actions);
       }
-      el.edProviderCards.appendChild(card);
+      if (item.enabled === false) {
+        card.classList.add("ed-provider-card-compact");
+        disabledCards.push(card);
+      } else {
+        enabledCards.push(card);
+      }
+    }
+
+    const enabledGrid = document.createElement("div");
+    enabledGrid.className = "ed-provider-grid";
+    for (const card of enabledCards) {
+      enabledGrid.appendChild(card);
+    }
+    el.edProviderCards.appendChild(enabledGrid);
+
+    if (disabledCards.length) {
+      const parkedTitle = document.createElement("div");
+      parkedTitle.className = "ed-provider-section-title";
+      parkedTitle.textContent = "Disabled Providers";
+      el.edProviderCards.appendChild(parkedTitle);
+
+      const disabledGrid = document.createElement("div");
+      disabledGrid.className = "ed-provider-grid ed-provider-grid-secondary";
+      for (const card of disabledCards) {
+        disabledGrid.appendChild(card);
+      }
+      el.edProviderCards.appendChild(disabledGrid);
     }
   }
 

@@ -83,9 +83,29 @@ class _FakeProviderService:
 class SupervisorSystemChangeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.original_collect = supervisor.collect_ed_state
+        self.original_db_class = supervisor.BrainstemDB
+        self.original_process_ed = supervisor.process_ed
+        self.original_process_edparser = supervisor.process_edparser
+        self.original_process_aux_apps = supervisor.process_aux_apps
+        self.original_process_jinx_sync = supervisor.process_jinx_sync
+        self.original_process_hardware = supervisor.process_hardware
+        self.original_process_sammi_bridge = supervisor.process_sammi_bridge
+        self.original_process_music = supervisor.process_music
+        self.original_process_watch_condition = supervisor.process_watch_condition
+        self.original_jinx_lighting_enabled = supervisor._jinx_lighting_enabled
 
     def tearDown(self) -> None:
         supervisor.collect_ed_state = self.original_collect
+        supervisor.BrainstemDB = self.original_db_class
+        supervisor.process_ed = self.original_process_ed
+        supervisor.process_edparser = self.original_process_edparser
+        supervisor.process_aux_apps = self.original_process_aux_apps
+        supervisor.process_jinx_sync = self.original_process_jinx_sync
+        supervisor.process_hardware = self.original_process_hardware
+        supervisor.process_sammi_bridge = self.original_process_sammi_bridge
+        supervisor.process_music = self.original_process_music
+        supervisor.process_watch_condition = self.original_process_watch_condition
+        supervisor._jinx_lighting_enabled = self.original_jinx_lighting_enabled
 
     def _set_collect(self, payload):
         supervisor.collect_ed_state = lambda: dict(payload)
@@ -196,6 +216,31 @@ class SupervisorSystemChangeTests(unittest.TestCase):
         self.assertEqual(provider.calls[0]["operation"], ProviderOperationId.SYSTEM_LOOKUP)
         self.assertEqual(provider.calls[1]["operation"], ProviderOperationId.COMMANDER_LOCATION_PUSH)
         self.assertIn("INARA_LOCATION_SYNCED", [event["event_type"] for event in db.events])
+
+    def test_run_supervisor_once_skips_hardware_when_jinx_sync_disabled(self):
+        hardware_calls = []
+
+        class _FakeBrainstemDB:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def ensure_schema(self) -> None:
+                return None
+
+        supervisor.BrainstemDB = _FakeBrainstemDB
+        supervisor.process_ed = lambda *_args, **_kwargs: (False, None)
+        supervisor.process_edparser = lambda *_args, **_kwargs: None
+        supervisor.process_aux_apps = lambda *_args, **_kwargs: ({"jinx": True}, None)
+        supervisor.process_jinx_sync = lambda *_args, **_kwargs: None
+        supervisor.process_hardware = lambda *_args, **_kwargs: hardware_calls.append("called")
+        supervisor.process_sammi_bridge = lambda *_args, **_kwargs: None
+        supervisor.process_music = lambda *_args, **_kwargs: (False, None)
+        supervisor.process_watch_condition = lambda *_args, **_kwargs: "standby"
+        supervisor._jinx_lighting_enabled = lambda: False
+
+        supervisor.run_supervisor_once()
+
+        self.assertEqual(hardware_calls, [])
 
 
 if __name__ == "__main__":

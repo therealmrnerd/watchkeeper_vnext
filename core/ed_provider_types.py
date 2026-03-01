@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 
 class ProviderId(str, Enum):
+    FRONTIER = "frontier"
     SPANSH = "spansh"
     EDSM = "edsm"
     INARA = "inara"

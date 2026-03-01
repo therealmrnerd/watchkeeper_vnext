@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -33,6 +34,13 @@ from provider_health import (
     upsert_provider_health,
 )
 from settings_store import apply_runtime_settings_overrides, load_runtime_settings
+
+
+FRONTIER_HEALTH_URL = os.getenv("WKV_FRONTIER_HEALTH_URL", "https://auth.frontierstore.net/").strip()
+FRONTIER_STATUS_SITE_URL = os.getenv(
+    "WKV_FRONTIER_STATUS_SITE_URL",
+    "https://customersupport.frontier.co.uk",
+).strip()
 
 
 def _utc_now() -> datetime:
@@ -220,6 +228,28 @@ def query_provider_health(
             "health": stored.get(provider_id),
             "activity_summary": _provider_activity_summary(db_path, provider_id, stored.get(provider_id)),
         }
+    out[ProviderId.FRONTIER.value] = {
+        "enabled": True,
+        "base_url": FRONTIER_STATUS_SITE_URL or FRONTIER_HEALTH_URL or None,
+        "features": {
+            "service_health": True,
+            "read_only": True,
+        },
+        "auth_summary": None,
+        "sync": {},
+        "settings": {
+            "enabled": True,
+            "live_applied": True,
+            "label": "Frontier Services",
+            "system_managed": True,
+        },
+        "health": stored.get(ProviderId.FRONTIER.value),
+        "activity_summary": _provider_activity_summary(
+            db_path,
+            ProviderId.FRONTIER.value,
+            stored.get(ProviderId.FRONTIER.value),
+        ),
+    }
     return {"ok": True, "providers": out}
 
 

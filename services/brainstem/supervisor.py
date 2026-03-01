@@ -481,6 +481,11 @@ def _ed_provider_autocache_enabled(db: BrainstemDB) -> bool:
     return runtime_setting_enabled(settings, "syncs", "ed_provider_autocache", True)
 
 
+def _jinx_lighting_enabled() -> bool:
+    settings = load_runtime_settings(DB_PATH)
+    return runtime_setting_enabled(settings, "syncs", "jinx_lighting", True)
+
+
 def _inara_sync_enabled(provider_query_service: ProviderQueryService) -> bool:
     settings = load_runtime_settings(DB_PATH)
     if not runtime_setting_enabled(settings, "syncs", "inara_location_sync", True):
@@ -488,6 +493,11 @@ def _inara_sync_enabled(provider_query_service: ProviderQueryService) -> bool:
     providers = provider_query_service.config.get("providers", {})
     provider_cfg = providers.get("inara")
     return isinstance(provider_cfg, dict) and bool(provider_cfg.get("enabled"))
+
+
+def _sammi_bridge_enabled() -> bool:
+    settings = load_runtime_settings(DB_PATH)
+    return runtime_setting_enabled(settings, "syncs", "sammi_bridge", True)
 
 
 def _sync_current_system_to_inara(
@@ -1068,6 +1078,32 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
     global _jinx_last_manual_request
 
     if not JINX_ENABLED:
+        return
+    if not _jinx_lighting_enabled():
+        db.set_state(
+            state_key="app.jinx.sync_enabled",
+            state_value=False,
+            source="jinx_sync",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+        db.set_state(
+            state_key="app.jinx.sync_state",
+            state_value="disabled",
+            source="jinx_sync",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+        db.set_state(
+            state_key="app.jinx.sync_error",
+            state_value="disabled_by_settings",
+            source="jinx_sync",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
         return
     if not ed_running:
         return
@@ -1712,6 +1748,40 @@ def _build_sammi_variable_map(db: BrainstemDB, *, ed_running: bool) -> dict[str,
 
 def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
     if not SAMMI_API_ENABLED:
+        return
+    if not _sammi_bridge_enabled():
+        db.set_state(
+            state_key="app.sammi.api.enabled",
+            state_value=False,
+            source="sammi_bridge",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+        db.set_state(
+            state_key="app.sammi.api.last_push_count",
+            state_value=0,
+            source="sammi_bridge",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+        db.set_state(
+            state_key="app.sammi.api.last_cycle_ms",
+            state_value=0.0,
+            source="sammi_bridge",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+        db.set_state(
+            state_key="app.sammi.api.last_error",
+            state_value="disabled_by_settings",
+            source="sammi_bridge",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
         return
     if SAMMI_API_ONLY_WHEN_ED and not ed_running:
         return
@@ -2588,13 +2658,14 @@ def run_supervisor_loop() -> None:
         now = time.monotonic()
 
         if now >= next_hardware:
+            jinx_sync_enabled = _jinx_lighting_enabled()
             jinx_running_for_stats = bool((previous_aux_running or {}).get("jinx"))
             if previous_aux_running is None:
                 jinx_running_for_stats = _process_running_by_names(
                     _list_process_names(),
                     JINX_PROCESS_NAMES,
                 )
-            if (not SUP_HARDWARE_REQUIRES_JINX) or jinx_running_for_stats:
+            if jinx_sync_enabled and ((not SUP_HARDWARE_REQUIRES_JINX) or jinx_running_for_stats):
                 process_hardware(db)
             next_hardware = now + HARDWARE_LOOP_SEC
 
@@ -2668,7 +2739,9 @@ def run_supervisor_once() -> None:
         ed_running=ed_running,
         jinx_running=bool((aux_running or {}).get("jinx")),
     )
-    if (not SUP_HARDWARE_REQUIRES_JINX) or bool((aux_running or {}).get("jinx")):
+    if _jinx_lighting_enabled() and (
+        (not SUP_HARDWARE_REQUIRES_JINX) or bool((aux_running or {}).get("jinx"))
+    ):
         process_hardware(db)
     if ed_running:
         process_sammi_bridge(db, ed_running=True)

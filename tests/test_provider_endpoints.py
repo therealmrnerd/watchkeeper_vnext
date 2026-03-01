@@ -160,6 +160,21 @@ class ProviderEndpointsTests(unittest.TestCase):
         upsert_provider_health(
             cls.db_path,
             ProviderHealth(
+                provider=ProviderId.FRONTIER,
+                status=ProviderHealthStatus.OK,
+                checked_at="2026-02-28T11:59:00.000000Z",
+                latency_ms=85,
+                http_code=200,
+                rate_limit_state=ProviderRateLimitState.OK,
+                retry_after_s=None,
+                tool_calls_allowed=True,
+                degraded_readonly=True,
+                message="healthy",
+            ),
+        )
+        upsert_provider_health(
+            cls.db_path,
+            ProviderHealth(
                 provider=ProviderId.SPANSH,
                 status=ProviderHealthStatus.OK,
                 checked_at="2026-02-28T12:00:00.000000Z",
@@ -245,6 +260,8 @@ class ProviderEndpointsTests(unittest.TestCase):
         status, body = self._request("GET", "/providers/health")
         self.assertEqual(status, 200)
         self.assertTrue(body.get("ok"))
+        self.assertIn("frontier", body.get("providers", {}))
+        self.assertEqual(body["providers"]["frontier"]["health"]["status"], "ok")
         self.assertIn("spansh", body.get("providers", {}))
         self.assertEqual(body["providers"]["spansh"]["health"]["status"], "ok")
         self.assertEqual(body["providers"]["spansh"]["health"]["latency_ms"], 42)

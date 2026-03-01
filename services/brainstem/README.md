@@ -157,6 +157,7 @@ Live endpoints in this slice:
 - `GET /providers/health`
   - returns normalized provider health rows plus static provider metadata
   - safe for UI polling; reads local SQLite state only
+  - includes a system-managed `frontier` row for Frontier auth/service reachability
 - `POST /providers/query`
   - current implementation is intentionally narrow:
     - `provider=spansh|edsm`
@@ -274,13 +275,13 @@ Live-applied settings in this slice:
 - syncs:
   - `ed_provider_autocache`
   - `inara_location_sync`
+  - `jinx_lighting`
+  - `ytmd_ingest`
+  - `sammi_bridge`
+  - `twitch_ingest`
 
 Planned-but-persisted settings in this slice:
 
-- `jinx_lighting`
-- `ytmd_ingest`
-- `sammi_bridge`
-- `twitch_ingest`
 - `obs_status`
 - `obs_effect_triggers`
 - `openai` cloud fallback preference

@@ -759,6 +759,20 @@ main {
   margin-top: 8px;
 }
 
+.ed-provider-grid-secondary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 6px;
+}
+
+.ed-provider-section-title {
+  margin-top: 12px;
+  color: #8ea2ba;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .ed-provider-card {
   text-align: left;
   border: 1px solid #475565;
@@ -767,6 +781,10 @@ main {
   background: linear-gradient(180deg, rgba(24, 31, 39, 0.96) 0%, rgba(19, 25, 33, 0.96) 100%);
   color: #e6eef7;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.ed-provider-card[data-enabled="false"] {
+  opacity: 0.86;
 }
 
 .ed-provider-card:hover {
@@ -854,6 +872,33 @@ main {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.ed-provider-card-compact {
+  padding: 8px 9px;
+}
+
+.ed-provider-card-compact .ed-provider-card-detail {
+  display: none;
+}
+
+.ed-provider-card-compact .ed-provider-card-activity {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.ed-provider-card-compact .ed-provider-card-tags {
+  margin-top: 6px;
+}
+
+.ed-provider-card-compact .ed-provider-card-actions {
+  margin-top: 6px;
+}
+
+.ed-provider-card-compact .ed-provider-open-btn {
+  min-width: 96px;
+  padding: 5px 8px;
+  font-size: 11px;
 }
 
 .ed-provider-form {
