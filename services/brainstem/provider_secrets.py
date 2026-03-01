@@ -192,6 +192,24 @@ def get_provider_secret_entry(
     return dict(entry) if isinstance(entry, dict) else {}
 
 
+def clear_provider_secret_entry(
+    provider_id: str,
+    path: str | Path | None = None,
+    *,
+    codec: SecretCodec | None = None,
+) -> bool:
+    store = load_provider_secret_store(path, codec=codec)
+    providers = store.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+        store["providers"] = providers
+    key = str(provider_id or "").strip().lower()
+    removed = key in providers
+    providers.pop(key, None)
+    save_provider_secret_store(store, path, codec=codec)
+    return removed
+
+
 def save_inara_secret_entry(
     *,
     commander_name: Any,

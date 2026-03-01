@@ -11,6 +11,7 @@ if str(BRAINSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(BRAINSTEM_DIR))
 
 from provider_secrets import (
+    clear_provider_secret_entry,
     get_provider_secret_entry,
     load_provider_secret_store,
     save_inara_secret_entry,
@@ -88,6 +89,17 @@ class ProviderSecretsTests(unittest.TestCase):
         loaded = get_provider_secret_entry("openai", self.secret_path, codec=self.codec)
         self.assertEqual(loaded["api_key"], "openai-secret-key")
         self.assertTrue(loaded["_updated_at_utc"])
+
+    def test_clear_provider_secret_entry_removes_provider_data(self) -> None:
+        save_openai_secret_entry(
+            api_key="openai-secret-key",
+            path=self.secret_path,
+            codec=self.codec,
+        )
+        removed = clear_provider_secret_entry("openai", self.secret_path, codec=self.codec)
+        self.assertTrue(removed)
+        loaded = get_provider_secret_entry("openai", self.secret_path, codec=self.codec)
+        self.assertEqual(loaded, {})
 
 
 if __name__ == "__main__":

@@ -426,10 +426,16 @@ def validate_provider_query(payload: dict[str, Any]) -> None:
 def validate_inara_credentials_update(payload: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise ValueError("body must be a JSON object")
-    allowed = {"commander_name", "frontier_id", "api_key"}
+    allowed = {"commander_name", "frontier_id", "api_key", "clear"}
     _check_extra_keys(payload, allowed, "inara_credentials")
     if not payload:
         raise ValueError("inara_credentials body must not be empty")
+
+    clear = payload.get("clear")
+    if clear is not None and not isinstance(clear, bool):
+        raise ValueError("clear must be boolean when supplied")
+    if clear is True:
+        return
 
     commander_name = payload.get("commander_name")
     if commander_name is not None and not isinstance(commander_name, str):
@@ -447,8 +453,13 @@ def validate_inara_credentials_update(payload: dict[str, Any]) -> None:
 def validate_openai_credentials_update(payload: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise ValueError("body must be a JSON object")
-    allowed = {"api_key"}
+    allowed = {"api_key", "clear"}
     _check_extra_keys(payload, allowed, "openai_credentials")
+    clear = payload.get("clear")
+    if clear is not None and not isinstance(clear, bool):
+        raise ValueError("clear must be boolean when supplied")
+    if clear is True:
+        return
     if "api_key" not in payload:
         raise ValueError("openai_credentials.api_key is required")
     api_key = payload.get("api_key")

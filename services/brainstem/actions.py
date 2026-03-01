@@ -49,7 +49,7 @@ from runtime import (
 )
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
 from provider_health import build_provider_health_probes
-from provider_secrets import save_inara_secret_entry, save_openai_secret_entry
+from provider_secrets import clear_provider_secret_entry, save_inara_secret_entry, save_openai_secret_entry
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -797,12 +797,17 @@ def send_twitch_chat(payload: dict[str, Any], source: str) -> dict[str, Any]:
 
 
 def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, Any]:
-    entry = save_inara_secret_entry(
-        commander_name=payload.get("commander_name"),
-        frontier_id=payload.get("frontier_id"),
-        app_key=payload.get("api_key"),
-        path=PROVIDER_SECRETS_PATH,
-    )
+    clear_requested = bool(payload.get("clear"))
+    if clear_requested:
+        clear_provider_secret_entry("inara", path=PROVIDER_SECRETS_PATH)
+        entry: dict[str, Any] = {}
+    else:
+        entry = save_inara_secret_entry(
+            commander_name=payload.get("commander_name"),
+            frontier_id=payload.get("frontier_id"),
+            app_key=payload.get("api_key"),
+            path=PROVIDER_SECRETS_PATH,
+        )
 
     if hasattr(ED_PROVIDER_QUERY_SERVICE, "reload_config"):
         ED_PROVIDER_QUERY_SERVICE.reload_config()
@@ -817,6 +822,7 @@ def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, An
         source=source,
         payload={
             "provider": "inara",
+            "cleared": clear_requested,
             "commander_name_present": bool(str(entry.get("commander_name") or "").strip()),
             "frontier_id_present": bool(str(entry.get("frontier_id") or "").strip()),
             "app_key_present": bool(str(entry.get("app_key") or "").strip()),
@@ -828,21 +834,28 @@ def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, An
     from queries import query_inara_credentials
 
     result = query_inara_credentials({})
-    result["saved_securely"] = True
+    result["saved_securely"] = not clear_requested
+    result["cleared_securely"] = clear_requested
     return result
 
 
 def save_openai_credentials(payload: dict[str, Any], source: str) -> dict[str, Any]:
-    entry = save_openai_secret_entry(
-        api_key=payload.get("api_key"),
-        path=PROVIDER_SECRETS_PATH,
-    )
+    clear_requested = bool(payload.get("clear"))
+    if clear_requested:
+        clear_provider_secret_entry("openai", path=PROVIDER_SECRETS_PATH)
+        entry: dict[str, Any] = {}
+    else:
+        entry = save_openai_secret_entry(
+            api_key=payload.get("api_key"),
+            path=PROVIDER_SECRETS_PATH,
+        )
     emit_event(
         con=None,
         event_type="PROVIDER_CREDENTIALS_UPDATED",
         source=source,
         payload={
             "provider": "openai",
+            "cleared": clear_requested,
             "api_key_present": bool(str(entry.get("api_key") or "").strip()),
             "storage_path": str(PROVIDER_SECRETS_PATH),
         },
@@ -852,7 +865,8 @@ def save_openai_credentials(payload: dict[str, Any], source: str) -> dict[str, A
     from queries import query_openai_credentials
 
     result = query_openai_credentials({})
-    result["saved_securely"] = True
+    result["saved_securely"] = not clear_requested
+    result["cleared_securely"] = clear_requested
     return result
 
 

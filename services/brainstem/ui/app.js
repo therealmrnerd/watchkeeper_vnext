@@ -85,10 +85,12 @@
     configInaraFrontierInput: document.getElementById("configInaraFrontierInput"),
     configInaraApiKeyInput: document.getElementById("configInaraApiKeyInput"),
     configInaraSaveBtn: document.getElementById("configInaraSaveBtn"),
+    configInaraClearBtn: document.getElementById("configInaraClearBtn"),
     configInaraState: document.getElementById("configInaraState"),
     configInaraMeta: document.getElementById("configInaraMeta"),
     configOpenAiApiKeyInput: document.getElementById("configOpenAiApiKeyInput"),
     configOpenAiSaveBtn: document.getElementById("configOpenAiSaveBtn"),
+    configOpenAiClearBtn: document.getElementById("configOpenAiClearBtn"),
     configOpenAiState: document.getElementById("configOpenAiState"),
     configOpenAiMeta: document.getElementById("configOpenAiMeta"),
     servicesTable: document.getElementById("servicesTable"),
@@ -403,6 +405,9 @@
         ? "Stored securely. Enter a new key to replace it."
         : "Enter API key";
     }
+    if (el.configInaraClearBtn) {
+      el.configInaraClearBtn.disabled = !inaraStorage.secure_store_present;
+    }
     if (el.configInaraState) {
       if (!inaraPayload.ok) {
         el.configInaraState.textContent = "Unavailable";
@@ -443,6 +448,9 @@
       el.configOpenAiApiKeyInput.placeholder = openAiCredentials.api_key_present
         ? "Stored securely. Enter a new key to replace it."
         : "Enter OpenAI API key";
+    }
+    if (el.configOpenAiClearBtn) {
+      el.configOpenAiClearBtn.disabled = !openAiStorage.secure_store_present;
     }
     if (el.configOpenAiState) {
       if (!openAiPayload.ok) {
@@ -596,12 +604,19 @@
     if (buttonNode) {
       buttonNode.disabled = true;
     }
-    setInaraCredentialActionStatus("executing", "Saving Inara credentials securely...");
+    const clearRequested = Boolean(payload && payload.clear);
+    setInaraCredentialActionStatus(
+      "executing",
+      clearRequested ? "Clearing Inara credentials from secure store..." : "Saving Inara credentials securely..."
+    );
     renderConfigTab();
     try {
       const result = await apiPost("/providers/inara/credentials", payload);
       state.inaraCredentials = result;
-      setInaraCredentialActionStatus("completed", "Encrypted Inara credentials saved.");
+      setInaraCredentialActionStatus(
+        "completed",
+        clearRequested ? "Inara secure store cleared." : "Encrypted Inara credentials saved."
+      );
       await loadProviderHealth();
       await loadInaraCredentials();
     } catch (err) {
@@ -618,12 +633,19 @@
     if (buttonNode) {
       buttonNode.disabled = true;
     }
-    setConfigOpenAiActionStatus("executing", "Saving OpenAI API key securely...");
+    const clearRequested = Boolean(payload && payload.clear);
+    setConfigOpenAiActionStatus(
+      "executing",
+      clearRequested ? "Clearing OpenAI key from secure store..." : "Saving OpenAI API key securely..."
+    );
     renderConfigTab();
     try {
       const result = await apiPost("/config/openai/credentials", payload);
       state.configOpenAiCredentials = result;
-      setConfigOpenAiActionStatus("completed", "Encrypted OpenAI API key saved.");
+      setConfigOpenAiActionStatus(
+        "completed",
+        clearRequested ? "OpenAI secure store cleared." : "Encrypted OpenAI API key saved."
+      );
       await loadOpenAiCredentials();
     } catch (err) {
       setConfigOpenAiActionStatus("failed", `Credential save failed: ${String(err.message || err)}`);
@@ -2307,6 +2329,11 @@
         );
       });
     }
+    if (el.configInaraClearBtn) {
+      el.configInaraClearBtn.addEventListener("click", async () => {
+        await saveInaraCredentials({ clear: true }, el.configInaraClearBtn);
+      });
+    }
     if (el.configOpenAiSaveBtn) {
       el.configOpenAiSaveBtn.addEventListener("click", async () => {
         await saveOpenAiCredentials(
@@ -2315,6 +2342,11 @@
           },
           el.configOpenAiSaveBtn
         );
+      });
+    }
+    if (el.configOpenAiClearBtn) {
+      el.configOpenAiClearBtn.addEventListener("click", async () => {
+        await saveOpenAiCredentials({ clear: true }, el.configOpenAiClearBtn);
       });
     }
     if (el.modeAutoBtn) {

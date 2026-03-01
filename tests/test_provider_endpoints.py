@@ -285,6 +285,20 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertTrue(body["credentials"]["last_updated_at"])
         self.assertEqual(body["credentials"]["last_updated_at"], body["storage"]["last_updated_at"])
 
+        status, body = self._request(
+            "POST",
+            "/config/openai/credentials",
+            {"clear": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertTrue(body.get("cleared_securely"))
+        self.assertFalse(body["credentials"]["api_key_present"])
+
+        status, body = self._request("GET", "/config/openai/credentials")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["credentials"]["api_key_present"])
+
     def test_get_inara_credentials_returns_secure_summary(self) -> None:
         status, body = self._request("GET", "/providers/inara/credentials")
         self.assertEqual(status, 200)
@@ -316,6 +330,31 @@ class ProviderEndpointsTests(unittest.TestCase):
         status, health_body = self._request("GET", "/providers/health")
         self.assertEqual(status, 200)
         self.assertTrue(health_body["providers"]["inara"]["auth_summary"]["configured"])
+
+    def test_inara_credentials_can_be_cleared(self) -> None:
+        status, body = self._request(
+            "POST",
+            "/providers/inara/credentials",
+            {
+                "commander_name": "Cmdr Nerd",
+                "frontier_id": "6206398",
+                "api_key": "secret-api-key",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("credentials", {}).get("api_key_present"))
+
+        status, body = self._request(
+            "POST",
+            "/providers/inara/credentials",
+            {"clear": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertTrue(body.get("cleared_securely"))
+        self.assertEqual(body.get("credentials", {}).get("commander_name"), "")
+        self.assertEqual(body.get("credentials", {}).get("frontier_id"), "")
+        self.assertFalse(body.get("credentials", {}).get("api_key_present"))
 
     def test_post_providers_query_uses_provider_service(self) -> None:
         before = len(self.fake_provider_service.requests)
