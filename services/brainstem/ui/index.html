@@ -158,17 +158,26 @@
             <h3 class="subhead">ED Providers</h3>
             <div id="providerHealthButtons" class="provider-health-grid">
               <button id="providerSpanshBtn" class="provider-health-btn" type="button" data-provider="spansh">
-                <span class="provider-health-name">Spansh</span>
+                <span class="provider-health-brand">
+                  <img class="provider-health-logo" src="icons/spansh.png" alt="Spansh logo">
+                  <span class="provider-health-name">Spansh</span>
+                </span>
                 <span id="providerSpanshStatus" class="provider-health-state">unknown</span>
                 <span id="providerSpanshLatency" class="provider-health-latency">-</span>
               </button>
               <button id="providerEdsmBtn" class="provider-health-btn" type="button" data-provider="edsm">
-                <span class="provider-health-name">EDSM</span>
+                <span class="provider-health-brand">
+                  <img class="provider-health-logo" src="icons/edsm.png" alt="EDSM logo">
+                  <span class="provider-health-name">EDSM</span>
+                </span>
                 <span id="providerEdsmStatus" class="provider-health-state">unknown</span>
                 <span id="providerEdsmLatency" class="provider-health-latency">-</span>
               </button>
               <button id="providerInaraBtn" class="provider-health-btn" type="button" data-provider="inara">
-                <span class="provider-health-name">Inara</span>
+                <span class="provider-health-brand">
+                  <img class="provider-health-logo" src="icons/inara.ico" alt="Inara logo">
+                  <span class="provider-health-name">Inara</span>
+                </span>
                 <span id="providerInaraStatus" class="provider-health-state">unknown</span>
                 <span id="providerInaraLatency" class="provider-health-latency">-</span>
               </button>
@@ -192,7 +201,7 @@
     </section>
 
     <section id="tab-edstatus" class="tab-panel">
-      <div class="panel">
+      <div class="panel ed-hud-banner">
         <div class="row ed-status-head">
           <h2>External ED Status</h2>
           <button id="refreshEdStatusBtn" class="secondary header-chip">Refresh</button>
@@ -200,26 +209,35 @@
         <div id="edStatusMeta" class="muted">Waiting for provider data.</div>
         <div id="edSystemBadges" class="ed-badge-row"></div>
       </div>
-      <div class="panel">
-        <h2>Provider Status</h2>
-        <div id="edProviderCards" class="ed-provider-grid"></div>
-      </div>
-      <div class="ed-status-grid">
-        <div class="panel">
-          <h2>Current System</h2>
-          <div id="edSystemSummary" class="ed-summary-grid"></div>
-        </div>
-        <div class="panel">
-          <h2>Bodies</h2>
-          <div id="edBodiesBadges" class="ed-badge-row"></div>
-          <div id="edBodiesMeta" class="muted">No data yet.</div>
-          <div id="edBodiesList" class="ed-card-list"></div>
-        </div>
-        <div class="panel">
-          <h2>Stations</h2>
-          <div id="edStationsBadges" class="ed-badge-row"></div>
-          <div id="edStationsMeta" class="muted">No data yet.</div>
-          <div id="edStationsList" class="ed-card-list"></div>
+      <div class="ed-hud-layout">
+        <aside class="ed-hud-sidebar">
+          <div class="panel ed-hud-panel ed-provider-panel">
+            <h2>Provider Status</h2>
+            <div id="edProviderCards" class="ed-provider-stack"></div>
+          </div>
+        </aside>
+        <div class="ed-hud-main">
+          <div class="panel ed-hud-panel ed-system-panel">
+            <h2>Current System</h2>
+            <div class="ed-box-caption">Resolved external system model and current source state.</div>
+            <div id="edSystemSummary" class="ed-summary-grid"></div>
+          </div>
+          <div class="ed-hud-detail-grid">
+            <div class="panel ed-hud-panel">
+              <h2>Bodies</h2>
+              <div class="ed-box-caption">Cached orbital bodies for the active system.</div>
+              <div id="edBodiesBadges" class="ed-badge-row"></div>
+              <div id="edBodiesMeta" class="muted">No data yet.</div>
+              <div id="edBodiesList" class="ed-card-list"></div>
+            </div>
+            <div class="panel ed-hud-panel">
+              <h2>Stations</h2>
+              <div class="ed-box-caption">Stations and surface ports known for the active system.</div>
+              <div id="edStationsBadges" class="ed-badge-row"></div>
+              <div id="edStationsMeta" class="muted">No data yet.</div>
+              <div id="edStationsList" class="ed-card-list"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>

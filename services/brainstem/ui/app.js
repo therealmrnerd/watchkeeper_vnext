@@ -337,6 +337,28 @@
     }
   }
 
+  function providerDisplayName(providerId) {
+    const provider = String(providerId || "").trim().toLowerCase();
+    const labels = {
+      frontier: "Frontier",
+      spansh: "Spansh",
+      edsm: "EDSM",
+      inara: "Inara",
+    };
+    return labels[provider] || provider.toUpperCase();
+  }
+
+  function providerLogoSrc(providerId) {
+    const provider = String(providerId || "").trim().toLowerCase();
+    const logos = {
+      frontier: "icons/frontier.svg",
+      spansh: "icons/spansh.png",
+      edsm: "icons/edsm.png",
+      inara: "icons/inara.ico",
+    };
+    return logos[provider] || "";
+  }
+
   function providerFeatureLabel(providerId, features) {
     const labels = [];
     if (providerId === "frontier" && features.service_health) {
@@ -717,15 +739,30 @@
       const top = document.createElement("div");
       top.className = "ed-provider-card-head";
 
+      const brand = document.createElement("div");
+      brand.className = "ed-provider-card-brand";
+
+      const logoWrap = document.createElement("span");
+      logoWrap.className = "ed-provider-logo-wrap";
+
+      const logo = document.createElement("img");
+      logo.className = "ed-provider-logo";
+      logo.src = providerLogoSrc(providerId);
+      logo.alt = `${providerDisplayName(providerId)} logo`;
+
       const title = document.createElement("div");
       title.className = "ed-provider-card-title";
-      title.textContent = providerId.toUpperCase();
+      title.textContent = providerDisplayName(providerId);
+
+      logoWrap.appendChild(logo);
+      brand.appendChild(logoWrap);
+      brand.appendChild(title);
 
       const statusNode = document.createElement("div");
       statusNode.className = "ed-provider-card-state";
       statusNode.textContent = status;
 
-      top.appendChild(title);
+      top.appendChild(brand);
       top.appendChild(statusNode);
 
       const meta = document.createElement("div");
