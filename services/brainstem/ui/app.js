@@ -10,10 +10,12 @@
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
     inaraCredentials: null,
+    runtimeSettings: null,
     inaraManualAction: null,
     configOpenAiCredentials: null,
     configInaraAction: null,
     configOpenAiAction: null,
+    configSettingsAction: null,
     demoEnabled: false,
     demoScenario: "none",
     demoPreviewItems: null,
@@ -93,6 +95,10 @@
     configOpenAiClearBtn: document.getElementById("configOpenAiClearBtn"),
     configOpenAiState: document.getElementById("configOpenAiState"),
     configOpenAiMeta: document.getElementById("configOpenAiMeta"),
+    configSettingsGrid: document.getElementById("configSettingsGrid"),
+    configSettingsSaveBtn: document.getElementById("configSettingsSaveBtn"),
+    configSettingsState: document.getElementById("configSettingsState"),
+    configSettingsMeta: document.getElementById("configSettingsMeta"),
     servicesTable: document.getElementById("servicesTable"),
     runtimeInfo: document.getElementById("runtimeInfo"),
     handoverInfo: document.getElementById("handoverInfo"),
@@ -380,6 +386,71 @@
     renderConfigTab();
   }
 
+  async function loadRuntimeSettings() {
+    try {
+      const data = await apiGet("/settings");
+      state.runtimeSettings = data && typeof data === "object" ? data.settings || null : null;
+    } catch (err) {
+      state.runtimeSettings = null;
+      state.configSettingsAction = {
+        status: "failed",
+        text: `Settings load failed: ${String(err.message || err)}`,
+        at: nowIso(),
+      };
+    }
+    renderConfigTab();
+  }
+
+  function buildSettingsSection(title, sectionName, items) {
+    const panel = document.createElement("div");
+    panel.className = "settings-section";
+    const heading = document.createElement("div");
+    heading.className = "settings-section-title";
+    heading.textContent = title;
+    panel.appendChild(heading);
+
+    const section = state.runtimeSettings && typeof state.runtimeSettings === "object"
+      ? state.runtimeSettings[sectionName]
+      : null;
+
+    for (const itemId of items) {
+      const item = section && typeof section === "object" ? section[itemId] : null;
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const row = document.createElement("label");
+      row.className = "settings-item";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = Boolean(item.enabled);
+      checkbox.dataset.section = sectionName;
+      checkbox.dataset.itemId = itemId;
+
+      const body = document.createElement("div");
+      body.className = "settings-item-body";
+
+      const titleRow = document.createElement("div");
+      titleRow.className = "settings-item-title";
+      titleRow.textContent = String(item.label || itemId);
+
+      const badges = document.createElement("div");
+      badges.className = "settings-item-badges";
+      const applied = document.createElement("span");
+      applied.className = `settings-badge ${item.live_applied ? "settings-badge-live" : "settings-badge-planned"}`;
+      applied.textContent = item.live_applied ? "live" : "planned";
+      badges.appendChild(applied);
+
+      body.appendChild(titleRow);
+      body.appendChild(badges);
+      row.appendChild(checkbox);
+      row.appendChild(body);
+      panel.appendChild(row);
+    }
+
+    return panel;
+  }
+
   function renderConfigTab() {
     const inaraPayload = state.inaraCredentials && typeof state.inaraCredentials === "object"
       ? state.inaraCredentials
@@ -471,6 +542,42 @@
         metaParts.push(state.configOpenAiAction.text);
       }
       el.configOpenAiMeta.textContent = metaParts.join(" | ");
+    }
+
+    if (el.configSettingsGrid) {
+      el.configSettingsGrid.innerHTML = "";
+      el.configSettingsGrid.appendChild(
+        buildSettingsSection("Providers", "providers", ["spansh", "edsm", "inara", "openai", "obs"])
+      );
+      el.configSettingsGrid.appendChild(
+        buildSettingsSection(
+          "Syncs",
+          "syncs",
+          [
+            "ed_provider_autocache",
+            "inara_location_sync",
+            "jinx_lighting",
+            "ytmd_ingest",
+            "sammi_bridge",
+            "twitch_ingest",
+            "obs_status",
+            "obs_effect_triggers",
+          ]
+        )
+      );
+    }
+    if (el.configSettingsState) {
+      el.configSettingsState.textContent = state.runtimeSettings ? "Ready" : "Unavailable";
+    }
+    if (el.configSettingsMeta) {
+      const metaParts = [
+        "Live toggles apply immediately where Brainstem already supports them.",
+        "Planned toggles are persisted for future integrations such as OBS and the wider stream tab.",
+      ];
+      if (state.configSettingsAction && state.configSettingsAction.text) {
+        metaParts.push(state.configSettingsAction.text);
+      }
+      el.configSettingsMeta.textContent = metaParts.join(" | ");
     }
   }
 
@@ -790,6 +897,58 @@
       text: String(text || "").trim(),
       at: nowIso(),
     };
+  }
+
+  function setConfigSettingsActionStatus(status, text) {
+    state.configSettingsAction = {
+      status: String(status || "idle").trim().toLowerCase(),
+      text: String(text || "").trim(),
+      at: nowIso(),
+    };
+  }
+
+  function collectRuntimeSettingsPayload() {
+    const payload = {
+      schema_version: "1.0",
+      providers: {},
+      syncs: {},
+    };
+    const nodes = el.configSettingsGrid
+      ? Array.from(el.configSettingsGrid.querySelectorAll('input[type="checkbox"][data-section][data-item-id]'))
+      : [];
+    for (const node of nodes) {
+      const section = String(node.dataset.section || "").trim();
+      const itemId = String(node.dataset.itemId || "").trim();
+      if (!section || !itemId) {
+        continue;
+      }
+      if (!payload[section]) {
+        payload[section] = {};
+      }
+      payload[section][itemId] = { enabled: Boolean(node.checked) };
+    }
+    return payload;
+  }
+
+  async function saveRuntimeSettings(buttonNode) {
+    if (buttonNode) {
+      buttonNode.disabled = true;
+    }
+    setConfigSettingsActionStatus("executing", "Saving runtime settings...");
+    renderConfigTab();
+    try {
+      const result = await apiPost("/settings", collectRuntimeSettingsPayload());
+      state.runtimeSettings = result && typeof result === "object" ? result.settings || null : null;
+      setConfigSettingsActionStatus("completed", "Runtime settings saved.");
+      await loadProviderHealth();
+    } catch (err) {
+      setConfigSettingsActionStatus("failed", `Settings save failed: ${String(err.message || err)}`);
+      renderConfigTab();
+    } finally {
+      if (buttonNode) {
+        buttonNode.disabled = false;
+      }
+    }
   }
 
   function setEdMeta(text) {
@@ -2349,6 +2508,11 @@
         await saveOpenAiCredentials({ clear: true }, el.configOpenAiClearBtn);
       });
     }
+    if (el.configSettingsSaveBtn) {
+      el.configSettingsSaveBtn.addEventListener("click", async () => {
+        await saveRuntimeSettings(el.configSettingsSaveBtn);
+      });
+    }
     if (el.modeAutoBtn) {
       el.modeAutoBtn.addEventListener("click", () => {
         state.manualAssistMode = null;
@@ -2397,6 +2561,7 @@
     await loadProviderHealth();
     await loadInaraCredentials();
     await loadOpenAiCredentials();
+    await loadRuntimeSettings();
     await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();

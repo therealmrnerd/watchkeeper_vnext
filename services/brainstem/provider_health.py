@@ -18,6 +18,7 @@ from core.ed_provider_types import (
     ProviderRateLimitState,
 )
 from provider_config import load_runtime_provider_config
+from settings_store import apply_runtime_settings_overrides, load_runtime_settings
 
 
 def _utc_now_iso() -> str:
@@ -309,8 +310,11 @@ class InaraHealthProbe:
 def build_provider_health_probes(
     config_path: str | Path | None = None,
     secrets_path: str | Path | None = None,
+    db_path: str | Path | None = None,
 ) -> list[Any]:
     config = load_runtime_provider_config(config_path, secrets_path)
+    if db_path is not None:
+        config = apply_runtime_settings_overrides(config, load_runtime_settings(Path(db_path)))
     providers = config.get("providers", {})
     probes: list[HttpProviderHealthProbe] = []
     for provider_name in ("spansh", "edsm"):

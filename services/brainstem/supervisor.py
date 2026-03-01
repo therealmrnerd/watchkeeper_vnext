@@ -23,6 +23,7 @@ from db_service import BrainstemDB
 from edparser_tool import EDParserTool
 from provider_config import DEFAULT_PROVIDER_CONFIG_PATH
 from provider_query import ProviderQueryService
+from settings_store import load_runtime_settings, runtime_setting_enabled
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -475,7 +476,15 @@ def _ensure_current_system_cached(
     )
 
 
+def _ed_provider_autocache_enabled(db: BrainstemDB) -> bool:
+    settings = load_runtime_settings(DB_PATH)
+    return runtime_setting_enabled(settings, "syncs", "ed_provider_autocache", True)
+
+
 def _inara_sync_enabled(provider_query_service: ProviderQueryService) -> bool:
+    settings = load_runtime_settings(DB_PATH)
+    if not runtime_setting_enabled(settings, "syncs", "inara_location_sync", True):
+        return False
     providers = provider_query_service.config.get("providers", {})
     provider_cfg = providers.get("inara")
     return isinstance(provider_cfg, dict) and bool(provider_cfg.get("enabled"))
@@ -2002,13 +2011,14 @@ def process_ed(
     db.batch_set_state(items=items, emit_events=True)
 
     if running and current_system is not None and current_system != previous_system:
-        _ensure_current_system_cached(
-            db=db,
-            correlation_id=correlation_id,
-            system_identity=current_system,
-            previous_system=previous_system,
-            provider_query_service=provider_query_service or ED_PROVIDER_QUERY_SERVICE,
-        )
+        if _ed_provider_autocache_enabled(db):
+            _ensure_current_system_cached(
+                db=db,
+                correlation_id=correlation_id,
+                system_identity=current_system,
+                previous_system=previous_system,
+                provider_query_service=provider_query_service or ED_PROVIDER_QUERY_SERVICE,
+            )
         if _inara_sync_enabled(provider_query_service or ED_PROVIDER_QUERY_SERVICE):
             _sync_current_system_to_inara(
                 db=db,

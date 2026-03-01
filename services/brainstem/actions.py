@@ -7,6 +7,7 @@ import subprocess
 import time
 import uuid
 from ctypes import windll
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from runtime import (
     ADVISORY_ENABLED,
     ADVISORY_TIMEOUT_SEC,
     ADVISORY_URL,
+    DB_PATH,
     DB_SERVICE,
     DEFAULT_WATCH_CONDITION,
     ED_PROVIDER_QUERY_SERVICE,
@@ -50,6 +52,7 @@ from runtime import (
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
 from provider_health import build_provider_health_probes
 from provider_secrets import clear_provider_secret_entry, save_inara_secret_entry, save_openai_secret_entry
+from settings_store import save_runtime_settings
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -813,7 +816,7 @@ def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, An
         ED_PROVIDER_QUERY_SERVICE.reload_config()
     if PROVIDER_HEALTH_ENABLED and hasattr(runtime, "ED_PROVIDER_HEALTH_SCHEDULER"):
         runtime.ED_PROVIDER_HEALTH_SCHEDULER.update_probes(
-            build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
+            build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH, DB_PATH)
         )
 
     emit_event(
@@ -868,6 +871,27 @@ def save_openai_credentials(payload: dict[str, Any], source: str) -> dict[str, A
     result["saved_securely"] = not clear_requested
     result["cleared_securely"] = clear_requested
     return result
+
+
+def save_runtime_settings_action(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    settings = save_runtime_settings(Path(DB_PATH), payload)
+    if hasattr(ED_PROVIDER_QUERY_SERVICE, "reload_config"):
+        ED_PROVIDER_QUERY_SERVICE.reload_config()
+    if PROVIDER_HEALTH_ENABLED and hasattr(runtime, "ED_PROVIDER_HEALTH_SCHEDULER"):
+        runtime.ED_PROVIDER_HEALTH_SCHEDULER.update_probes(
+            build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH, DB_PATH)
+        )
+    emit_event(
+        con=None,
+        event_type="RUNTIME_SETTINGS_UPDATED",
+        source=source,
+        payload={
+            "providers": payload.get("providers", {}),
+            "syncs": payload.get("syncs", {}),
+        },
+        tags=["settings", "runtime"],
+    )
+    return {"ok": True, "settings": settings}
 
 
 def _safe_twitch_context_pack(payload: dict[str, Any]) -> dict[str, Any]:

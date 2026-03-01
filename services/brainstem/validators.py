@@ -18,6 +18,7 @@ from runtime import (
     WATCH_CONDITION_SET,
     parse_iso8601_utc,
 )
+from settings_store import validate_runtime_settings_update
 
 STATE_KEY_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_]+)+$")
 STATE_KEY_PREFIXES = ("ed.", "music.", "hw.", "policy.", "ai.")
@@ -465,3 +466,7 @@ def validate_openai_credentials_update(payload: dict[str, Any]) -> None:
     api_key = payload.get("api_key")
     if api_key is not None and not isinstance(api_key, str):
         raise ValueError("api_key must be a string when supplied")
+
+
+def validate_runtime_settings_payload(payload: dict[str, Any]) -> None:
+    validate_runtime_settings_update(payload)

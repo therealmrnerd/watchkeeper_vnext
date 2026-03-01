@@ -260,6 +260,32 @@ class ProviderEndpointsTests(unittest.TestCase):
             "2026-02-28T12:20:00.000000Z",
         )
 
+    def test_settings_endpoint_updates_effective_provider_enablement(self) -> None:
+        status, body = self._request("GET", "/settings")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["settings"]["providers"]["spansh"]["enabled"])
+
+        status, body = self._request(
+            "POST",
+            "/settings",
+            {
+                "providers": {
+                    "spansh": {"enabled": False},
+                },
+                "syncs": {
+                    "ed_provider_autocache": {"enabled": False},
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(body["settings"]["providers"]["spansh"]["enabled"])
+        self.assertFalse(body["settings"]["syncs"]["ed_provider_autocache"]["enabled"])
+
+        status, body = self._request("GET", "/providers/health")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["providers"]["spansh"]["enabled"])
+        self.assertFalse(body["providers"]["spansh"]["settings"]["enabled"])
+
     def test_openai_credentials_round_trip_uses_secure_store(self) -> None:
         status, body = self._request("GET", "/config/openai/credentials")
         self.assertEqual(status, 200)

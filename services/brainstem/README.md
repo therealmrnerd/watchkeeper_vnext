@@ -23,8 +23,19 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 - `GET /twitch/user/{user_id}`
 - `GET /twitch/user/{user_id}/redeems/top?limit=5`
 - `GET /twitch/recent?limit=50`
+- `GET /providers/health`
+- `GET /providers/current-system`
+- `GET /providers/current-system/bodies`
+- `GET /providers/current-system/stations`
+- `GET /providers/inara/credentials`
+- `GET /config/openai/credentials`
+- `GET /settings`
 - `POST /twitch/send_chat`
 - `POST /app/open`
+- `POST /providers/query`
+- `POST /providers/inara/credentials`
+- `POST /config/openai/credentials`
+- `POST /settings`
 
 ## Stub Implementation
 
@@ -231,6 +242,53 @@ Audit trail:
   - `INARA_LOCATION_SYNCED`
   - `INARA_LOCATION_SYNC_SKIPPED`
   - `INARA_LOCATION_SYNC_FAILED`
+
+## Runtime Settings
+
+Brainstem now exposes a persistent runtime settings layer stored in the local DB `config` table.
+
+- contracts:
+  - `contracts/v1/runtime_settings.schema.json`
+  - `contracts/v1/runtime_settings_update.schema.json`
+- implementation:
+  - `services/brainstem/settings_store.py`
+- API:
+  - `GET /settings`
+  - `POST /settings`
+
+Current rules:
+
+- provider toggles are operator overrides layered on top of file config
+  - no saved provider override means `inherit file config`
+- sync toggles are persisted explicitly
+- Config UI marks each toggle as:
+  - `live`
+  - `planned`
+
+Live-applied settings in this slice:
+
+- providers:
+  - `spansh`
+  - `edsm`
+  - `inara`
+- syncs:
+  - `ed_provider_autocache`
+  - `inara_location_sync`
+
+Planned-but-persisted settings in this slice:
+
+- `jinx_lighting`
+- `ytmd_ingest`
+- `sammi_bridge`
+- `twitch_ingest`
+- `obs_status`
+- `obs_effect_triggers`
+- `openai` cloud fallback preference
+
+This split is intentional:
+
+- the settings UI should not pretend to control runtime paths that are still env-only or not yet implemented
+- operator intent can still be stored now, so future stream/OBS settings do not require a redesign of the settings surface
 
 ## Run
 

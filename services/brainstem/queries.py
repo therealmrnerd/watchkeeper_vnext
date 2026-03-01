@@ -33,6 +33,7 @@ from provider_config import load_runtime_provider_config
 from provider_health import list_provider_health
 from provider_query import query_provider_health
 from provider_secrets import get_provider_secret_entry
+from settings_store import apply_runtime_settings_overrides, load_runtime_settings
 
 try:
     from tools.diag_report import build_diag_report
@@ -228,7 +229,11 @@ def query_providers_health(query: dict[str, list[str]]) -> dict[str, Any]:
 
 
 def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
-    config = load_runtime_provider_config(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
+    settings = load_runtime_settings(Path(DB_PATH))
+    config = apply_runtime_settings_overrides(
+        load_runtime_provider_config(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH),
+        settings,
+    )
     providers = config.get("providers", {})
     inara_cfg = providers.get("inara") if isinstance(providers, dict) else {}
     if not isinstance(inara_cfg, dict):
@@ -302,6 +307,24 @@ def query_openai_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
                 else "Stored for future OpenAI fallback wiring; current advisory runtime does not consume it yet."
             ),
         },
+    }
+
+
+def query_runtime_settings(query: dict[str, list[str]]) -> dict[str, Any]:
+    settings = load_runtime_settings(Path(DB_PATH))
+    effective_provider_config = apply_runtime_settings_overrides(
+        load_runtime_provider_config(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH),
+        settings,
+    )
+    providers_cfg = effective_provider_config.get("providers", {})
+    if isinstance(settings.get("providers"), dict):
+        for provider_id, item in settings["providers"].items():
+            provider_cfg = providers_cfg.get(provider_id) if isinstance(providers_cfg, dict) else None
+            if isinstance(item, dict) and isinstance(provider_cfg, dict):
+                item["enabled"] = bool(provider_cfg.get("enabled"))
+    return {
+        "ok": True,
+        "settings": settings,
     }
 
 

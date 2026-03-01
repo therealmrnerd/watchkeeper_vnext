@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "providers": {
+    "spansh": { "enabled": true, "live_applied": true, "label": "Spansh" },
+    "edsm": { "enabled": true, "live_applied": true, "label": "EDSM" },
+    "inara": { "enabled": false, "live_applied": true, "label": "Inara" },
+    "openai": { "enabled": false, "live_applied": false, "label": "OpenAI Cloud Fallback" },
+    "obs": { "enabled": false, "live_applied": false, "label": "OBS Status" }
+  },
+  "syncs": {
+    "ed_provider_autocache": { "enabled": true, "live_applied": true, "label": "ED Provider Autocache" },
+    "inara_location_sync": { "enabled": true, "live_applied": true, "label": "Inara Location Sync" },
+    "jinx_lighting": { "enabled": true, "live_applied": false, "label": "Jinx Lighting Sync" },
+    "ytmd_ingest": { "enabled": true, "live_applied": false, "label": "YTMD Ingest" },
+    "sammi_bridge": { "enabled": true, "live_applied": false, "label": "SAMMI Bridge" },
+    "twitch_ingest": { "enabled": true, "live_applied": false, "label": "Twitch Ingest" },
+    "obs_status": { "enabled": false, "live_applied": false, "label": "OBS Status Polling" },
+    "obs_effect_triggers": { "enabled": false, "live_applied": false, "label": "OBS Effect Triggers" }
+  }
+}

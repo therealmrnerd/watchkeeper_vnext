@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "providers": {
+    "spansh": { "enabled": false },
+    "inara": { "enabled": true }
+  },
+  "syncs": {
+    "ed_provider_autocache": { "enabled": true },
+    "obs_status": { "enabled": false }
+  }
+}

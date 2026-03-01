@@ -73,6 +73,7 @@ class UIServedTests(unittest.TestCase):
         self.assertIn("ED Status", body)
         self.assertIn("Config", body)
         self.assertIn("Clear Secure Store", body)
+        self.assertIn("Runtime Settings", body)
 
     def test_ui_asset_served(self) -> None:
         status, body = self._request("/app.js")

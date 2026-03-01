@@ -315,7 +315,7 @@ TWITCH_INGEST_SERVICE = TwitchIngestService(
     variable_index_path=TWITCH_VARIABLE_INDEX_PATH,
 )
 ED_PROVIDER_HEALTH_PROBES = (
-    build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH)
+    build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH, DB_PATH)
     if PROVIDER_HEALTH_ENABLED
     else []
 )

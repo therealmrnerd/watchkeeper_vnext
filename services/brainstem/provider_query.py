@@ -32,6 +32,7 @@ from provider_health import (
     list_provider_health,
     upsert_provider_health,
 )
+from settings_store import apply_runtime_settings_overrides, load_runtime_settings
 
 
 def _utc_now() -> datetime:
@@ -170,7 +171,11 @@ def query_provider_health(
     config_path: str | Path | None = None,
     secrets_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    config = load_runtime_provider_config(config_path, secrets_path)
+    settings = load_runtime_settings(db_path)
+    config = apply_runtime_settings_overrides(
+        load_runtime_provider_config(config_path, secrets_path),
+        settings,
+    )
     stored = get_provider_health_map(db_path)
     providers_cfg = config.get("providers", {})
     out: dict[str, Any] = {}
@@ -207,6 +212,11 @@ def query_provider_health(
             "features": cfg.get("features") if isinstance(cfg.get("features"), dict) else {},
             "auth_summary": auth_summary,
             "sync": sync_cfg,
+            "settings": (
+                settings.get("providers", {}).get(provider_id)
+                if isinstance(settings.get("providers"), dict)
+                else None
+            ),
             "health": stored.get(provider_id),
             "activity_summary": _provider_activity_summary(db_path, provider_id, stored.get(provider_id)),
         }
@@ -581,7 +591,11 @@ class ProviderQueryService:
         self.reload_config()
 
     def reload_config(self) -> None:
-        self.config = load_runtime_provider_config(self.config_path, self.secrets_path)
+        self.settings = load_runtime_settings(self.db_path)
+        self.config = apply_runtime_settings_overrides(
+            load_runtime_provider_config(self.config_path, self.secrets_path),
+            self.settings,
+        )
         self._spansh = self._build_spansh_adapter()
         self._edsm = self._build_edsm_adapter()
         self._inara = self._build_inara_adapter()
