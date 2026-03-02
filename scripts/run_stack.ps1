@@ -12,6 +12,11 @@ Set-Location $root
 
 . (Join-Path $root "scripts\set_runtime_env.ps1") -Quiet -InitDb
 
+$advisoryPython = [Environment]::GetEnvironmentVariable("WKV_ADVISORY_PYTHON", "Process")
+if ([string]::IsNullOrWhiteSpace($advisoryPython)) {
+  $advisoryPython = "python"
+}
+
 $dataDir = Join-Path $root "data"
 if (-not (Test-Path $dataDir)) {
   New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
@@ -33,7 +38,10 @@ $services = @(
   [pscustomobject]@{
     Name = "advisory"
     Script = "services/advisory/run.ps1"
-    MatchArgs = @("services/advisory/run.ps1", "services/advisory/app.py")
+    MatchArgs = @("services/advisory/app.py")
+    MatchExecutable = $advisoryPython
+    LaunchFilePath = $advisoryPython
+    LaunchArgumentList = @("services/advisory/app.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8790/health"
   },
@@ -104,9 +112,16 @@ function Read-StackState {
     }
     $json = $raw | ConvertFrom-Json
     $table = @{}
+    $knownServices = @{}
+    foreach ($service in $services) {
+      $knownServices[[string]$service.Name] = $true
+    }
     if ($json.services) {
       foreach ($svc in $json.services) {
-        $table[$svc.name] = $svc
+        $name = [string]$svc.name
+        if ($knownServices.ContainsKey($name)) {
+          $table[$name] = $svc
+        }
       }
     }
     return $table
@@ -192,16 +207,29 @@ function Start-ServiceProcess {
     return
   }
 
-  $scriptPath = Join-Path $root $Service.Script
-  if (-not (Test-Path $scriptPath)) {
-    throw "Missing startup script for $($Service.Name): $scriptPath"
-  }
   $stdoutLog = Join-Path $logsDir ("{0}.out.log" -f $Service.Name)
   $stderrLog = Join-Path $logsDir ("{0}.err.log" -f $Service.Name)
 
+  $launchFilePath = $null
+  $launchArguments = $null
+  if ($Service.PSObject.Properties.Match("LaunchFilePath").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$Service.LaunchFilePath)) {
+    $launchFilePath = [string]$Service.LaunchFilePath
+    $launchArguments = @()
+    if ($Service.PSObject.Properties.Match("LaunchArgumentList").Count -gt 0 -and $Service.LaunchArgumentList) {
+      $launchArguments = @($Service.LaunchArgumentList)
+    }
+  } else {
+    $scriptPath = Join-Path $root $Service.Script
+    if (-not (Test-Path $scriptPath)) {
+      throw "Missing startup script for $($Service.Name): $scriptPath"
+    }
+    $launchFilePath = "powershell"
+    $launchArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
+  }
+
   $proc = Start-Process `
-    -FilePath "powershell" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath) `
+    -FilePath $launchFilePath `
+    -ArgumentList $launchArguments `
     -WorkingDirectory $root `
     -WindowStyle Hidden `
     -RedirectStandardOutput $stdoutLog `
@@ -371,6 +399,15 @@ function Find-ServiceProcessIds {
     }
   }
 
+  $preferredExecutable = $null
+  if ($Service.PSObject.Properties.Match("MatchExecutable").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$Service.MatchExecutable)) {
+    try {
+      $preferredExecutable = (Resolve-Path ([string]$Service.MatchExecutable)).Path.ToLower()
+    } catch {
+      $preferredExecutable = ([string]$Service.MatchExecutable).ToLower()
+    }
+  }
+
   $matches = @()
   try {
     $rows = Get-CimInstance Win32_Process -ErrorAction Stop
@@ -394,10 +431,18 @@ function Find-ServiceProcessIds {
       }
     }
     if ($isMatch) {
-      $matches += $rowPid
+      $exePath = ([string]$row.ExecutablePath).ToLower()
+      $rank = 1
+      if ($preferredExecutable -and $exePath -eq $preferredExecutable) {
+        $rank = 0
+      }
+      $matches += [pscustomobject]@{
+        pid = $rowPid
+        rank = $rank
+      }
     }
   }
-  return @($matches | Sort-Object -Unique)
+  return @($matches | Sort-Object rank, pid | Select-Object -ExpandProperty pid -Unique)
 }
 
 function Get-ReverseServices {
