@@ -320,12 +320,12 @@ def query_openai_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
             "last_updated_at": secret_updated_at,
         },
         "usage": {
-            "wired": False,
+            "wired": True,
             "ready_for_cloud_fallback": api_key_present,
             "note": (
-                "Cloud fallback key is present in the encrypted keystore."
+                "Cloud fallback key is present in the encrypted keystore and advisory can use it when enabled."
                 if api_key_present
-                else "Stored for future OpenAI fallback wiring; current advisory runtime does not consume it yet."
+                else "OpenAI cloud fallback is wired, but no encrypted API key is stored."
             ),
         },
     }

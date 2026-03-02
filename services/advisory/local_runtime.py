@@ -29,6 +29,7 @@ class OpenVinoLocalRuntime:
         self.model_loader = model_loader
         self.gc_hook = gc_hook or gc.collect
         self._lock = threading.RLock()
+        self._infer_lock = threading.Lock()
         self._tokenizer: Any = None
         self._model: Any = None
         self._loaded = False
@@ -116,20 +117,29 @@ class OpenVinoLocalRuntime:
 
         started = time.perf_counter()
         try:
-            inputs = tokenizer(prompt, return_tensors="pt")
-            pad_token_id = getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", None)
-            do_sample = float(temperature) > 0.0
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=int(max_new_tokens),
-                temperature=float(temperature),
-                top_p=float(top_p),
-                do_sample=do_sample,
-                pad_token_id=pad_token_id,
-                eos_token_id=getattr(tokenizer, "eos_token_id", None),
-            )
-            full_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
-            reply = full_text[len(prompt) :].strip() if full_text.startswith(prompt) else full_text.strip()
+            with self._infer_lock:
+                inputs = tokenizer(prompt, return_tensors="pt")
+                input_ids = inputs.get("input_ids")
+                prompt_token_count = int(getattr(input_ids, "shape", [0, 0])[-1]) if input_ids is not None else 0
+                pad_token_id = getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", None)
+                do_sample = float(temperature) > 0.0
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=int(max_new_tokens),
+                    temperature=float(temperature),
+                    top_p=float(top_p),
+                    do_sample=do_sample,
+                    pad_token_id=pad_token_id,
+                    eos_token_id=getattr(tokenizer, "eos_token_id", None),
+                )
+                sequence = outputs[0]
+                generated_ids = sequence[prompt_token_count:] if prompt_token_count > 0 else sequence
+                reply = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+                if reply.startswith(prompt):
+                    reply = reply[len(prompt) :].strip()
+                if not reply:
+                    full_text = tokenizer.decode(sequence, skip_special_tokens=True)
+                    reply = full_text[len(prompt) :].strip() if full_text.startswith(prompt) else full_text.strip()
         except Exception as exc:
             with self._lock:
                 self._last_error = str(exc)

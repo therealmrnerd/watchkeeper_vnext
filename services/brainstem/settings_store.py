@@ -15,7 +15,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
         "spansh": {"enabled": None, "live_applied": True, "label": "Spansh"},
         "edsm": {"enabled": None, "live_applied": True, "label": "EDSM"},
         "inara": {"enabled": None, "live_applied": True, "label": "Inara"},
-        "openai": {"enabled": False, "live_applied": False, "label": "OpenAI Cloud Fallback"},
+        "openai": {"enabled": False, "live_applied": True, "label": "OpenAI Cloud Fallback"},
         "obs": {"enabled": False, "live_applied": True, "label": "OBS Status"},
     },
     "syncs": {

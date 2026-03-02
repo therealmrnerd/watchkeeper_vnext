@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -281,6 +282,10 @@ def build_assist_prompt(
             )
 
     user_text = str(request_payload.get("user_text") or "").strip()
+    request_id = str(request_payload.get("request_id") or "")
+    mode = _normalize_mode(request_payload.get("mode"))
+    domain = _normalize_domain(request_payload.get("domain"))
+    urgency = _normalize_urgency(request_payload.get("urgency"))
     context_lines: list[str] = []
     request_context = request_payload.get("context")
     if isinstance(request_context, dict):
@@ -314,6 +319,24 @@ def build_assist_prompt(
                     context_lines.append(
                         "TwitchLastMessages: " + " | ".join(compact_messages)
                     )
+    response_template = {
+        "schema_version": "1.0",
+        "request_id": request_id,
+        "timestamp_utc": "2026-01-01T00:00:00Z",
+        "mode": mode,
+        "domain": domain,
+        "urgency": urgency,
+        "user_text": user_text,
+        "needs_tools": False,
+        "needs_clarification": True,
+        "clarification_questions": ["Please confirm the exact action you want me to take."],
+        "retrieval": {
+            "citation_ids": [],
+            "confidence": 0.4,
+        },
+        "proposed_actions": [],
+        "response_text": "I need clarification before taking any action.",
+    }
     lines = [
         system_prompt,
         router_prompt,
@@ -329,7 +352,10 @@ def build_assist_prompt(
         f"UserRequest: {user_text}",
         "RequestContext:",
         "\n".join(context_lines) if context_lines else "- (none)",
-        "Return JSON only with the intent proposal schema.",
+        "Return exactly one JSON object.",
+        "Do not include markdown fences or explanatory text.",
+        "Use this exact output shape and keep all keys present:",
+        json.dumps(response_template, ensure_ascii=False, indent=2),
     ]
     return "\n".join([line for line in lines if line is not None]).strip()
 

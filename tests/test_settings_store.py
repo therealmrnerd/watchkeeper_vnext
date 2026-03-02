@@ -33,6 +33,7 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
     def test_defaults_load_without_row(self) -> None:
         settings = load_runtime_settings(self.db_path)
         self.assertIsNone(settings["providers"]["spansh"]["enabled"])
+        self.assertTrue(settings["providers"]["openai"]["live_applied"])
         self.assertTrue(settings["syncs"]["ed_provider_autocache"]["enabled"])
         self.assertTrue(settings["syncs"]["jinx_lighting"]["live_applied"])
         self.assertTrue(settings["syncs"]["ytmd_ingest"]["live_applied"])

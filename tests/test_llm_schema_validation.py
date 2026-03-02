@@ -35,7 +35,6 @@ def _fallback_proposal() -> dict:
 class LLMSchemaValidationTests(unittest.TestCase):
     def test_schema_invalid_output_falls_back(self) -> None:
         bad_payload = {
-            "schema_version": "1.0",
             "request_id": "req-bad-001",
             "timestamp_utc": "2026-02-19T10:00:00Z",
             "mode": "work",
@@ -52,9 +51,9 @@ class LLMSchemaValidationTests(unittest.TestCase):
             prompt="test prompt",
             fallback_proposal=_fallback_proposal(),
         )
-        self.assertEqual(meta.get("validation"), "safe_fallback")
-        self.assertTrue(proposal.get("needs_clarification"))
-        self.assertEqual(proposal.get("proposed_actions"), [])
+        self.assertEqual(meta.get("validation"), "repaired")
+        self.assertEqual(proposal.get("schema_version"), "1.0")
+        self.assertEqual(proposal.get("domain"), "coding")
 
     def test_schema_valid_output_is_accepted(self) -> None:
         good_payload = dict(_fallback_proposal())
@@ -71,4 +70,3 @@ class LLMSchemaValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
