@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import threading
 import unittest
@@ -17,6 +18,8 @@ for p in (BRAINSTEM_DIR, ADVISORY_DIR):
 for p in (BRAINSTEM_DIR, ADVISORY_DIR):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
+
+os.environ["WKV_ADVISORY_LLM_MODE"] = "stub"
 
 sys.modules.pop("app", None)
 from app import AdvisoryHandler

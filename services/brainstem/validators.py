@@ -470,3 +470,11 @@ def validate_openai_credentials_update(payload: dict[str, Any]) -> None:
 
 def validate_runtime_settings_payload(payload: dict[str, Any]) -> None:
     validate_runtime_settings_update(payload)
+
+
+def validate_llm_control_payload(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    action = payload.get("action")
+    if not isinstance(action, str) or action.strip().lower() not in {"engage", "disengage"}:
+        raise ValueError("action must be 'engage' or 'disengage'")

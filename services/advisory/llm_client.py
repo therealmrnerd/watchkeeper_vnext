@@ -12,6 +12,7 @@ if str(BRAINSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(BRAINSTEM_DIR))
 
 from validators import validate_intent_proposal
+from local_runtime import OpenVinoLocalRuntime
 
 
 class LLMClient:
@@ -25,8 +26,9 @@ class LLMClient:
         raw_generator: Callable[[str], str] | None = None,
         http_opener: Callable[..., Any] | None = None,
         schema_path: str | Path | None = None,
+        local_runtime: OpenVinoLocalRuntime | None = None,
     ) -> None:
-        self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "stub")).strip().lower()
+        self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "openvino_local")).strip().lower()
         self.phi3_url = (phi3_url or os.getenv("WKV_PHI3_URL", "http://127.0.0.1:11434/api/generate")).strip()
         self.phi3_model = (phi3_model or os.getenv("WKV_PHI3_MODEL", "phi3:mini")).strip()
         self.timeout_sec = float(timeout_sec or os.getenv("WKV_PHI3_TIMEOUT_SEC", "25"))
@@ -37,6 +39,7 @@ class LLMClient:
         self.legacy_top_p = float(os.getenv("WKV_LEGACY_TOP_P", "0.9"))
         self.raw_generator = raw_generator
         self.http_opener = http_opener or request.urlopen
+        self.local_runtime = local_runtime or OpenVinoLocalRuntime()
         self.schema_path = (
             Path(schema_path)
             if schema_path
@@ -58,6 +61,19 @@ class LLMClient:
             return json.dumps(fallback_proposal, ensure_ascii=False), {
                 "provider": "stub_local",
                 "mode": self.mode,
+            }
+
+        if self.mode in {"openvino_local", "native", "phi3_openvino"}:
+            reply, runtime_meta = self.local_runtime.generate(
+                prompt=prompt,
+                max_new_tokens=int(os.getenv("WKV_ADVISORY_MAX_NEW_TOKENS", "256")),
+                temperature=float(os.getenv("WKV_ADVISORY_TEMPERATURE", "0.2")),
+                top_p=float(os.getenv("WKV_ADVISORY_TOP_P", "0.9")),
+            )
+            return reply, {
+                "provider": "openvino_local",
+                "mode": self.mode,
+                "runtime": runtime_meta,
             }
 
         if self.mode == "phi3":
@@ -240,6 +256,22 @@ class LLMClient:
         validate_intent_proposal(proposal)
         return proposal
 
+    def _safe_disengaged(self, fallback_proposal: dict[str, Any], reason: str) -> dict[str, Any]:
+        proposal = dict(fallback_proposal)
+        proposal["needs_tools"] = False
+        proposal["needs_clarification"] = False
+        proposal["clarification_questions"] = []
+        proposal["proposed_actions"] = []
+        proposal["response_text"] = "LLM is disengaged."
+        retrieval = proposal.get("retrieval")
+        if not isinstance(retrieval, dict):
+            retrieval = {"citation_ids": [], "confidence": 0.0}
+        retrieval["confidence"] = 0.0
+        retrieval["llm_validation_error"] = reason[:300]
+        proposal["retrieval"] = retrieval
+        validate_intent_proposal(proposal)
+        return proposal
+
     def generate_intent_proposal(
         self,
         *,
@@ -249,6 +281,14 @@ class LLMClient:
         try:
             raw_text, raw_meta = self._generate_raw(prompt, fallback_proposal)
         except Exception as exc:
+            if "not engaged" in str(exc).lower():
+                safe = self._safe_disengaged(fallback_proposal, f"llm_disengaged:{exc}")
+                return safe, {
+                    "provider": "openvino_local",
+                    "mode": self.mode,
+                    "validation": "disengaged",
+                    "error": str(exc),
+                }
             safe = self._safe_no_action(fallback_proposal, f"llm_request_error:{exc}")
             return safe, {
                 "provider": "fail_safe",

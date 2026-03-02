@@ -10,6 +10,7 @@
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
     latestObsStatus: null,
+    latestLlmStatus: null,
     inaraCredentials: null,
     runtimeSettings: null,
     inaraManualAction: null,
@@ -37,6 +38,7 @@
     vectorLatency: document.getElementById("vectorLatency"),
     lastAlarmTs: document.getElementById("lastAlarmTs"),
     lastAlarmMeta: document.getElementById("lastAlarmMeta"),
+    llmToggleBtn: document.getElementById("llmToggleBtn"),
     modeAutoBtn: document.getElementById("modeAutoBtn"),
     modeNormalBtn: document.getElementById("modeNormalBtn"),
     modeGameBtn: document.getElementById("modeGameBtn"),
@@ -269,6 +271,32 @@
     }
   }
 
+  function llmLoaded() {
+    const payload = state.latestLlmStatus && typeof state.latestLlmStatus === "object" ? state.latestLlmStatus : {};
+    const llm = payload.llm && typeof payload.llm === "object" ? payload.llm : {};
+    return Boolean(llm.loaded);
+  }
+
+  function renderLlmToggle() {
+    if (!el.llmToggleBtn) {
+      return;
+    }
+    const payload = state.latestLlmStatus && typeof state.latestLlmStatus === "object" ? state.latestLlmStatus : {};
+    const llm = payload.llm && typeof payload.llm === "object" ? payload.llm : {};
+    const loaded = Boolean(llm.loaded);
+    const loading = Boolean(llm.loading);
+    el.llmToggleBtn.classList.toggle("active", loaded);
+    el.llmToggleBtn.classList.toggle("inactive", !loaded);
+    el.llmToggleBtn.classList.toggle("loading", loading);
+    el.llmToggleBtn.disabled = loading;
+    el.llmToggleBtn.textContent = loading ? "..." : (loaded ? "LLM" : "OFF");
+    const device = String(llm.device || "").trim();
+    const errorText = String(llm.last_error || payload.error || "").trim();
+    el.llmToggleBtn.title = loaded
+      ? `Disengage LLM${device ? ` (${device})` : ""}`
+      : `Engage LLM${errorText ? `\n${errorText}` : ""}`;
+  }
+
   function setQuickAppState(appButton, running) {
     if (!appButton) {
       return;
@@ -462,6 +490,21 @@
       };
     }
     renderConfigTab();
+    renderLlmToggle();
+  }
+
+  async function loadLlmStatus() {
+    try {
+      const data = await apiGet("/llm/status");
+      state.latestLlmStatus = data && typeof data === "object" ? data : null;
+    } catch (err) {
+      state.latestLlmStatus = {
+        ok: false,
+        error: String(err.message || err),
+        llm: { loaded: false, loading: false },
+      };
+    }
+    renderLlmToggle();
   }
 
   async function loadObsStatus() {
@@ -1321,6 +1364,25 @@
       if (buttonNode) {
         buttonNode.disabled = false;
       }
+    }
+  }
+
+  async function toggleLlmAdvisory(buttonNode) {
+    if (!buttonNode) {
+      return;
+    }
+    const engage = !llmLoaded();
+    buttonNode.disabled = true;
+    try {
+      const result = await apiPost("/llm/control", { action: engage ? "engage" : "disengage" });
+      state.latestLlmStatus = result && typeof result === "object" ? result : state.latestLlmStatus;
+      setAssistMeta(engage ? "LLM engaged." : "LLM disengaged.");
+      renderLlmToggle();
+    } catch (err) {
+      setAssistMeta(`LLM toggle failed: ${String(err.message || err)}`);
+    } finally {
+      await loadLlmStatus();
+      buttonNode.disabled = false;
     }
   }
 
@@ -3270,6 +3332,11 @@
         await loadObsStatus();
       });
     }
+    if (el.llmToggleBtn) {
+      el.llmToggleBtn.addEventListener("click", async () => {
+        await toggleLlmAdvisory(el.llmToggleBtn);
+      });
+    }
     if (el.modeAutoBtn) {
       el.modeAutoBtn.addEventListener("click", () => {
         state.manualAssistMode = null;
@@ -3319,6 +3386,7 @@
     await loadInaraCredentials();
     await loadOpenAiCredentials();
     await loadRuntimeSettings();
+    await loadLlmStatus();
     await loadObsStatus();
     await loadEdStatus();
     await loadTwitchRecent();
@@ -3328,6 +3396,7 @@
     startEventStream();
     setInterval(loadSitrep, 10000);
     setInterval(loadProviderHealth, 60000);
+    setInterval(loadLlmStatus, 15000);
     setInterval(loadObsStatus, 15000);
     setInterval(loadEdStatus, 15000);
     setInterval(loadTwitchRecent, 6000);

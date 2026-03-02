@@ -8,40 +8,72 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BRAINSTEM_DIR = ROOT_DIR / "services" / "brainstem"
-ADVISORY_DIR = ROOT_DIR / "services" / "advisory"
-for p in (BRAINSTEM_DIR, ADVISORY_DIR):
+for p in (BRAINSTEM_DIR,):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
 
-class AssistKeypressConfirmTests(unittest.TestCase):
+class _FakeAdvisoryLlmHandler(BaseHTTPRequestHandler):
+    llm_status = {"loaded": False, "loading": False, "device": "GPU", "last_error": None}
+
+    def log_message(self, fmt, *args):
+        return
+
+    def _send_json(self, status_code, payload):
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self):  # noqa: N802
+        if self.path == "/llm/status":
+            self._send_json(200, {"ok": True, "mode": "openvino_local", "llm": dict(self.llm_status)})
+            return
+        self._send_json(404, {"ok": False, "error": "not_found"})
+
+    def do_POST(self):  # noqa: N802
+        if self.path != "/llm/control":
+            self._send_json(404, {"ok": False, "error": "not_found"})
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+        action = str(body.get("action") or "").strip().lower()
+        if action == "engage":
+            type(self).llm_status["loaded"] = True
+        elif action == "disengage":
+            type(self).llm_status["loaded"] = False
+        else:
+            self._send_json(400, {"ok": False, "error": "bad_action"})
+            return
+        self._send_json(200, {"ok": True, "action": action, "mode": "openvino_local", "llm": dict(self.llm_status)})
+
+
+class LlmControlEndpointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        os.environ["WKV_ADVISORY_LLM_MODE"] = "stub"
-        sys.modules.pop("app", None)
-        advisory_app = importlib.import_module("app")
-        cls.advisory_server = ThreadingHTTPServer(("127.0.0.1", 0), advisory_app.AdvisoryHandler)
+        cls.advisory_server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeAdvisoryLlmHandler)
         cls.advisory_port = int(cls.advisory_server.server_address[1])
         cls.advisory_thread = threading.Thread(target=cls.advisory_server.serve_forever, daemon=True)
         cls.advisory_thread.start()
 
-        cls.temp_dir = Path(tempfile.mkdtemp(prefix="assist_keypress_"))
-        cls.db_path = cls.temp_dir / "watchkeeper_keypress.db"
+        cls.temp_dir = Path(tempfile.mkdtemp(prefix="llm_control_endpoint_"))
+        cls.db_path = cls.temp_dir / "watchkeeper_llm_control.db"
 
         os.environ["WKV_DB_PATH"] = str(cls.db_path)
         os.environ["WKV_SCHEMA_PATH"] = str(ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
         os.environ["WKV_STANDING_ORDERS_PATH"] = str(ROOT_DIR / "config" / "standing_orders.json")
         os.environ["WKV_ENABLE_ACTUATORS"] = "0"
         os.environ["WKV_EDPARSER_ENABLED"] = "0"
-        os.environ["WKV_ADVISORY_ENABLED"] = "1"
-        os.environ["WKV_ADVISORY_URL"] = f"http://127.0.0.1:{cls.advisory_port}/assist"
-        os.environ["WKV_ADVISORY_TIMEOUT_SEC"] = "5"
+        os.environ["WKV_ADVISORY_LLM_STATUS_URL"] = f"http://127.0.0.1:{cls.advisory_port}/llm/status"
+        os.environ["WKV_ADVISORY_LLM_CONTROL_URL"] = f"http://127.0.0.1:{cls.advisory_port}/llm/control"
 
         for name in ("runtime", "validators", "queries", "actions", "handlers"):
             sys.modules.pop(name, None)
@@ -90,37 +122,21 @@ class AssistKeypressConfirmTests(unittest.TestCase):
             raw = exc.read().decode("utf-8", errors="replace")
         return status, json.loads(raw) if raw else {}
 
-    def test_keypress_requires_confirmation(self) -> None:
-        status, body = self._request(
-            "POST",
-            "/assist",
-            {
-                "schema_version": "1.0",
-                "request_id": "req-keypress-confirm-001",
-                "timestamp_utc": "2026-02-19T10:00:00Z",
-                "mode": "game",
-                "domain": "general",
-                "urgency": "normal",
-                "watch_condition": "GAME",
-                "incident_id": "inc-keypress-001",
-                "user_text": "press space now",
-                "stt_confidence": 0.95,
-                "foreground_process": "EliteDangerous64.exe",
-            },
-        )
+    def test_llm_status_and_control_proxy(self) -> None:
+        status, body = self._request("GET", "/llm/status")
         self.assertEqual(status, 200)
-        self.assertTrue(body.get("ok"))
-        self.assertTrue(body.get("needs_confirmation"))
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["llm"]["loaded"])
 
-        preview = body.get("policy_preview")
-        self.assertIsInstance(preview, list)
-        keypress_rows = [p for p in preview if p.get("tool_name") == "keypress"]
-        self.assertTrue(keypress_rows)
-        decision = keypress_rows[0].get("decision", {})
-        self.assertFalse(decision.get("allowed", True))
-        self.assertTrue(decision.get("requires_confirmation"))
-        self.assertEqual(decision.get("deny_reason_code"), "DENY_NEEDS_CONFIRMATION")
-        self.assertTrue(str(keypress_rows[0].get("confirm_token") or "").strip())
+        status, body = self._request("POST", "/llm/control", {"action": "engage"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["llm"]["loaded"])
+
+        status, body = self._request("POST", "/llm/control", {"action": "disengage"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["llm"]["loaded"])
 
 
 if __name__ == "__main__":

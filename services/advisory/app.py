@@ -12,6 +12,7 @@ for p in (THIS_DIR, ROOT_DIR):
         sys.path.insert(0, str(p))
 
 from llm_client import LLMClient
+from local_runtime import OpenVinoLocalRuntime
 from retrieval import RetrievalPackBuilder
 from router import (
     apply_expert_action_permissions,
@@ -24,7 +25,8 @@ from router import (
 HOST = os.getenv("WKV_ADVISORY_HOST", "127.0.0.1")
 PORT = int(os.getenv("WKV_ADVISORY_PORT", "8790"))
 RETRIEVAL_BUILDER = RetrievalPackBuilder()
-LLM_CLIENT = LLMClient()
+LOCAL_RUNTIME = OpenVinoLocalRuntime()
+LLM_CLIENT = LLMClient(local_runtime=LOCAL_RUNTIME)
 
 
 class AdvisoryHandler(BaseHTTPRequestHandler):
@@ -61,13 +63,33 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "service": "advisory",
-                    "mode": "stub",
+                    "mode": LLM_CLIENT.mode,
+                    "llm": LOCAL_RUNTIME.status(),
                 },
             )
+            return
+        if self.path == "/llm/status":
+            self._send_json(200, {"ok": True, "llm": LOCAL_RUNTIME.status(), "mode": LLM_CLIENT.mode})
             return
         self._send_json(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/llm/control":
+            try:
+                body = self._read_json_body()
+                action = str(body.get("action") or "").strip().lower()
+                if action == "engage":
+                    status = LOCAL_RUNTIME.engage()
+                elif action == "disengage":
+                    status = LOCAL_RUNTIME.disengage()
+                else:
+                    raise ValueError("action must be 'engage' or 'disengage'")
+                self._send_json(200, {"ok": True, "action": action, "llm": status, "mode": LLM_CLIENT.mode})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            except Exception as exc:
+                self._send_json(500, {"ok": False, "error": str(exc)})
+            return
         if self.path != "/assist":
             self._send_json(404, {"ok": False, "error": "not_found"})
             return
@@ -122,6 +144,11 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if os.getenv("WKV_ADVISORY_LOAD_ON_START", "0").strip().lower() in {"1", "true", "yes"}:
+        try:
+            LOCAL_RUNTIME.engage()
+        except Exception:
+            pass
     server = ThreadingHTTPServer((HOST, PORT), AdvisoryHandler)
     print(f"Advisory API listening on http://{HOST}:{PORT}")
     try:

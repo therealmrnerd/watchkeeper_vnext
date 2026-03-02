@@ -10,6 +10,7 @@ from typing import Any
 
 from runtime import (
     ADVISORY_HEALTH_URL,
+    ADVISORY_LLM_STATUS_URL,
     COMMIT,
     DB_PATH,
     DB_SERVICE,
@@ -96,6 +97,18 @@ def _probe_service(name: str, url: str, timeout_sec: float = 1.0) -> dict[str, A
             "url": url,
             "error": str(exc),
         }
+
+
+def _fetch_json(url: str, *, timeout_sec: float = 4.0) -> dict[str, Any]:
+    if not url:
+        raise ValueError("url is required")
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+        body = resp.read().decode("utf-8", errors="replace")
+    parsed = json.loads(body) if body else {}
+    if not isinstance(parsed, dict):
+        raise ValueError("response must be a JSON object")
+    return parsed
 
 
 def _state_map() -> dict[str, Any]:
@@ -334,6 +347,20 @@ def query_runtime_settings(query: dict[str, list[str]]) -> dict[str, Any]:
         "ok": True,
         "settings": settings,
     }
+
+
+def query_llm_status(query: dict[str, list[str]]) -> dict[str, Any]:
+    del query
+    try:
+        payload = _fetch_json(ADVISORY_LLM_STATUS_URL, timeout_sec=4.0)
+        return payload if isinstance(payload, dict) else {"ok": False, "error": "invalid_response"}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "down",
+            "error": str(exc),
+            "llm": {"loaded": False, "loading": False},
+        }
 
 
 def query_obs_status(query: dict[str, list[str]]) -> dict[str, Any]:

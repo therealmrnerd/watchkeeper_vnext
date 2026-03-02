@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from runtime import (
     ADVISORY_ENABLED,
+    ADVISORY_LLM_CONTROL_URL,
     ADVISORY_TIMEOUT_SEC,
     ADVISORY_URL,
     DB_PATH,
@@ -895,6 +896,44 @@ def save_runtime_settings_action(payload: dict[str, Any], source: str) -> dict[s
         tags=["settings", "runtime"],
     )
     return {"ok": True, "settings": settings}
+
+
+def control_advisory_llm_action(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    action = str(payload.get("action") or "").strip().lower()
+    req = request.Request(
+        ADVISORY_LLM_CONTROL_URL,
+        data=json.dumps({"action": action}, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with request.urlopen(req, timeout=max(ADVISORY_TIMEOUT_SEC, 15.0)) as resp:
+            raw_body = resp.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"llm control HTTP {exc.code}: {message}") from exc
+    except Exception as exc:
+        raise ValueError(f"llm control request failed: {exc}") from exc
+
+    try:
+        parsed = json.loads(raw_body) if raw_body else {}
+    except Exception as exc:
+        raise ValueError("llm control returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("llm control response must be a JSON object")
+    emit_event(
+        con=None,
+        event_type="ADVISORY_LLM_CONTROL",
+        source=source,
+        payload={
+            "action": action,
+            "ok": bool(parsed.get("ok", False)),
+            "mode": parsed.get("mode"),
+            "llm": parsed.get("llm") if isinstance(parsed.get("llm"), dict) else {},
+        },
+        tags=["advisory", "llm", action],
+    )
+    return parsed
 
 
 def _safe_twitch_context_pack(payload: dict[str, Any]) -> dict[str, Any]:

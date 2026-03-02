@@ -346,6 +346,23 @@ body {
     0 0 3px var(--wk-active-glow-orange-b);
 }
 
+.llm-toggle-btn {
+  width: auto;
+  min-width: 46px;
+  padding: 0 10px;
+  border-radius: 999px;
+}
+
+.llm-toggle-btn.inactive {
+  color: #9aa7b4;
+  border-color: #4a4a4a;
+  background: #232323;
+}
+
+.llm-toggle-btn.loading {
+  color: #ffcc7a;
+}
+
 main {
   padding: 12px 16px 24px 16px;
 }

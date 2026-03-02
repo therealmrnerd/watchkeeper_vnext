@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from actions import (
     assist_with_advisory,
+    control_advisory_llm_action,
     execute_provider_query,
     execute_actions,
     ingest_state,
@@ -32,6 +33,7 @@ from queries import (
     query_current_system_provider,
     query_current_system_stations,
     query_inara_credentials,
+    query_llm_status,
     query_openai_credentials,
     query_providers_health,
     query_runtime_settings,
@@ -61,6 +63,7 @@ from validators import (
     validate_feedback,
     validate_inara_credentials_update,
     validate_intent,
+    validate_llm_control_payload,
     validate_openai_credentials_update,
     validate_provider_query,
     validate_runtime_settings_payload,
@@ -251,6 +254,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 self._send_json(200, query_runtime_settings(query))
                 return
 
+            if parsed.path == "/llm/status":
+                self._send_json(200, query_llm_status(query))
+                return
+
             if parsed.path == "/obs/status":
                 self._send_json(200, query_obs_status(query))
                 return
@@ -377,6 +384,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 validate_runtime_settings_payload(body)
                 result = save_runtime_settings_action(body, source=source)
+                self._send_json(200, result)
+                return
+
+            if parsed.path == "/llm/control":
+                body = self._read_json_body()
+                validate_llm_control_payload(body)
+                result = control_advisory_llm_action(body, source=source)
                 self._send_json(200, result)
                 return
 

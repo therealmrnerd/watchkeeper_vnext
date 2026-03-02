@@ -24,6 +24,7 @@ for p in (BRAINSTEM_DIR, ADVISORY_DIR):
 class IncidentTraceCompletenessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        os.environ["WKV_ADVISORY_LLM_MODE"] = "stub"
         sys.modules.pop("app", None)
         advisory_app = importlib.import_module("app")
         cls.advisory_server = ThreadingHTTPServer(("127.0.0.1", 0), advisory_app.AdvisoryHandler)
