@@ -70,6 +70,9 @@ ED_PROCESS_NAMES = [
 ED_TELEMETRY_JSON = Path(
     os.getenv("WKV_ED_TELEMETRY_JSON", str(ROOT_DIR / "data" / "ed_telemetry.json"))
 )
+ED_JOURNAL_HARVEST_JSON = Path(
+    os.getenv("WKV_ED_JOURNAL_HARVEST_JSON", str(ROOT_DIR / "data" / "ed_journal_harvest.json"))
+)
 ED_STATUS_PATH = Path(
     os.getenv(
         "WKV_ED_STATUS_PATH",
@@ -136,13 +139,23 @@ AUX_APPS_AUTORUN = os.getenv("WKV_SUP_AUX_APPS_AUTORUN", "0").strip().lower() in
     "yes",
 }
 AUX_APPS_LAUNCH_BACKOFF_SEC = max(1.0, float(os.getenv("WKV_SUP_AUX_LAUNCH_BACKOFF_SEC", "10")))
+SAMMI_RESTART_GRACE_SEC = max(0.0, float(os.getenv("WKV_SUP_SAMMI_RESTART_GRACE_SEC", "30")))
 
 SAMMI_ENABLED = os.getenv("WKV_SUP_SAMMI_ENABLED", "1").strip().lower() in {
     "1",
     "true",
     "yes",
 }
+SAMMI_AUTORUN = os.getenv("WKV_SUP_SAMMI_AUTORUN", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 SAMMI_EXE = os.getenv("WKV_SUP_SAMMI_EXE", "").strip()
+SAMMI_RESTART_SUPPRESS_SEC = max(
+    0.0,
+    float(os.getenv("WKV_SUP_SAMMI_RESTART_SUPPRESS_SEC", "45")),
+)
 SAMMI_PROCESS_NAMES = [
     p.strip().lower()
     for p in os.getenv(
@@ -255,6 +268,12 @@ _sammi_heartbeat = 0
 _ed_ahk_last_launch_attempt = 0.0
 _sammi_last_launch_attempt = 0.0
 _jinx_last_launch_attempt = 0.0
+_sammi_missing_cycles = 0
+_jinx_missing_cycles = 0
+_ed_ahk_missing_cycles = 0
+_supervisor_started_monotonic = time.monotonic()
+_sammi_restart_suppress_until = 0.0
+_sammi_restart_suppress_initialized = False
 _journal_cache: dict[str, Any] = {"path": None, "size": 0, "mtime": 0.0, "values": {}}
 _jinx_env_map_cache: dict[str, Any] = {"mtime": None, "values": {}}
 _jinx_sync_state = "off"
@@ -761,6 +780,34 @@ def _process_running_by_names(
     return any(name in process_canon for name in configured_canon)
 
 
+def _process_running_by_path(exe_path: Path | None) -> bool:
+    if not exe_path:
+        return False
+    try:
+        target = str(exe_path.resolve()).lower().replace("'", "''")
+    except Exception:
+        target = str(exe_path).lower().replace("'", "''")
+    if not target:
+        return False
+    cmd = (
+        f"$target = '{target}'; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant() -eq $target } | "
+        "Select-Object -First 1 -ExpandProperty ProcessId"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=NO_WINDOW_FLAGS,
+        )
+        return (result.stdout or "").strip().isdigit()
+    except Exception:
+        return False
+
+
 def _launch_executable(
     exe_path: Path,
     args: list[str] | None = None,
@@ -978,6 +1025,23 @@ def _sammi_get_variable(name: str) -> Any | None:
         if "variable" in data:
             return data.get("variable")
     return data
+
+
+def _sammi_api_alive() -> bool:
+    if not SAMMI_API_ENABLED:
+        return False
+    query = parse.urlencode({"request": "getVariable", "name": "Heartbeat"})
+    url = f"http://{SAMMI_API_HOST}:{SAMMI_API_PORT}/api?{query}"
+    headers: dict[str, str] = {}
+    if SAMMI_API_PASSWORD:
+        headers["Authorization"] = SAMMI_API_PASSWORD
+    req = request.Request(url, method="GET", headers=headers)
+    try:
+        with request.urlopen(req, timeout=SAMMI_API_TIMEOUT_SEC) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return False
+    return isinstance(payload, dict) and "data" in payload
 
 
 def _normalize_jinx_effect(effect: Any) -> str | None:
@@ -1982,6 +2046,41 @@ def collect_ed_state() -> dict[str, Any]:
     running = bool(ed_running_name)
 
     telemetry = _read_json_file(ED_TELEMETRY_JSON) if running else {}
+    status = _read_json_file(ED_STATUS_PATH) if running else {}
+    journal_harvest = _read_json_file(ED_JOURNAL_HARVEST_JSON) if running else {}
+    destination = status.get("Destination") if isinstance(status, dict) else None
+    destination_name = None
+    destination_system = None
+    destination_body = None
+    if isinstance(destination, dict):
+        name = destination.get("Name")
+        if isinstance(name, str) and name.strip():
+            destination_name = name.strip()
+        system = destination.get("System")
+        if isinstance(system, int):
+            destination_system = system
+        body = destination.get("Body")
+        if isinstance(body, int):
+            destination_body = body
+    published = journal_harvest.get("published") if isinstance(journal_harvest, dict) else None
+    if not destination_name and isinstance(published, dict):
+        for key in ("j.SupercruiseDestinationDrop.Type", "j.SupercruiseDestinationDrop.Body"):
+            value = published.get(key)
+            if isinstance(value, str) and value.strip():
+                destination_name = value.strip()
+                break
+    destination_body_type = None
+    if isinstance(published, dict):
+        body_type = published.get("j.SupercruiseDestinationDrop.BodyType")
+        if isinstance(body_type, str) and body_type.strip():
+            destination_body_type = body_type.strip()
+    station_name = None
+    if isinstance(published, dict):
+        for key in ("j.Docked.StationName", "j.SupercruiseDestinationDrop.Type"):
+            value = published.get(key)
+            if isinstance(value, str) and value.strip():
+                station_name = value.strip()
+                break
     return {
         "ed.running": running,
         "ed.process_name": ed_running_name if running else None,
@@ -1990,12 +2089,18 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.telemetry.hull_percent": telemetry.get("hull_percent"),
         "ed.telemetry.dock_state": telemetry.get("dock_state"),
         "ed.telemetry.supercruise": telemetry.get("supercruise"),
+        "ed.telemetry.in_hyperspace": telemetry.get("in_hyperspace"),
         "ed.telemetry.landed": telemetry.get("landed"),
         "ed.telemetry.landing_gear_down": telemetry.get("landing_gear_down"),
         "ed.telemetry.shield_up": telemetry.get("shield_up"),
         "ed.telemetry.lights_on": telemetry.get("lights_on"),
         "ed.telemetry.flight_assist_off": telemetry.get("flight_assist_off"),
         "ed.telemetry.night_vision": telemetry.get("night_vision"),
+        "ed.telemetry.destination_name": destination_name,
+        "ed.telemetry.destination_system": destination_system,
+        "ed.telemetry.destination_body": destination_body,
+        "ed.telemetry.destination_body_type": destination_body_type,
+        "ed.telemetry.station_name": station_name,
     }
 
 
@@ -2281,16 +2386,34 @@ def process_aux_apps(
     global _ed_ahk_last_launch_attempt
     global _sammi_last_launch_attempt
     global _jinx_last_launch_attempt
+    global _sammi_missing_cycles
+    global _jinx_missing_cycles
+    global _ed_ahk_missing_cycles
+    global _sammi_restart_suppress_until
+    global _sammi_restart_suppress_initialized
 
     correlation_id = str(uuid.uuid4())
     now = utc_now_iso()
     process_names = _list_process_names()
+
+    if not _sammi_restart_suppress_initialized:
+        _sammi_restart_suppress_initialized = True
+        previous_sammi_state = db.get_state("app.sammi.running")
+        previous_sammi_running = bool(
+            previous_sammi_state and previous_sammi_state.get("state_value")
+        )
+        if previous_sammi_running and SAMMI_RESTART_SUPPRESS_SEC > 0:
+            _sammi_restart_suppress_until = time.monotonic() + SAMMI_RESTART_SUPPRESS_SEC
 
     sammi_path = _path_or_none(SAMMI_EXE)
     jinx_path = _path_or_none(JINX_EXE)
     ed_ahk_path = _path_or_none(ED_AHK_PATH)
 
     sammi_running = _process_running_by_names(process_names, SAMMI_PROCESS_NAMES)
+    if not sammi_running and sammi_path:
+        sammi_running = _process_running_by_path(sammi_path)
+    if not sammi_running and _sammi_api_alive():
+        sammi_running = True
     jinx_running = _process_running_by_names(process_names, JINX_PROCESS_NAMES)
 
     if isinstance(managed_ed_ahk_pid, int) and managed_ed_ahk_pid > 0 and not _pid_running(managed_ed_ahk_pid):
@@ -2304,6 +2427,22 @@ def process_aux_apps(
         ed_ahk_pids = _find_ahk_script_pids(ed_ahk_path)
         ed_ahk_running = bool(ed_ahk_pids)
 
+    if sammi_running:
+        _sammi_missing_cycles = 0
+        _sammi_restart_suppress_until = 0.0
+    else:
+        _sammi_missing_cycles += 1
+
+    if jinx_running:
+        _jinx_missing_cycles = 0
+    else:
+        _jinx_missing_cycles += 1
+
+    if ed_ahk_running:
+        _ed_ahk_missing_cycles = 0
+    else:
+        _ed_ahk_missing_cycles += 1
+
     sammi_error: str | None = None
     jinx_error: str | None = None
     ed_ahk_error: str | None = None
@@ -2311,28 +2450,46 @@ def process_aux_apps(
     if AUX_APPS_AUTORUN and ed_running:
         can_restart_sammi = (time.monotonic() - _sammi_last_launch_attempt) >= AUX_APPS_LAUNCH_BACKOFF_SEC
         can_restart_jinx = (time.monotonic() - _jinx_last_launch_attempt) >= AUX_APPS_LAUNCH_BACKOFF_SEC
-        if SAMMI_ENABLED and sammi_path and not sammi_running and can_restart_sammi:
+        sammi_grace_active = (time.monotonic() - _supervisor_started_monotonic) < SAMMI_RESTART_GRACE_SEC
+        sammi_restart_suppressed = time.monotonic() < _sammi_restart_suppress_until
+        if SAMMI_ENABLED and SAMMI_AUTORUN and sammi_path and not sammi_running and not sammi_grace_active and not sammi_restart_suppressed and _sammi_missing_cycles >= 3 and can_restart_sammi:
             _sammi_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable(sammi_path)
             if ok:
                 sammi_running = True
+                _sammi_missing_cycles = 0
             else:
                 sammi_error = err or "failed to launch"
         elif SAMMI_ENABLED and sammi_path and not sammi_running and sammi_error is None:
-            sammi_error = f"sammi launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
+            if not SAMMI_AUTORUN:
+                sammi_error = "sammi autorun disabled"
+            elif sammi_grace_active:
+                remaining = max(0.0, SAMMI_RESTART_GRACE_SEC - (time.monotonic() - _supervisor_started_monotonic))
+                sammi_error = f"sammi startup grace active ({remaining:.1f}s)"
+            elif sammi_restart_suppressed:
+                remaining = max(0.0, _sammi_restart_suppress_until - time.monotonic())
+                sammi_error = f"sammi restart suppress active ({remaining:.1f}s)"
+            elif _sammi_missing_cycles < 3:
+                sammi_error = f"sammi verification window ({_sammi_missing_cycles}/3)"
+            else:
+                sammi_error = f"sammi launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 
-        if JINX_ENABLED and jinx_path and not jinx_running and can_restart_jinx:
+        if JINX_ENABLED and jinx_path and not jinx_running and _jinx_missing_cycles >= 3 and can_restart_jinx:
             _jinx_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable_via_helper(jinx_path, JINX_LAUNCH_ARGS)
             if ok:
                 jinx_running = True
+                _jinx_missing_cycles = 0
             else:
                 jinx_error = err or "failed to launch"
         elif JINX_ENABLED and jinx_path and not jinx_running and jinx_error is None:
-            jinx_error = f"jinx launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
+            if _jinx_missing_cycles < 3:
+                jinx_error = f"jinx verification window ({_jinx_missing_cycles}/3)"
+            else:
+                jinx_error = f"jinx launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 
         can_restart_ahk = (time.monotonic() - _ed_ahk_last_launch_attempt) >= ED_AHK_RESTART_BACKOFF_SEC
-        if ED_AHK_ENABLED and ed_ahk_path and not ed_ahk_running and can_restart_ahk:
+        if ED_AHK_ENABLED and ed_ahk_path and not ed_ahk_running and _ed_ahk_missing_cycles >= 3 and can_restart_ahk:
             _ed_ahk_last_launch_attempt = time.monotonic()
             if ed_ahk_path.suffix.lower() == ".ahk":
                 ahk_bin = _resolve_ahk_bin()
@@ -2343,6 +2500,7 @@ def process_aux_apps(
                     if ok:
                         managed_ed_ahk_pid = pid
                         ed_ahk_running = True
+                        _ed_ahk_missing_cycles = 0
                     else:
                         ed_ahk_error = err or "failed to launch ed.ahk"
             else:
@@ -2350,10 +2508,14 @@ def process_aux_apps(
                 if ok:
                     managed_ed_ahk_pid = pid
                     ed_ahk_running = True
+                    _ed_ahk_missing_cycles = 0
                 else:
                     ed_ahk_error = err or "failed to launch ed.ahk executable"
         elif ED_AHK_ENABLED and ed_ahk_path and not ed_ahk_running and ed_ahk_error is None:
-            ed_ahk_error = f"ed.ahk restart backoff active ({ED_AHK_RESTART_BACKOFF_SEC:.1f}s)"
+            if _ed_ahk_missing_cycles < 3:
+                ed_ahk_error = f"ed.ahk verification window ({_ed_ahk_missing_cycles}/3)"
+            else:
+                ed_ahk_error = f"ed.ahk restart backoff active ({ED_AHK_RESTART_BACKOFF_SEC:.1f}s)"
 
     if AUX_APPS_AUTORUN and not ed_running and ED_AHK_ENABLED and ED_AHK_STOP_ON_EXIT:
         stopped = False
@@ -2381,6 +2543,7 @@ def process_aux_apps(
     values = {
         "app.aux.autorun": AUX_APPS_AUTORUN,
         "app.sammi.enabled": SAMMI_ENABLED,
+        "app.sammi.autorun": SAMMI_AUTORUN,
         "app.sammi.path": str(sammi_path) if sammi_path else SAMMI_EXE or None,
         "app.sammi.running": sammi_running,
         "app.sammi.last_error": sammi_error,

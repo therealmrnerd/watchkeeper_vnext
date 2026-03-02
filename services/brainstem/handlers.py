@@ -25,6 +25,7 @@ from actions import (
 )
 from queries import (
     build_diag_bundle,
+    query_ed_control_profile,
     query_current_system_bodies,
     query_events,
     query_log_files,
@@ -260,6 +261,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/obs/status":
                 self._send_json(200, query_obs_status(query))
+                return
+
+            if parsed.path == "/ed/control-profile":
+                self._send_json(200, query_ed_control_profile(query))
                 return
 
             if parsed.path == "/providers/current-system":

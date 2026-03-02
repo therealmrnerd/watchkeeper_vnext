@@ -138,6 +138,8 @@ $ahkExe = Resolve-PreferredPath -Candidates @(
   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe"
 )
 Set-EnvDefault -Name "WKV_SUP_SAMMI_EXE" -Value $sammiExe
+Set-EnvDefault -Name "WKV_SUP_SAMMI_AUTORUN" -Value "1"
+Set-EnvDefault -Name "WKV_SUP_SAMMI_RESTART_SUPPRESS_SEC" -Value "45"
 Set-EnvDefault -Name "WKV_SUP_JINX_EXE" -Value $jinxExe
 Set-EnvDefault -Name "WKV_SUP_JINX_ARGS" -Value "-m"
 Set-EnvDefault -Name "WKV_SUP_JINX_SYNC_ENABLED" -Value "1"

@@ -40,10 +40,40 @@
       "mvp": true
     },
     {
+      "key": "ed.semantic.context.player_platform",
+      "domain": "context",
+      "type": "enum",
+      "allowed_values": ["ship", "srv", "on_foot", "unknown"],
+      "meaning": "Direct platform the commander is currently operating from.",
+      "derive_from": [
+        "Status.Flags.OnFoot",
+        "Status.Flags.InSRV",
+        "Status.Flags"
+      ],
+      "priority": 0,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.context.on_foot_area",
+      "domain": "context",
+      "type": "enum",
+      "allowed_values": ["not_on_foot", "station", "settlement", "planet_surface", "unknown"],
+      "meaning": "Operational location classification while on foot.",
+      "derive_from": [
+        "Status.Flags.OnFoot",
+        "Status.Flags.Docked",
+        "Status.Flags.Landed",
+        "Status.Flags.HasLatLong",
+        "ed.telemetry.on_foot_location"
+      ],
+      "priority": 0,
+      "mvp": true
+    },
+    {
       "key": "ed.semantic.flight.flight_status",
       "domain": "flight",
       "type": "enum",
-      "allowed_values": ["normal_space", "supercruise", "witch_space", "glide", "landed", "docked", "dead", "unknown"],
+      "allowed_values": ["normal_space", "planetary_flight", "supercruise", "witch_space", "glide", "landed", "docked", "dead", "unknown"],
       "meaning": "Canonical ship movement regime.",
       "derive_from": [
         "Status.Flags.Docked",
@@ -180,7 +210,7 @@
       "type": "enum",
       "allowed_values": ["none", "ship", "station", "outpost", "fleet_carrier", "planet", "moon", "star", "asteroid", "signal_source", "settlement", "nav_beacon", "unknown"],
       "meaning": "Operational classification of the current target.",
-      "derive_from": ["Status.Target", "Status.Target.Name", "Status.Target.Type", "Journal.FSDTarget", "Journal.Location"],
+      "derive_from": ["Status.Target", "Status.Target.Name", "Status.Target.Type", "Status.Destination", "ed.telemetry.destination_name", "ed.telemetry.destination_body_type", "Journal.FSDTarget", "Journal.Location"],
       "priority": 2,
       "mvp": true
     },
@@ -190,7 +220,34 @@
       "type": "boolean",
       "allowed_values": [true, false],
       "meaning": "Suggest/enable docking request now.",
-      "derive_from": ["ed.semantic.flight.flight_status", "ed.semantic.docking.docking_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level", "ed.semantic.target.target_type"],
+      "derive_from": ["ed.semantic.flight.flight_status", "ed.semantic.docking.docking_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level", "ed.semantic.target.target_type", "ed.telemetry.destination_name", "ed.telemetry.destination_body_type"],
+      "priority": 3,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.opportunity.station_services_available",
+      "domain": "opportunity",
+      "type": "boolean",
+      "allowed_values": [true, false],
+      "meaning": "Station-style services are available now, either from ship docked state or on-foot in station.",
+      "derive_from": [
+        "ed.semantic.context.player_platform",
+        "ed.semantic.context.on_foot_area",
+        "ed.semantic.flight.flight_status",
+        "ed.semantic.docking.docking_state"
+      ],
+      "priority": 3,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.opportunity.market_access_available",
+      "domain": "opportunity",
+      "type": "boolean",
+      "allowed_values": [true, false],
+      "meaning": "Market-oriented station access is likely available now.",
+      "derive_from": [
+        "ed.semantic.opportunity.station_services_available"
+      ],
       "priority": 3,
       "mvp": true
     },
@@ -201,6 +258,19 @@
       "allowed_values": [true, false],
       "meaning": "Conservative gating for synthetic keypress/macros.",
       "derive_from": ["ed.semantic.session.online_state", "ed.semantic.flight.flight_status", "ed.semantic.flight.fsd_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level"],
+      "priority": 3,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.interface.control_profile",
+      "domain": "interface",
+      "type": "enum",
+      "allowed_values": ["ship", "srv", "on_foot_station", "on_foot_surface", "unknown"],
+      "meaning": "Recommended deterministic control profile for external control surfaces such as SAMMI.",
+      "derive_from": [
+        "ed.semantic.context.player_platform",
+        "ed.semantic.context.on_foot_area"
+      ],
       "priority": 3,
       "mvp": true
     }

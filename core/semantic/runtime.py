@@ -61,6 +61,12 @@ class TelemetryRawStore:
             "FuelCapacity": self.values.get("ed.telemetry.fuel_capacity"),
             "Hull": self.values.get("ed.telemetry.hull_percent"),
             "Target": self.values.get("ed.telemetry.target"),
+            "Destination": {
+                "Name": self.values.get("ed.telemetry.destination_name"),
+                "System": self.values.get("ed.telemetry.destination_system"),
+                "Body": self.values.get("ed.telemetry.destination_body"),
+                "BodyType": self.values.get("ed.telemetry.destination_body_type"),
+            },
         }
 
 
@@ -86,10 +92,15 @@ def compute_ed_semantic_records(values: dict[str, Any], now_ms: int | None = Non
         "Status.$fresh",
         "Status.Flags",
         "Status.Target",
+        "Status.Destination",
         "Status.Heat",
         "Status.FuelMain",
         "Status.FuelReservoir",
         "Status.Hull",
+        "ed.telemetry.destination_name",
+        "ed.telemetry.destination_system",
+        "ed.telemetry.destination_body",
+        "ed.telemetry.destination_body_type",
         "NavRoute.NextLegCost",
     ]
     engine.update(dirty, raw.now_ms())
@@ -104,10 +115,15 @@ def explain_ed_semantic(values: dict[str, Any], key: str, now_ms: int | None = N
         "Status.$fresh",
         "Status.Flags",
         "Status.Target",
+        "Status.Destination",
         "Status.Heat",
         "Status.FuelMain",
         "Status.FuelReservoir",
         "Status.Hull",
+        "ed.telemetry.destination_name",
+        "ed.telemetry.destination_system",
+        "ed.telemetry.destination_body",
+        "ed.telemetry.destination_body_type",
         "NavRoute.NextLegCost",
     ]
     engine.update(dirty, raw.now_ms())

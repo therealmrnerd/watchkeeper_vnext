@@ -33,7 +33,7 @@ class SemanticEngine:
                         affected.add(key)
 
         changed: list[SemanticStateRecord] = []
-        for _ in range(2):
+        for _ in range(3):
             for key in self._order_keys(list(affected)):
                 fn = self.derive_fns.get(key)
                 if fn is None or key not in self.states_by_key:

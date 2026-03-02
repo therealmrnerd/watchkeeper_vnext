@@ -1,19 +1,29 @@
 from __future__ import annotations
 
 
-def derive_can_request_docking(_raw, sem, _now_ms: int):
+def derive_can_request_docking(raw, sem, _now_ms: int):
     flight = _semantic_value(sem, "ed.semantic.flight.flight_status")
     docking = _semantic_value(sem, "ed.semantic.docking.docking_state")
     combat = _semantic_value(sem, "ed.semantic.combat.combat_state")
     risk = _semantic_value(sem, "ed.semantic.risk.risk_level")
     target = _semantic_value(sem, "ed.semantic.target.target_type")
+    destination_name = str(raw.get_raw_value("ed.telemetry.destination_name") or "").strip()
+    destination_body_type = str(raw.get_raw_value("ed.telemetry.destination_body_type") or "").strip().lower()
+    station_approach = bool(
+        destination_name
+        and (
+            target in {"station", "outpost", "fleet_carrier"}
+            or destination_body_type in {"station", "outpost", "fleetcarrier", "fleet_carrier"}
+            or any(token in destination_name.lower() for token in ("hub", "station", "outpost", "port", "terminal", "base"))
+        )
+    )
 
     value = (
-        flight in {"normal_space", "supercruise"}
+        flight in {"normal_space", "planetary_flight"}
         and docking in {"not_docking", "can_request"}
         and combat == "idle"
         and risk != "red"
-        and target in {"station", "outpost", "fleet_carrier"}
+        and station_approach
     )
     return {
         "type": "boolean",
@@ -25,7 +35,50 @@ def derive_can_request_docking(_raw, sem, _now_ms: int):
             "ed.semantic.combat.combat_state",
             "ed.semantic.risk.risk_level",
             "ed.semantic.target.target_type",
+            "ed.telemetry.destination_name",
+            "ed.telemetry.destination_body_type",
         ],
+    }
+
+
+def derive_station_services_available(_raw, sem, _now_ms: int):
+    player_platform = sem.get("ed.semantic.context.player_platform")
+    on_foot_area = sem.get("ed.semantic.context.on_foot_area")
+    flight_status = sem.get("ed.semantic.flight.flight_status")
+    docking_state = sem.get("ed.semantic.docking.docking_state")
+
+    platform_value = player_platform.value if player_platform else None
+    on_foot_area_value = on_foot_area.value if on_foot_area else None
+    flight_value = flight_status.value if flight_status else None
+    docking_value = docking_state.value if docking_state else None
+
+    value = bool(
+        flight_value == "docked"
+        or docking_value == "docked"
+        or (platform_value == "on_foot" and on_foot_area_value == "station")
+    )
+
+    return {
+        "type": "boolean",
+        "value": value,
+        "confidence": "best_effort",
+        "derived_from": [
+            "ed.semantic.context.player_platform",
+            "ed.semantic.context.on_foot_area",
+            "ed.semantic.flight.flight_status",
+            "ed.semantic.docking.docking_state",
+        ],
+    }
+
+
+def derive_market_access_available(_raw, sem, _now_ms: int):
+    services = sem.get("ed.semantic.opportunity.station_services_available")
+    value = bool(services.value) if services is not None else False
+    return {
+        "type": "boolean",
+        "value": value,
+        "confidence": "best_effort",
+        "derived_from": ["ed.semantic.opportunity.station_services_available"],
     }
 
 

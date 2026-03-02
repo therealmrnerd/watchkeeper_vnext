@@ -85,6 +85,13 @@ class BrainstemSmokeTests(unittest.TestCase):
         self.assertTrue(body.get("ok"))
         self.assertIn("items", body)
 
+    def test_ed_control_profile_endpoint_exists(self) -> None:
+        status, body = self._request("GET", "/ed/control-profile")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertIn("recommended_profile", body)
+        self.assertIn("semantic", body)
+
     def test_post_state_success_and_validation_error(self) -> None:
         status, body = self._request(
             "POST",

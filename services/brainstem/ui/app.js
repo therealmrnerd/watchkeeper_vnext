@@ -83,6 +83,7 @@
     edProviderCards: document.getElementById("edProviderCards"),
     edSystemSummary: document.getElementById("edSystemSummary"),
     edShipStateGrid: document.getElementById("edShipStateGrid"),
+    edSemanticDebug: document.getElementById("edSemanticDebug"),
     edBodiesBadges: document.getElementById("edBodiesBadges"),
     edBodiesMeta: document.getElementById("edBodiesMeta"),
     edBodiesList: document.getElementById("edBodiesList"),
@@ -1287,6 +1288,7 @@
       const mapped = {
         offline: "Offline",
         normal_space: "Normal Space",
+        planetary_flight: "Planetary Flight",
         supercruise: "Supercruise",
         witch_space: "Witch Space",
         glide: "Glide",
@@ -1863,6 +1865,44 @@
       "landinggear",
       semanticLandingGearDown
     );
+  }
+
+  function renderEdSemanticDebug(sitrep) {
+    if (!el.edSemanticDebug) {
+      return;
+    }
+    const handover = sitrep && typeof sitrep === "object" ? sitrep.handover || {} : {};
+    const edState = handover && typeof handover.ed_state === "object" ? handover.ed_state : {};
+    const semantic = getEdSemantic(edState);
+    const entries = Object.entries(semantic)
+      .filter(([key]) => key && !String(key).startsWith("_"))
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    if (!entries.length) {
+      el.edSemanticDebug.textContent = "No semantic state available.";
+      return;
+    }
+
+    el.edSemanticDebug.textContent = entries
+      .map(([key, value]) => `${key}: ${formatSemanticDebugValue(value)}`)
+      .join("\n");
+  }
+
+  function formatSemanticDebugValue(value) {
+    if (value === null || value === undefined) {
+      return "null";
+    }
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch (_err) {
+        return String(value);
+      }
+    }
+    return String(value);
   }
 
   function renderEdCardList(node, items, buildCard) {
@@ -3141,6 +3181,7 @@
       renderQuickSitrep(data);
       renderEdHeaderMeta(data);
       renderEdShipState(data);
+      renderEdSemanticDebug(data);
       renderServices(data.services || {});
       if (el.runtimeInfo) {
         el.runtimeInfo.textContent = JSON.stringify(data.runtime || {}, null, 2);

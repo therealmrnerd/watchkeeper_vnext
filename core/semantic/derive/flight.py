@@ -22,6 +22,25 @@ def derive_flight_status(raw, _sem, now_ms: int):
     if truthy(get_path(status, "Flags.Supercruise")):
         return _out("supercruise", ["Status.Flags.Supercruise"])
 
+    has_lat_long = truthy(get_path(status, "Flags.HasLatLong"))
+    altitude = _number_or_none(raw.get_raw_value("ed.telemetry.altitude"))
+    latitude = _number_or_none(raw.get_raw_value("ed.telemetry.latitude_raw"))
+    longitude = _number_or_none(raw.get_raw_value("ed.telemetry.longitude_raw"))
+    if has_lat_long or altitude is not None or (latitude is not None and longitude is not None):
+        deps = []
+        if has_lat_long:
+            deps.append("Status.Flags.HasLatLong")
+        if altitude is not None:
+            deps.append("ed.telemetry.altitude")
+        if latitude is not None and longitude is not None:
+            deps.extend(["ed.telemetry.latitude_raw", "ed.telemetry.longitude_raw"])
+        return {
+            "type": "enum",
+            "value": "planetary_flight",
+            "confidence": "best_effort",
+            "derived_from": deps or ["Status.Flags.HasLatLong"],
+        }
+
     start_jump = raw.get_last_journal_event("StartJump")
     if start_jump and ms_since(now_ms, start_jump["timestampMs"]) <= SEMANTIC_CONFIG["FSD_CHARGE_WINDOW_MS"]:
         completed = raw.get_last_journal_event_of(["FSDJump", "SupercruiseEntry"])
@@ -61,3 +80,13 @@ def derive_fsd_state(raw, _sem, now_ms: int):
 
 def _out(value: str, deps: list[str]) -> dict[str, object]:
     return {"type": "enum", "value": value, "confidence": "certain", "derived_from": deps}
+
+
+def _number_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number

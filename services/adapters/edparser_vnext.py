@@ -168,12 +168,17 @@ class ParserState:
             "hull_percent": None,
             "dock_state": None,
             "supercruise": None,
+            "in_hyperspace": None,
             "landed": None,
             "landing_gear_down": None,
             "shield_up": None,
             "lights_on": None,
             "flight_assist_off": None,
             "night_vision": None,
+            "destination_name": None,
+            "destination_system": None,
+            "destination_body": None,
+            "destination_body_type": None,
             "status_source_mtime": None,
             "journal_source": None,
             "last_event": None,
@@ -213,9 +218,20 @@ class ParserState:
             self.telemetry["landing_gear_down"] = bool(flags & (1 << 2))
             self.telemetry["shield_up"] = bool(flags & (1 << 3))
             self.telemetry["supercruise"] = bool(flags & (1 << 4))
+            self.telemetry["in_hyperspace"] = bool(flags & (1 << 30))
             self.telemetry["flight_assist_off"] = bool(flags & (1 << 5))
             self.telemetry["lights_on"] = bool(flags & (1 << 8))
             self.telemetry["night_vision"] = bool(flags & (1 << 28))
+        destination = status.get("Destination")
+        if isinstance(destination, dict):
+            name = destination.get("Name")
+            self.telemetry["destination_name"] = name.strip() if isinstance(name, str) and name.strip() else None
+            self.telemetry["destination_system"] = (
+                destination.get("System") if isinstance(destination.get("System"), int) else None
+            )
+            self.telemetry["destination_body"] = (
+                destination.get("Body") if isinstance(destination.get("Body"), int) else None
+            )
         self.telemetry["last_event"] = "status_update"
 
     def apply_journal_event(self, ev: dict[str, Any]) -> None:
@@ -229,6 +245,18 @@ class ParserState:
             system_address = ev.get("SystemAddress")
             if isinstance(system_address, int):
                 self.telemetry["system_address"] = system_address
+        if event_name == "SupercruiseDestinationDrop":
+            stationish = ev.get("Type")
+            if isinstance(stationish, str) and stationish.strip():
+                self.telemetry["destination_name"] = stationish.strip()
+            body_type = ev.get("BodyType")
+            if isinstance(body_type, str) and body_type.strip():
+                self.telemetry["destination_body_type"] = body_type.strip()
+        if event_name == "Docked":
+            station_name = ev.get("StationName")
+            if isinstance(station_name, str) and station_name.strip():
+                self.telemetry["destination_name"] = station_name.strip()
+                self.telemetry["destination_body_type"] = "Station"
         if "HullHealth" in ev:
             self._set_hull(ev.get("HullHealth"))
         if "Health" in ev:

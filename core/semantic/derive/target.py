@@ -7,7 +7,24 @@ def derive_target_type(raw, _sem, _now_ms: int):
     status = raw.get_status() or {}
     target = status.get("Target")
     if not target:
-        return {"type": "enum", "value": "none", "confidence": "best_effort", "derived_from": ["Status.Target"]}
+        destination = status.get("Destination") or {}
+        destination_name = str(destination.get("Name") or raw.get_raw_value("ed.telemetry.destination_name") or "").strip()
+        destination_body_type = str(
+            destination.get("BodyType")
+            or raw.get_raw_value("ed.telemetry.destination_body_type")
+            or ""
+        ).strip()
+        if destination_body_type:
+            mapped = _map_explicit(destination_body_type)
+            if mapped:
+                return _out(mapped, ["Status.Destination.BodyType"])
+        if destination_name:
+            lower_name = destination_name.lower()
+            if looks_like_fleet_carrier_callsign(destination_name):
+                return _out("fleet_carrier", ["Status.Destination.Name"])
+            if any(token in lower_name for token in ("hub", "station", "outpost", "port", "terminal", "base")):
+                return _out("station", ["Status.Destination.Name"])
+        return {"type": "enum", "value": "none", "confidence": "best_effort", "derived_from": ["Status.Target", "Status.Destination"]}
 
     explicit_type = target.get("Type") or target.get("TargetType") or target.get("Kind")
     if isinstance(explicit_type, str) and explicit_type:

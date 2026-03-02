@@ -395,6 +395,28 @@ def query_obs_status(query: dict[str, list[str]]) -> dict[str, Any]:
     return payload
 
 
+def query_ed_control_profile(query: dict[str, list[str]]) -> dict[str, Any]:
+    del query
+    state = _state_map()
+    ed_running = bool(
+        _state_value_with_fallback(state, "ed.status.running", "ed.running", "ed.telemetry.running")
+    )
+    semantic = {
+        "player_platform": state.get("ed.semantic.context.player_platform"),
+        "on_foot_area": state.get("ed.semantic.context.on_foot_area"),
+        "control_profile": state.get("ed.semantic.interface.control_profile"),
+        "station_services_available": state.get("ed.semantic.opportunity.station_services_available"),
+        "market_access_available": state.get("ed.semantic.opportunity.market_access_available"),
+    }
+    return {
+        "ok": True,
+        "ed_running": ed_running,
+        "recommended_profile": semantic["control_profile"] or "unknown",
+        "semantic": semantic,
+        "note": "Read-only recommendation endpoint for future SAMMI deck switching.",
+    }
+
+
 def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]:
     state = _state_map()
     system_name = _first_present(
@@ -764,6 +786,8 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     )
     ed_semantic_online_state = state.get("ed.semantic.session.online_state")
     ed_semantic_primary_mode = state.get("ed.semantic.context.primary_mode")
+    ed_semantic_player_platform = state.get("ed.semantic.context.player_platform")
+    ed_semantic_on_foot_area = state.get("ed.semantic.context.on_foot_area")
     ed_semantic_flight_status = state.get("ed.semantic.flight.flight_status")
     ed_semantic_fsd_state = state.get("ed.semantic.flight.fsd_state")
     ed_semantic_docking_state = state.get("ed.semantic.docking.docking_state")
@@ -775,7 +799,10 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     ed_semantic_target_type = state.get("ed.semantic.target.target_type")
     ed_semantic_risk_level = state.get("ed.semantic.risk.risk_level")
     ed_semantic_primary_risk = state.get("ed.semantic.risk.primary_risk")
+    ed_semantic_control_profile = state.get("ed.semantic.interface.control_profile")
     ed_semantic_can_request_docking = state.get("ed.semantic.opportunity.can_request_docking")
+    ed_semantic_station_services_available = state.get("ed.semantic.opportunity.station_services_available")
+    ed_semantic_market_access_available = state.get("ed.semantic.opportunity.market_access_available")
     ed_semantic_safe_for_keypress = state.get("ed.semantic.interaction.safe_for_keypress")
     inara_secret = get_provider_secret_entry("inara", PROVIDER_SECRETS_PATH)
     ed_commander_name = str(inara_secret.get("commander_name") or "").strip() or None
@@ -865,6 +892,8 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "semantic": {
                     "online_state": ed_semantic_online_state,
                     "primary_mode": ed_semantic_primary_mode,
+                    "player_platform": ed_semantic_player_platform,
+                    "on_foot_area": ed_semantic_on_foot_area,
                     "flight_status": ed_semantic_flight_status,
                     "fsd_state": ed_semantic_fsd_state,
                     "docking_state": ed_semantic_docking_state,
@@ -876,7 +905,10 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                     "target_type": ed_semantic_target_type,
                     "risk_level": ed_semantic_risk_level,
                     "primary_risk": ed_semantic_primary_risk,
+                    "control_profile": ed_semantic_control_profile,
                     "can_request_docking": ed_semantic_can_request_docking,
+                    "station_services_available": ed_semantic_station_services_available,
+                    "market_access_available": ed_semantic_market_access_available,
                     "safe_for_keypress": ed_semantic_safe_for_keypress,
                 },
             },
@@ -918,6 +950,8 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ed.telemetry.night_vision",
                 "ed.semantic.session.online_state",
                 "ed.semantic.context.primary_mode",
+                "ed.semantic.context.player_platform",
+                "ed.semantic.context.on_foot_area",
                 "ed.semantic.flight.flight_status",
                 "ed.semantic.flight.fsd_state",
                 "ed.semantic.docking.docking_state",
@@ -929,7 +963,10 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ed.semantic.target.target_type",
                 "ed.semantic.risk.risk_level",
                 "ed.semantic.risk.primary_risk",
+                "ed.semantic.interface.control_profile",
                 "ed.semantic.opportunity.can_request_docking",
+                "ed.semantic.opportunity.station_services_available",
+                "ed.semantic.opportunity.market_access_available",
                 "ed.semantic.interaction.safe_for_keypress",
                 "music.status.playing",
                 "music.playing",
