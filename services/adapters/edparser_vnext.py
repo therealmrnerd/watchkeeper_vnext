@@ -163,8 +163,13 @@ class ParserState:
             "timestamp_utc": utc_now_iso(),
             "ed_running": False,
             "process_name": None,
+            "commander_name": None,
             "system_name": None,
             "system_address": None,
+            "ship_name": None,
+            "ship_model": None,
+            "ship_ident": None,
+            "ship_id": None,
             "hull_percent": None,
             "dock_state": None,
             "supercruise": None,
@@ -238,6 +243,26 @@ class ParserState:
         event_name = str(ev.get("event") or "").strip()
         if not event_name:
             return
+        if event_name == "Commander":
+            commander = ev.get("Name")
+            if isinstance(commander, str) and commander.strip():
+                self.telemetry["commander_name"] = commander.strip()
+        if event_name in {"LoadGame", "Loadout", "ShipyardSwap", "SetUserShipName"}:
+            ship_name = ev.get("ShipName")
+            if isinstance(ship_name, str) and ship_name.strip():
+                self.telemetry["ship_name"] = ship_name.strip()
+            ship_model = ev.get("Ship") or ev.get("Ship_Localised")
+            if isinstance(ship_model, str) and ship_model.strip():
+                self.telemetry["ship_model"] = ship_model.strip()
+            ship_ident = ev.get("ShipIdent")
+            if isinstance(ship_ident, str) and ship_ident.strip():
+                self.telemetry["ship_ident"] = ship_ident.strip()
+            ship_id = ev.get("ShipID")
+            if ship_id is not None:
+                try:
+                    self.telemetry["ship_id"] = str(ship_id)
+                except Exception:
+                    pass
         if event_name in {"Location", "FSDJump"}:
             star = ev.get("StarSystem") or ev.get("System")
             if isinstance(star, str) and star.strip():

@@ -156,6 +156,10 @@ SAMMI_RESTART_SUPPRESS_SEC = max(
     0.0,
     float(os.getenv("WKV_SUP_SAMMI_RESTART_SUPPRESS_SEC", "45")),
 )
+SAMMI_MISSING_FOR_RESTART_SEC = max(
+    1.0,
+    float(os.getenv("WKV_SUP_SAMMI_MISSING_FOR_RESTART_SEC", "20")),
+)
 SAMMI_PROCESS_NAMES = [
     p.strip().lower()
     for p in os.getenv(
@@ -274,6 +278,7 @@ _ed_ahk_missing_cycles = 0
 _supervisor_started_monotonic = time.monotonic()
 _sammi_restart_suppress_until = 0.0
 _sammi_restart_suppress_initialized = False
+_sammi_last_seen_monotonic = 0.0
 _journal_cache: dict[str, Any] = {"path": None, "size": 0, "mtime": 0.0, "values": {}}
 _jinx_env_map_cache: dict[str, Any] = {"mtime": None, "values": {}}
 _jinx_sync_state = "off"
@@ -2084,8 +2089,13 @@ def collect_ed_state() -> dict[str, Any]:
     return {
         "ed.running": running,
         "ed.process_name": ed_running_name if running else None,
+        "ed.telemetry.commander_name": telemetry.get("commander_name"),
         "ed.telemetry.system_name": telemetry.get("system_name"),
         "ed.telemetry.system_address": telemetry.get("system_address"),
+        "ed.telemetry.ship_name": telemetry.get("ship_name"),
+        "ed.telemetry.ship_model": telemetry.get("ship_model"),
+        "ed.telemetry.ship_ident": telemetry.get("ship_ident"),
+        "ed.telemetry.ship_id": telemetry.get("ship_id"),
         "ed.telemetry.hull_percent": telemetry.get("hull_percent"),
         "ed.telemetry.dock_state": telemetry.get("dock_state"),
         "ed.telemetry.supercruise": telemetry.get("supercruise"),
@@ -2391,6 +2401,7 @@ def process_aux_apps(
     global _ed_ahk_missing_cycles
     global _sammi_restart_suppress_until
     global _sammi_restart_suppress_initialized
+    global _sammi_last_seen_monotonic
 
     correlation_id = str(uuid.uuid4())
     now = utc_now_iso()
@@ -2430,6 +2441,7 @@ def process_aux_apps(
     if sammi_running:
         _sammi_missing_cycles = 0
         _sammi_restart_suppress_until = 0.0
+        _sammi_last_seen_monotonic = time.monotonic()
     else:
         _sammi_missing_cycles += 1
 
@@ -2452,7 +2464,16 @@ def process_aux_apps(
         can_restart_jinx = (time.monotonic() - _jinx_last_launch_attempt) >= AUX_APPS_LAUNCH_BACKOFF_SEC
         sammi_grace_active = (time.monotonic() - _supervisor_started_monotonic) < SAMMI_RESTART_GRACE_SEC
         sammi_restart_suppressed = time.monotonic() < _sammi_restart_suppress_until
-        if SAMMI_ENABLED and SAMMI_AUTORUN and sammi_path and not sammi_running and not sammi_grace_active and not sammi_restart_suppressed and _sammi_missing_cycles >= 3 and can_restart_sammi:
+        sammi_missing_for_sec = (
+            time.monotonic() - _sammi_last_seen_monotonic
+            if _sammi_last_seen_monotonic > 0
+            else 0.0
+        )
+        sammi_missing_long_enough = (
+            _sammi_last_seen_monotonic > 0
+            and sammi_missing_for_sec >= SAMMI_MISSING_FOR_RESTART_SEC
+        )
+        if SAMMI_ENABLED and SAMMI_AUTORUN and sammi_path and not sammi_running and not sammi_grace_active and not sammi_restart_suppressed and sammi_missing_long_enough and can_restart_sammi:
             _sammi_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable(sammi_path)
             if ok:
@@ -2469,8 +2490,11 @@ def process_aux_apps(
             elif sammi_restart_suppressed:
                 remaining = max(0.0, _sammi_restart_suppress_until - time.monotonic())
                 sammi_error = f"sammi restart suppress active ({remaining:.1f}s)"
-            elif _sammi_missing_cycles < 3:
-                sammi_error = f"sammi verification window ({_sammi_missing_cycles}/3)"
+            elif _sammi_last_seen_monotonic <= 0:
+                sammi_error = "sammi never observed in this session"
+            elif not sammi_missing_long_enough:
+                remaining = max(0.0, SAMMI_MISSING_FOR_RESTART_SEC - sammi_missing_for_sec)
+                sammi_error = f"sammi missing holdoff active ({remaining:.1f}s)"
             else:
                 sammi_error = f"sammi launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 

@@ -768,6 +768,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     ed_system_address = _state_value_with_fallback(state, "ed.status.system_address", "ed.telemetry.system_address")
     ed_ship_name = _state_value_with_fallback(state, "ed.status.ship_name", "ed.telemetry.ship_name")
     ed_ship_model = _state_value_with_fallback(state, "ed.status.ship_model", "ed.telemetry.ship_model")
+    ed_ship_ident = _state_value_with_fallback(state, "ed.status.ship_ident", "ed.telemetry.ship_ident")
     ed_dock_state = _state_value_with_fallback(state, "ed.status.docked", "ed.telemetry.dock_state")
     ed_supercruise = _state_value_with_fallback(state, "ed.status.supercruise", "ed.telemetry.supercruise")
     ed_landed = _state_value_with_fallback(state, "ed.status.landed", "ed.telemetry.landed")
@@ -805,7 +806,11 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     ed_semantic_market_access_available = state.get("ed.semantic.opportunity.market_access_available")
     ed_semantic_safe_for_keypress = state.get("ed.semantic.interaction.safe_for_keypress")
     inara_secret = get_provider_secret_entry("inara", PROVIDER_SECRETS_PATH)
-    ed_commander_name = str(inara_secret.get("commander_name") or "").strip() or None
+    ed_commander_name = (
+        str(state.get("ed.telemetry.commander_name") or "").strip()
+        or str(inara_secret.get("commander_name") or "").strip()
+        or None
+    )
     jinx_running = bool(state.get("app.jinx.running"))
     sammi_running = bool(state.get("app.sammi.running"))
     ytmd_running = bool(state.get("music.app_running"))
@@ -879,6 +884,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "commander_name": ed_commander_name,
                 "ship_name": ed_ship_name,
                 "ship_model": ed_ship_model,
+                "ship_ident": ed_ship_ident,
                 "system_name": ed_system_name,
                 "system_address": ed_system_address,
                 "docked": ed_dock_state,
