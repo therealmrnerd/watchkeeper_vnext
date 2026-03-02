@@ -57,6 +57,48 @@ class RetrievalPackLimitsTests(unittest.TestCase):
                 VALUES(?,?,?,?,?,?)
                 """,
                 (
+                    "ed.semantic.flight.flight_status",
+                    '"normal_space"',
+                    "test",
+                    1.0,
+                    "2026-02-19T12:00:00Z",
+                    "2026-02-19T12:00:00Z",
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO state_current(state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    "ed.semantic.combat.combat_state",
+                    '"idle"',
+                    "test",
+                    1.0,
+                    "2026-02-19T12:00:00Z",
+                    "2026-02-19T12:00:00Z",
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO state_current(state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    "ed.semantic.interaction.safe_for_keypress",
+                    "true",
+                    "test",
+                    1.0,
+                    "2026-02-19T12:00:00Z",
+                    "2026-02-19T12:00:00Z",
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO state_current(state_key,state_value_json,source,confidence,observed_at_utc,updated_at_utc)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
                     "music.now_playing.title",
                     '"Very Long Test Song"',
                     "test",
@@ -132,6 +174,9 @@ class RetrievalPackLimitsTests(unittest.TestCase):
         self.assertLessEqual(len(pack["facts"]), 4)
         self.assertLessEqual(pack["metadata"]["total_chars"], 720)
         self.assertLessEqual(pack["metadata"]["approx_tokens"], 180)
+        self.assertEqual(pack["sitrep"]["state"].get("ed.semantic.flight.flight_status"), "normal_space")
+        self.assertEqual(pack["sitrep"]["state"].get("ed.semantic.combat.combat_state"), "idle")
+        self.assertEqual(pack["sitrep"]["state"].get("ed.semantic.interaction.safe_for_keypress"), "True")
         for chunk in pack["chunks"]:
             self.assertLessEqual(len(chunk["text"]), 180)
         for fact in pack["facts"]:
@@ -176,4 +221,3 @@ class RetrievalPackLimitsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

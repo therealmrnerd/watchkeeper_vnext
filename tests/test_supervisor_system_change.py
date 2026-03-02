@@ -132,6 +132,13 @@ class SupervisorSystemChangeTests(unittest.TestCase):
 
         self.assertTrue(running)
         self.assertEqual(current_system, ("Sol", 10477373803))
+        self.assertGreaterEqual(len(db.batch_calls), 2)
+        semantic_keys = {
+            item["state_key"]
+            for item in db.batch_calls[1]["items"]
+        }
+        self.assertIn("ed.semantic.session.online_state", semantic_keys)
+        self.assertIn("ed.semantic.flight.flight_status", semantic_keys)
         self.assertEqual(len(provider.calls), 1)
         self.assertEqual(provider.calls[0]["operation"], ProviderOperationId.SYSTEM_LOOKUP)
         self.assertEqual(provider.calls[0]["params"]["system_name"], "Sol")

@@ -1250,7 +1250,56 @@
     return asBool(value) ? onLabel : offLabel;
   }
 
+  function getEdSemantic(edState) {
+    if (!edState || typeof edState !== "object") {
+      return {};
+    }
+    const semantic = edState.semantic;
+    return semantic && typeof semantic === "object" ? semantic : {};
+  }
+
+  function formatSemanticLabel(value, fallback) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return fallback;
+    }
+    return text
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  function semanticBoolStatusLabel(value, onLabel, offLabel, unknownLabel) {
+    if (typeof value === "boolean") {
+      return value ? onLabel : offLabel;
+    }
+    if (value === null || value === undefined || value === "") {
+      return unknownLabel || "Unknown";
+    }
+    return boolStatusLabel(value, onLabel, offLabel, unknownLabel);
+  }
+
   function deriveEdFlightStatus(edState, edRunning) {
+    const semantic = getEdSemantic(edState);
+    const semanticFlight = String(semantic.flight_status || "").trim().toLowerCase();
+    if (semanticFlight) {
+      const mapped = {
+        offline: "Offline",
+        normal_space: "Normal Space",
+        supercruise: "Supercruise",
+        witch_space: "Witch Space",
+        glide: "Glide",
+        landed: "Landed",
+        docked: "Docked",
+        dead: "Dead",
+        unknown: "Unknown",
+      };
+      if (mapped[semanticFlight]) {
+        return mapped[semanticFlight];
+      }
+      return formatSemanticLabel(semanticFlight, "Unknown");
+    }
     if (!edRunning) {
       return "Offline";
     }
@@ -1768,25 +1817,51 @@
     }
     const handover = sitrep && typeof sitrep === "object" ? sitrep.handover || {} : {};
     const edState = handover && typeof handover.ed_state === "object" ? handover.ed_state : {};
+    const semantic = getEdSemantic(edState);
     const edRunning = Boolean(handover.ed_running);
+    const semanticPrimaryMode = String(semantic.primary_mode || "").trim().toLowerCase();
+    const semanticOnlineState = String(semantic.online_state || "").trim().toLowerCase();
+    const semanticLightsOn = semanticPrimaryMode === "unknown" ? null : edState.lights_on;
+    const semanticNightVisionOn = semanticPrimaryMode === "unknown" ? null : edState.night_vision;
+    const semanticLandingGearDown = semanticPrimaryMode === "unknown" ? null : edState.landing_gear_down;
+    const semanticFlightAssistOff = semanticPrimaryMode === "unknown" ? null : edState.flight_assist_off;
+    const semanticShieldState = String(semantic.risk_level || "").trim().toLowerCase();
+    let shieldsLabel = boolStatusLabel(edState.shields_up, "ON", "OFF", "----");
+    if (semanticOnlineState === "offline") {
+      shieldsLabel = "----";
+    } else if (semanticShieldState === "red" || semanticShieldState === "orange") {
+      shieldsLabel = edState.shields_up === false ? "OFF" : shieldsLabel;
+    }
 
     appendShipStateButton(el.edShipStateGrid, "Flight Status", deriveEdFlightStatus(edState, edRunning), "flightstatus", edRunning);
-    appendShipStateButton(el.edShipStateGrid, "Shields", boolStatusLabel(edState.shields_up, "ON", "OFF", "----"), "shields", edState.shields_up);
-    appendShipStateButton(el.edShipStateGrid, "Lights", boolStatusLabel(edState.lights_on, "ON", "OFF", "----"), "lights", edState.lights_on);
-    appendShipStateButton(el.edShipStateGrid, "Night Vision", boolStatusLabel(edState.night_vision, "ON", "OFF", "----"), "nightvision", edState.night_vision);
+    appendShipStateButton(el.edShipStateGrid, "Shields", shieldsLabel, "shields", edState.shields_up);
+    appendShipStateButton(
+      el.edShipStateGrid,
+      "Lights",
+      semanticBoolStatusLabel(semanticLightsOn, "ON", "OFF", "----"),
+      "lights",
+      semanticLightsOn
+    );
+    appendShipStateButton(
+      el.edShipStateGrid,
+      "Night Vision",
+      semanticBoolStatusLabel(semanticNightVisionOn, "ON", "OFF", "----"),
+      "nightvision",
+      semanticNightVisionOn
+    );
     appendShipStateButton(
       el.edShipStateGrid,
       "Flight Assist",
-      boolStatusLabel(edState.flight_assist_off, "OFF", "ON", "----"),
+      semanticBoolStatusLabel(semanticFlightAssistOff, "OFF", "ON", "----"),
       "flightassist",
-      edState.flight_assist_off === null || edState.flight_assist_off === undefined ? null : !asBool(edState.flight_assist_off)
+      semanticFlightAssistOff === null || semanticFlightAssistOff === undefined ? null : !asBool(semanticFlightAssistOff)
     );
     appendShipStateButton(
       el.edShipStateGrid,
       "Landing Gear",
-      boolStatusLabel(edState.landing_gear_down, "EXTENDED", "RETRACTED", "----"),
+      semanticBoolStatusLabel(semanticLandingGearDown, "EXTENDED", "RETRACTED", "----"),
       "landinggear",
-      edState.landing_gear_down
+      semanticLandingGearDown
     );
   }
 

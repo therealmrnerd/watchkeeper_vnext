@@ -762,6 +762,21 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         "ed.status.landing_gear_down",
         "ed.telemetry.landing_gear_down",
     )
+    ed_semantic_online_state = state.get("ed.semantic.session.online_state")
+    ed_semantic_primary_mode = state.get("ed.semantic.context.primary_mode")
+    ed_semantic_flight_status = state.get("ed.semantic.flight.flight_status")
+    ed_semantic_fsd_state = state.get("ed.semantic.flight.fsd_state")
+    ed_semantic_docking_state = state.get("ed.semantic.docking.docking_state")
+    ed_semantic_landing_state = state.get("ed.semantic.landing.landing_state")
+    ed_semantic_combat_state = state.get("ed.semantic.combat.combat_state")
+    ed_semantic_heat_state = state.get("ed.semantic.ship.heat_state")
+    ed_semantic_fuel_state = state.get("ed.semantic.ship.fuel_state")
+    ed_semantic_integrity_state = state.get("ed.semantic.ship.integrity_state")
+    ed_semantic_target_type = state.get("ed.semantic.target.target_type")
+    ed_semantic_risk_level = state.get("ed.semantic.risk.risk_level")
+    ed_semantic_primary_risk = state.get("ed.semantic.risk.primary_risk")
+    ed_semantic_can_request_docking = state.get("ed.semantic.opportunity.can_request_docking")
+    ed_semantic_safe_for_keypress = state.get("ed.semantic.interaction.safe_for_keypress")
     inara_secret = get_provider_secret_entry("inara", PROVIDER_SECRETS_PATH)
     ed_commander_name = str(inara_secret.get("commander_name") or "").strip() or None
     jinx_running = bool(state.get("app.jinx.running"))
@@ -847,6 +862,23 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "night_vision": ed_night_vision,
                 "flight_assist_off": ed_flight_assist_off,
                 "landing_gear_down": ed_landing_gear_down,
+                "semantic": {
+                    "online_state": ed_semantic_online_state,
+                    "primary_mode": ed_semantic_primary_mode,
+                    "flight_status": ed_semantic_flight_status,
+                    "fsd_state": ed_semantic_fsd_state,
+                    "docking_state": ed_semantic_docking_state,
+                    "landing_state": ed_semantic_landing_state,
+                    "combat_state": ed_semantic_combat_state,
+                    "heat_state": ed_semantic_heat_state,
+                    "fuel_state": ed_semantic_fuel_state,
+                    "integrity_state": ed_semantic_integrity_state,
+                    "target_type": ed_semantic_target_type,
+                    "risk_level": ed_semantic_risk_level,
+                    "primary_risk": ed_semantic_primary_risk,
+                    "can_request_docking": ed_semantic_can_request_docking,
+                    "safe_for_keypress": ed_semantic_safe_for_keypress,
+                },
             },
             "apps": {
                 "ed_running": ed_running,
@@ -884,6 +916,21 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ed.telemetry.lights_on",
                 "ed.telemetry.flight_assist_off",
                 "ed.telemetry.night_vision",
+                "ed.semantic.session.online_state",
+                "ed.semantic.context.primary_mode",
+                "ed.semantic.flight.flight_status",
+                "ed.semantic.flight.fsd_state",
+                "ed.semantic.docking.docking_state",
+                "ed.semantic.landing.landing_state",
+                "ed.semantic.combat.combat_state",
+                "ed.semantic.ship.heat_state",
+                "ed.semantic.ship.fuel_state",
+                "ed.semantic.ship.integrity_state",
+                "ed.semantic.target.target_type",
+                "ed.semantic.risk.risk_level",
+                "ed.semantic.risk.primary_risk",
+                "ed.semantic.opportunity.can_request_docking",
+                "ed.semantic.interaction.safe_for_keypress",
                 "music.status.playing",
                 "music.playing",
                 "music.now_playing.title",

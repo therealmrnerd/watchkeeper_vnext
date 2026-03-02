@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "states": [
+    {
+      "key": "ed.semantic.session.online_state",
+      "domain": "session",
+      "type": "enum",
+      "allowed_values": ["offline", "main_menu", "in_game", "loading", "unknown"],
+      "meaning": "ED client lifecycle state.",
+      "derive_from": ["Status.$fresh", "Journal.LoadGame", "Journal.Shutdown", "Journal.Location", "Journal.FSDJump", "Journal.Docked", "Journal.Undocked", "Journal.Commander", "Journal.Music"],
+      "priority": 0,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.context.primary_mode",
+      "domain": "context",
+      "type": "enum",
+      "allowed_values": ["space", "supercruise", "hyperspace", "planetary", "hangar", "on_foot", "srv", "unknown"],
+      "meaning": "Primary gameplay context.",
+      "derive_from": [
+        "Status.Flags.OnFoot",
+        "Status.Flags.InSRV",
+        "Status.Flags.Docked",
+        "Status.Flags.Landed",
+        "Status.Flags.Supercruise",
+        "Status.Flags.InHyperspace",
+        "Status.Flags.HasLatLong",
+        "Journal.Embark",
+        "Journal.Disembark",
+        "Journal.Docked",
+        "Journal.Undocked",
+        "Journal.Touchdown",
+        "Journal.Liftoff",
+        "Journal.StartJump",
+        "Journal.FSDJump",
+        "Journal.SupercruiseEntry",
+        "Journal.SupercruiseExit"
+      ],
+      "priority": 0,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.flight.flight_status",
+      "domain": "flight",
+      "type": "enum",
+      "allowed_values": ["normal_space", "supercruise", "witch_space", "glide", "landed", "docked", "dead", "unknown"],
+      "meaning": "Canonical ship movement regime.",
+      "derive_from": [
+        "Status.Flags.Docked",
+        "Status.Flags.Landed",
+        "Status.Flags.Supercruise",
+        "Status.Flags.InHyperspace",
+        "Status.Flags.GlideMode",
+        "Journal.Docked",
+        "Journal.Undocked",
+        "Journal.Touchdown",
+        "Journal.Liftoff",
+        "Journal.StartJump",
+        "Journal.FSDJump",
+        "Journal.SupercruiseEntry",
+        "Journal.SupercruiseExit",
+        "Journal.Died",
+        "Journal.ShipDestroyed"
+      ],
+      "priority": 0,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.flight.fsd_state",
+      "domain": "flight",
+      "type": "enum",
+      "allowed_values": ["idle", "charging", "cooldown", "supercruise", "hyperspace", "inhibited", "failed", "unknown"],
+      "meaning": "Deterministic FSD lifecycle.",
+      "derive_from": [
+        "Status.Flags.Supercruise",
+        "Status.Flags.InHyperspace",
+        "Status.Flags.MassLocked",
+        "Journal.StartJump",
+        "Journal.FSDJump",
+        "Journal.SupercruiseEntry",
+        "Journal.SupercruiseExit"
+      ],
+      "priority": 1,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.docking.docking_state",
+      "domain": "docking",
+      "type": "enum",
+      "allowed_values": ["not_docking", "can_request", "requested", "granted", "approaching", "docking", "docked", "denied", "timeout", "unknown"],
+      "meaning": "Docking request lifecycle.",
+      "derive_from": ["Status.Flags.Docked", "Journal.DockingRequested", "Journal.DockingGranted", "Journal.DockingDenied", "Journal.DockingCancelled", "Journal.Docked", "Journal.Undocked"],
+      "priority": 1,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.landing.landing_state",
+      "domain": "landing",
+      "type": "enum",
+      "allowed_values": ["in_space", "glide", "descending", "near_surface", "landing", "landed", "taking_off", "unknown"],
+      "meaning": "Planetary landing lifecycle.",
+      "derive_from": [
+        "Status.Flags.Landed",
+        "Status.Flags.GlideMode",
+        "Status.Flags.HasLatLong",
+        "Journal.Touchdown",
+        "Journal.Liftoff",
+        "Journal.ApproachBody",
+        "Journal.EnterOrbitalCruise",
+        "Journal.ExitOrbitalCruise",
+        "Journal.SupercruiseEntry",
+        "Journal.SupercruiseExit"
+      ],
+      "priority": 1,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.combat.combat_state",
+      "domain": "combat",
+      "type": "enum",
+      "allowed_values": ["idle", "hardpoints_deployed", "weapons_firing", "engaged", "under_attack", "interdiction", "retreating"],
+      "meaning": "Tactical posture.",
+      "derive_from": ["Status.Flags.HardpointsDeployed", "Status.Flags.IsInDanger", "Status.Flags.BeingInterdicted", "Status.Flags.Firing", "Journal.UnderAttack", "Journal.Interdicted", "Journal.Interdiction", "Journal.EscapeInterdiction"],
+      "priority": 1,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.risk.risk_level",
+      "domain": "risk",
+      "type": "enum",
+      "allowed_values": ["green", "yellow", "orange", "red"],
+      "meaning": "Aggregate risk bucket.",
+      "derive_from": ["ed.semantic.ship.heat_state", "ed.semantic.ship.fuel_state", "ed.semantic.ship.integrity_state", "ed.semantic.combat.combat_state"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.risk.primary_risk",
+      "domain": "risk",
+      "type": "enum",
+      "allowed_values": ["none", "heat", "fuel", "hull", "shields", "crime", "interdiction", "landing", "piracy", "unknown"],
+      "meaning": "Most pressing risk category.",
+      "derive_from": ["ed.semantic.ship.heat_state", "ed.semantic.ship.fuel_state", "ed.semantic.ship.integrity_state", "ed.semantic.combat.combat_state", "ed.semantic.landing.landing_state"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.ship.heat_state",
+      "domain": "ship",
+      "type": "enum",
+      "allowed_values": ["normal", "warm", "hot", "overheating", "critical"],
+      "meaning": "Heat risk bucket from ship heat percent.",
+      "derive_from": ["Status.Heat"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.ship.fuel_state",
+      "domain": "ship",
+      "type": "enum",
+      "allowed_values": ["ok", "low", "critical", "out_of_fuel", "unknown"],
+      "meaning": "Fuel risk bucket.",
+      "derive_from": ["Status.Fuel", "Status.FuelMain", "Status.FuelReservoir", "NavRoute.NextLegCost"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.ship.integrity_state",
+      "domain": "ship",
+      "type": "enum",
+      "allowed_values": ["healthy", "damaged", "critical", "unknown"],
+      "meaning": "Hull integrity bucket.",
+      "derive_from": ["Status.Hull", "Status.HullHealth", "Journal.HullDamage"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.target.target_type",
+      "domain": "target",
+      "type": "enum",
+      "allowed_values": ["none", "ship", "station", "outpost", "fleet_carrier", "planet", "moon", "star", "asteroid", "signal_source", "settlement", "nav_beacon", "unknown"],
+      "meaning": "Operational classification of the current target.",
+      "derive_from": ["Status.Target", "Status.Target.Name", "Status.Target.Type", "Journal.FSDTarget", "Journal.Location"],
+      "priority": 2,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.opportunity.can_request_docking",
+      "domain": "opportunity",
+      "type": "boolean",
+      "allowed_values": [true, false],
+      "meaning": "Suggest/enable docking request now.",
+      "derive_from": ["ed.semantic.flight.flight_status", "ed.semantic.docking.docking_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level", "ed.semantic.target.target_type"],
+      "priority": 3,
+      "mvp": true
+    },
+    {
+      "key": "ed.semantic.interaction.safe_for_keypress",
+      "domain": "interaction",
+      "type": "boolean",
+      "allowed_values": [true, false],
+      "meaning": "Conservative gating for synthetic keypress/macros.",
+      "derive_from": ["ed.semantic.session.online_state", "ed.semantic.flight.flight_status", "ed.semantic.flight.fsd_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level"],
+      "priority": 3,
+      "mvp": true
+    }
+  ]
+}

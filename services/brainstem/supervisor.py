@@ -19,6 +19,7 @@ for p in (THIS_DIR, ROOT_DIR):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 from core.ed_provider_types import ProviderOperationId
+from core.semantic.runtime import compute_ed_semantic_records
 from db_service import BrainstemDB
 from edparser_tool import EDParserTool
 from provider_config import DEFAULT_PROVIDER_CONFIG_PATH
@@ -2084,6 +2085,12 @@ def process_ed(
         mode="game" if running else "standby",
     )
     db.batch_set_state(items=items, emit_events=True)
+    _process_ed_semantic_state(
+        db,
+        values=values,
+        correlation_id=correlation_id,
+        mode="game" if running else "standby",
+    )
 
     if running and current_system is not None and current_system != previous_system:
         if _ed_provider_autocache_enabled(db):
@@ -2126,6 +2133,38 @@ def process_ed(
             tags=["ed"],
         )
     return running, (current_system or previous_system if running else None)
+
+
+def _process_ed_semantic_state(
+    db: BrainstemDB,
+    *,
+    values: dict[str, Any],
+    correlation_id: str,
+    mode: str,
+) -> None:
+    records = compute_ed_semantic_records(values)
+    if not records:
+        return
+
+    now = utc_now_iso()
+    items: list[dict[str, Any]] = []
+    for record in records:
+        confidence = 0.5
+        if record.confidence == "certain":
+            confidence = 1.0
+        elif record.confidence == "best_effort":
+            confidence = 0.75
+        items.append(
+            {
+                "state_key": record.key,
+                "state_value": record.value,
+                "source": "ed_semantic_engine",
+                "confidence": confidence,
+                "observed_at_utc": now,
+                "updated_at_utc": now,
+            }
+        )
+    db.batch_set_state(items=items, emit_events=False)
 
 
 def process_edparser(
