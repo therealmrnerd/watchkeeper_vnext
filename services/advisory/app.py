@@ -104,9 +104,16 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
                 retrieval_domains=list(expert_profile.get("retrieval_domains", [])),
             )
             fallback_proposal = build_fallback_proposal(body, context_pack, expert_profile)
-            prompt = build_assist_prompt(body, context_pack, expert_profile)
+            prompt = build_assist_prompt(body, context_pack, expert_profile, output_contract="intent_proposal")
+            local_prompt = build_assist_prompt(
+                body,
+                context_pack,
+                expert_profile,
+                output_contract="intent_sketch",
+            )
             proposal, llm_meta = LLM_CLIENT.generate_intent_proposal(
                 prompt=prompt,
+                local_prompt=local_prompt,
                 fallback_proposal=fallback_proposal,
             )
             proposal, dropped_count = apply_expert_action_permissions(proposal, expert_profile)

@@ -67,6 +67,38 @@ class LLMSchemaValidationTests(unittest.TestCase):
         self.assertEqual(proposal.get("request_id"), "req-good-001")
         self.assertFalse(proposal.get("needs_clarification"))
 
+    def test_intent_sketch_is_mapped_to_final_proposal(self) -> None:
+        class _FakeRuntime:
+            def generate(self, **kwargs):
+                return (
+                    json.dumps(
+                        {
+                            "schema_version": "1.0",
+                            "intent": "tool_request",
+                            "response_text": "Advancing the music.",
+                            "needs_clarification": False,
+                            "clarification_question": "",
+                            "tool_name": "music_next",
+                            "tool_arg": "",
+                            "confidence_band": "high",
+                        }
+                    ),
+                    {"provider": "openvino_local", "backend": "openvino_genai"},
+                )
+
+        client = LLMClient(mode="openvino_local", local_runtime=_FakeRuntime())
+        client.local_output_mode = "intent_sketch"
+        proposal, meta = client.generate_intent_proposal(
+            prompt="full proposal prompt",
+            local_prompt="intent sketch prompt",
+            fallback_proposal=_fallback_proposal(),
+        )
+        self.assertEqual(meta.get("output_contract"), "intent_sketch")
+        self.assertEqual(meta.get("validation"), "ok")
+        self.assertTrue(proposal.get("needs_tools"))
+        self.assertEqual(len(proposal.get("proposed_actions", [])), 1)
+        self.assertEqual(proposal["proposed_actions"][0]["tool_name"], "music_next")
+
 
 if __name__ == "__main__":
     unittest.main()

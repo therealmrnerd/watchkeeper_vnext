@@ -29,9 +29,13 @@ class LLMClient:
         raw_generator: Callable[[str], str] | None = None,
         http_opener: Callable[..., Any] | None = None,
         schema_path: str | Path | None = None,
+        intent_sketch_schema_path: str | Path | None = None,
         local_runtime: OpenVinoLocalRuntime | None = None,
     ) -> None:
         self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "openvino_local")).strip().lower()
+        self.local_output_mode = (
+            os.getenv("WKV_ADVISORY_LOCAL_OUTPUT_MODE", "intent_proposal").strip().lower() or "intent_proposal"
+        )
         self.phi3_url = (phi3_url or os.getenv("WKV_PHI3_URL", "http://127.0.0.1:11434/api/generate")).strip()
         self.phi3_model = (phi3_model or os.getenv("WKV_PHI3_MODEL", "phi3:mini")).strip()
         self.timeout_sec = float(timeout_sec or os.getenv("WKV_PHI3_TIMEOUT_SEC", "25"))
@@ -55,15 +59,27 @@ class LLMClient:
             if schema_path
             else (ROOT_DIR / "contracts" / "v1" / "intent_proposal.json")
         )
-        self._contract = self._load_contract()
+        self.intent_sketch_schema_path = (
+            Path(intent_sketch_schema_path)
+            if intent_sketch_schema_path
+            else (ROOT_DIR / "contracts" / "v1" / "intent_sketch.schema.json")
+        )
+        self._contract = self._load_contract(self.schema_path)
+        self._intent_sketch_contract = self._load_contract(self.intent_sketch_schema_path)
 
-    def _load_contract(self) -> dict[str, Any]:
+    def _load_contract(self, path: Path) -> dict[str, Any]:
         try:
-            return json.loads(self.schema_path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return {}
 
-    def _generate_raw(self, prompt: str, fallback_proposal: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _generate_raw(
+        self,
+        prompt: str,
+        fallback_proposal: dict[str, Any],
+        *,
+        json_schema: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         if self.raw_generator is not None:
             return self.raw_generator(prompt), {"provider": "test_raw_generator", "mode": "custom"}
 
@@ -79,6 +95,7 @@ class LLMClient:
                 max_new_tokens=int(os.getenv("WKV_ADVISORY_MAX_NEW_TOKENS", "256")),
                 temperature=float(os.getenv("WKV_ADVISORY_TEMPERATURE", "0.2")),
                 top_p=float(os.getenv("WKV_ADVISORY_TOP_P", "0.9")),
+                json_schema=json_schema,
             )
             return reply, {
                 "provider": "openvino_local",
@@ -437,6 +454,154 @@ class LLMClient:
             if extra:
                 raise ValueError(f"unexpected fields: {', '.join(extra)}")
 
+    def _validate_intent_sketch_shape(self, sketch: dict[str, Any]) -> None:
+        if not isinstance(sketch, dict):
+            raise ValueError("intent sketch must be object")
+        properties = self._intent_sketch_contract.get("properties", {})
+        required = self._intent_sketch_contract.get("required", [])
+        if isinstance(required, list):
+            for field in required:
+                if field not in sketch:
+                    raise ValueError(f"intent sketch missing required field: {field}")
+        if self._intent_sketch_contract.get("additionalProperties") is False and isinstance(properties, dict):
+            allowed = set(properties.keys())
+            extra = sorted(set(sketch.keys()) - allowed)
+            if extra:
+                raise ValueError(f"unexpected sketch fields: {', '.join(extra)}")
+
+    def _repair_intent_sketch(self, sketch: dict[str, Any]) -> dict[str, Any]:
+        repaired = dict(sketch) if isinstance(sketch, dict) else {}
+        repaired["schema_version"] = "1.0"
+
+        intent = str(repaired.get("intent") or "").strip().lower()
+        if intent not in {"respond", "clarify", "tool_request"}:
+            intent = "respond"
+        repaired["intent"] = intent
+
+        response_text = str(repaired.get("response_text") or "").strip()
+        repaired["response_text"] = (response_text or "I can help with that.")[:480]
+
+        tool_name = str(repaired.get("tool_name") or "").strip()
+        if tool_name not in {"none", "keypress", "set_lights", "music_next"}:
+            tool_name = "none"
+        repaired["tool_name"] = tool_name
+        repaired["tool_arg"] = str(repaired.get("tool_arg") or "").strip()[:64]
+
+        confidence_band = str(repaired.get("confidence_band") or "").strip().lower()
+        if confidence_band not in {"low", "medium", "high"}:
+            confidence_band = "medium"
+        repaired["confidence_band"] = confidence_band
+
+        needs_clarification = bool(repaired.get("needs_clarification")) or intent == "clarify"
+        repaired["needs_clarification"] = needs_clarification
+        clarification_question = str(repaired.get("clarification_question") or "").strip()[:160]
+        if needs_clarification and not clarification_question:
+            clarification_question = "Please confirm the exact action you want me to take."
+        repaired["clarification_question"] = clarification_question
+
+        if repaired["needs_clarification"]:
+            repaired["intent"] = "clarify"
+            repaired["tool_name"] = "none"
+            repaired["tool_arg"] = ""
+        elif repaired["tool_name"] == "none":
+            repaired["intent"] = "respond"
+        else:
+            repaired["intent"] = "tool_request"
+        return repaired
+
+    def _confidence_band_score(self, value: str) -> float:
+        return {"low": 0.35, "medium": 0.65, "high": 0.9}.get(str(value).strip().lower(), 0.5)
+
+    def _normalize_keypress_arg(self, value: str) -> str | None:
+        key = str(value or "").strip().lower()
+        if key in {"space", "enter", "tab", "esc", "up", "down", "left", "right"}:
+            return key
+        if key.startswith("f") and key[1:].isdigit():
+            number = int(key[1:])
+            if 1 <= number <= 12:
+                return key
+        return None
+
+    def _map_intent_sketch_to_proposal(
+        self,
+        sketch: dict[str, Any],
+        fallback_proposal: dict[str, Any],
+    ) -> dict[str, Any]:
+        repaired = self._repair_intent_sketch(sketch)
+        proposal = dict(fallback_proposal)
+        proposal["response_text"] = repaired["response_text"]
+        proposal["needs_clarification"] = bool(repaired["needs_clarification"])
+        proposal["clarification_questions"] = (
+            [repaired["clarification_question"]] if repaired["needs_clarification"] else []
+        )
+
+        confidence = self._confidence_band_score(str(repaired.get("confidence_band") or "medium"))
+        retrieval = proposal.get("retrieval")
+        if not isinstance(retrieval, dict):
+            retrieval = {"citation_ids": [], "confidence": confidence}
+        retrieval["confidence"] = max(float(retrieval.get("confidence", 0.0)), confidence)
+        proposal["retrieval"] = retrieval
+
+        actions: list[dict[str, Any]] = []
+        tool_name = str(repaired.get("tool_name") or "none")
+        tool_arg = str(repaired.get("tool_arg") or "").strip()
+        if not proposal["needs_clarification"] and tool_name != "none":
+            if tool_name == "keypress":
+                key = self._normalize_keypress_arg(tool_arg)
+                if key:
+                    actions.append(
+                        {
+                            "action_id": "a1",
+                            "tool_name": "keypress",
+                            "parameters": {"key": key},
+                            "safety_level": "high_risk",
+                            "mode_constraints": ["game"],
+                            "requires_confirmation": True,
+                            "timeout_ms": 1500,
+                            "reason": f"User requested keypress '{key}'",
+                            "confidence": confidence,
+                        }
+                    )
+                else:
+                    proposal["needs_clarification"] = True
+                    proposal["clarification_questions"] = ["Which key should I press?"]
+            elif tool_name == "set_lights":
+                scene = tool_arg if tool_arg in {"default", "combat", "work", "standby"} else "default"
+                actions.append(
+                    {
+                        "action_id": "a1",
+                        "tool_name": "set_lights",
+                        "parameters": {"scene": scene},
+                        "safety_level": "low_risk",
+                        "mode_constraints": ["game", "work", "standby", "tutor"],
+                        "requires_confirmation": False,
+                        "timeout_ms": 3000,
+                        "reason": f"Set lights scene to '{scene}'",
+                        "confidence": confidence,
+                    }
+                )
+            elif tool_name == "music_next":
+                actions.append(
+                    {
+                        "action_id": "a1",
+                        "tool_name": "music_next",
+                        "parameters": {},
+                        "safety_level": "low_risk",
+                        "mode_constraints": ["game", "work", "standby", "tutor"],
+                        "requires_confirmation": False,
+                        "timeout_ms": 1200,
+                        "reason": "Advance music track",
+                        "confidence": confidence,
+                    }
+                )
+        proposal["proposed_actions"] = actions[:1]
+        proposal["needs_tools"] = bool(proposal["proposed_actions"])
+        if proposal["needs_clarification"]:
+            proposal["proposed_actions"] = []
+            proposal["needs_tools"] = False
+        validate_intent_proposal(proposal)
+        return proposal
+
     def _repair_proposal(self, proposal: dict[str, Any], fallback_proposal: dict[str, Any]) -> dict[str, Any]:
         repaired = dict(proposal) if isinstance(proposal, dict) else {}
         fallback = dict(fallback_proposal)
@@ -572,10 +737,20 @@ class LLMClient:
         self,
         *,
         prompt: str,
+        local_prompt: str | None = None,
         fallback_proposal: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        use_local_sketch = (
+            self.raw_generator is None
+            and self.mode in {"openvino_local", "native", "phi3_openvino"}
+            and self.local_output_mode == "intent_sketch"
+        )
         try:
-            raw_text, raw_meta = self._generate_raw(prompt, fallback_proposal)
+            raw_text, raw_meta = self._generate_raw(
+                local_prompt if use_local_sketch and local_prompt else prompt,
+                fallback_proposal,
+                json_schema=self._intent_sketch_contract if use_local_sketch else None,
+            )
         except Exception as exc:
             if "not engaged" in str(exc).lower():
                 safe = self._safe_disengaged(fallback_proposal, f"llm_disengaged:{exc}")
@@ -618,6 +793,38 @@ class LLMClient:
                 return proposal, meta
             safe = self._safe_no_action(fallback_proposal, "invalid_json")
             return safe, raw_meta | {"validation": "safe_fallback", "parse_mode": parse_mode}
+
+        if use_local_sketch:
+            try:
+                self._validate_intent_sketch_shape(parsed)
+                repaired_sketch = self._repair_intent_sketch(parsed)
+                proposal = self._map_intent_sketch_to_proposal(repaired_sketch, fallback_proposal)
+                return proposal, raw_meta | {
+                    "validation": "ok",
+                    "parse_mode": parse_mode,
+                    "output_contract": "intent_sketch",
+                }
+            except Exception as exc:
+                proposal, meta = self._try_openai_fallback(
+                    prompt=prompt,
+                    fallback_proposal=fallback_proposal,
+                    prior_error=f"intent_sketch_error:{exc}",
+                    prior_meta=raw_meta | {
+                        "validation": "repair_failed",
+                        "parse_mode": parse_mode,
+                        "error": str(exc),
+                        "output_contract": "intent_sketch",
+                    },
+                )
+                if proposal is not None and meta is not None:
+                    return proposal, meta
+                safe = self._safe_no_action(fallback_proposal, f"intent_sketch_error:{exc}")
+                return safe, raw_meta | {
+                    "validation": "safe_fallback",
+                    "parse_mode": parse_mode,
+                    "error": str(exc),
+                    "output_contract": "intent_sketch",
+                }
 
         try:
             self._validate_contract_shape(parsed)

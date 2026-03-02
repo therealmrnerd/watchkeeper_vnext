@@ -252,6 +252,8 @@ def build_assist_prompt(
     request_payload: dict[str, Any],
     context_pack: dict[str, Any],
     expert_profile: dict[str, Any],
+    *,
+    output_contract: str = "intent_proposal",
 ) -> str:
     system_prompt = _read_prompt(PROMPTS_DIR / "system.txt")
     router_prompt = _read_prompt(PROMPTS_DIR / "router.txt")
@@ -319,24 +321,43 @@ def build_assist_prompt(
                     context_lines.append(
                         "TwitchLastMessages: " + " | ".join(compact_messages)
                     )
-    response_template = {
-        "schema_version": "1.0",
-        "request_id": request_id,
-        "timestamp_utc": "2026-01-01T00:00:00Z",
-        "mode": mode,
-        "domain": domain,
-        "urgency": urgency,
-        "user_text": user_text,
-        "needs_tools": False,
-        "needs_clarification": True,
-        "clarification_questions": ["Please confirm the exact action you want me to take."],
-        "retrieval": {
-            "citation_ids": [],
-            "confidence": 0.4,
-        },
-        "proposed_actions": [],
-        "response_text": "I need clarification before taking any action.",
-    }
+    if output_contract == "intent_sketch":
+        response_template = {
+            "schema_version": "1.0",
+            "intent": "respond",
+            "response_text": "Short helpful reply.",
+            "needs_clarification": False,
+            "clarification_question": "",
+            "tool_name": "none",
+            "tool_arg": "",
+            "confidence_band": "medium",
+        }
+        contract_note = (
+            "Return exactly one JSON object matching the IntentSketch shape below. "
+            "Use tool_name 'none' when no tool is needed. "
+            "If clarification is needed, set intent to 'clarify', needs_clarification to true, "
+            "and provide one short clarification_question."
+        )
+    else:
+        response_template = {
+            "schema_version": "1.0",
+            "request_id": request_id,
+            "timestamp_utc": "2026-01-01T00:00:00Z",
+            "mode": mode,
+            "domain": domain,
+            "urgency": urgency,
+            "user_text": user_text,
+            "needs_tools": False,
+            "needs_clarification": True,
+            "clarification_questions": ["Please confirm the exact action you want me to take."],
+            "retrieval": {
+                "citation_ids": [],
+                "confidence": 0.4,
+            },
+            "proposed_actions": [],
+            "response_text": "I need clarification before taking any action.",
+        }
+        contract_note = "Use this exact output shape and keep all keys present:"
     lines = [
         system_prompt,
         router_prompt,
@@ -354,7 +375,7 @@ def build_assist_prompt(
         "\n".join(context_lines) if context_lines else "- (none)",
         "Return exactly one JSON object.",
         "Do not include markdown fences or explanatory text.",
-        "Use this exact output shape and keep all keys present:",
+        contract_note,
         json.dumps(response_template, ensure_ascii=False, indent=2),
     ]
     return "\n".join([line for line in lines if line is not None]).strip()

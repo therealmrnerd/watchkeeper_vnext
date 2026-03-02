@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watchkeeper.local/contracts/v1/intent_sketch.schema.json",
+  "title": "IntentSketch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intent",
+    "response_text",
+    "needs_clarification",
+    "clarification_question",
+    "tool_name",
+    "tool_arg",
+    "confidence_band"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "intent": {
+      "type": "string",
+      "enum": [
+        "respond",
+        "clarify",
+        "tool_request"
+      ]
+    },
+    "response_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 480
+    },
+    "needs_clarification": {
+      "type": "boolean"
+    },
+    "clarification_question": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "tool_name": {
+      "type": "string",
+      "enum": [
+        "none",
+        "keypress",
+        "set_lights",
+        "music_next"
+      ]
+    },
+    "tool_arg": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "confidence_band": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  }
+}
