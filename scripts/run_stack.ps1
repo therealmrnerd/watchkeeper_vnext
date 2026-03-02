@@ -31,16 +31,16 @@ $services = @(
     HealthUrl = "http://127.0.0.1:8787/health"
   },
   [pscustomobject]@{
-    Name = "knowledge"
-    Script = "services/ai/run_knowledge.ps1"
-    MatchArgs = @("services/ai/run_knowledge.ps1", "services/ai/knowledge_service.py")
+    Name = "advisory"
+    Script = "services/advisory/run.ps1"
+    MatchArgs = @("services/advisory/run.ps1", "services/advisory/app.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8790/health"
   },
   [pscustomobject]@{
-    Name = "assist_router"
-    Script = "services/ai/run_assist_router.ps1"
-    MatchArgs = @("services/ai/run_assist_router.ps1", "services/ai/assist_router.py")
+    Name = "knowledge"
+    Script = "services/ai/run_knowledge.ps1"
+    MatchArgs = @("services/ai/run_knowledge.ps1", "services/ai/knowledge_service.py")
     Kind = "http"
     HealthUrl = "http://127.0.0.1:8791/health"
   },

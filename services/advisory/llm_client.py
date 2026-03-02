@@ -23,13 +23,20 @@ class LLMClient:
         phi3_model: str | None = None,
         timeout_sec: float | None = None,
         raw_generator: Callable[[str], str] | None = None,
+        http_opener: Callable[..., Any] | None = None,
         schema_path: str | Path | None = None,
     ) -> None:
         self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "stub")).strip().lower()
         self.phi3_url = (phi3_url or os.getenv("WKV_PHI3_URL", "http://127.0.0.1:11434/api/generate")).strip()
         self.phi3_model = (phi3_model or os.getenv("WKV_PHI3_MODEL", "phi3:mini")).strip()
         self.timeout_sec = float(timeout_sec or os.getenv("WKV_PHI3_TIMEOUT_SEC", "25"))
+        self.legacy_assist_url = os.getenv("WKV_LEGACY_ASSIST_URL", "http://127.0.0.1:8000/assist").strip()
+        self.legacy_profile = os.getenv("WKV_LEGACY_PROFILE", "watchkeeper").strip() or "watchkeeper"
+        self.legacy_max_new_tokens = int(os.getenv("WKV_LEGACY_MAX_NEW_TOKENS", "256"))
+        self.legacy_temperature = float(os.getenv("WKV_LEGACY_TEMPERATURE", "0.3"))
+        self.legacy_top_p = float(os.getenv("WKV_LEGACY_TOP_P", "0.9"))
         self.raw_generator = raw_generator
+        self.http_opener = http_opener or request.urlopen
         self.schema_path = (
             Path(schema_path)
             if schema_path
@@ -67,7 +74,7 @@ class LLMClient:
                 headers={"Content-Type": "application/json"},
             )
             try:
-                with request.urlopen(req, timeout=self.timeout_sec) as resp:
+                with self.http_opener(req, timeout=self.timeout_sec) as resp:
                     raw_body = resp.read().decode("utf-8", errors="replace")
             except error.HTTPError as exc:
                 message = exc.read().decode("utf-8", errors="replace")
@@ -94,6 +101,63 @@ class LLMClient:
                 pass
 
             return raw_body, {"provider": "phi3_local", "mode": self.mode, "model": self.phi3_model}
+
+        if self.mode in {"legacy_http", "legacy_local", "original_http"}:
+            request_payload = {
+                "message": str(fallback_proposal.get("user_text") or "").strip(),
+                "profile": self.legacy_profile,
+                "tool_policy": "never",
+                "memory_policy": "off",
+                "max_new_tokens": self.legacy_max_new_tokens,
+                "temperature": self.legacy_temperature,
+                "top_p": self.legacy_top_p,
+            }
+            req = request.Request(
+                self.legacy_assist_url,
+                data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with self.http_opener(req, timeout=self.timeout_sec) as resp:
+                    raw_body = resp.read().decode("utf-8", errors="replace")
+            except error.HTTPError as exc:
+                message = exc.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"legacy_http HTTP {exc.code}: {message}") from exc
+            except Exception as exc:
+                raise RuntimeError(f"legacy_http request failed: {exc}") from exc
+
+            try:
+                parsed = json.loads(raw_body)
+            except Exception as exc:
+                raise RuntimeError(f"legacy_http returned non-JSON body: {exc}") from exc
+
+            if not isinstance(parsed, dict):
+                raise RuntimeError("legacy_http returned non-object response")
+
+            answer = str(parsed.get("answer") or parsed.get("reply") or "").strip()
+            if not answer:
+                raise RuntimeError("legacy_http returned empty answer")
+
+            proposal = dict(fallback_proposal)
+            proposal["response_text"] = answer
+            retrieval = proposal.get("retrieval")
+            if not isinstance(retrieval, dict):
+                retrieval = {"citation_ids": [], "confidence": 0.0}
+            retrieval["legacy_backend"] = {
+                "provider": "watchkeeper_local",
+                "profile": self.legacy_profile,
+                "mode": self.mode,
+                "used_model": parsed.get("used_model"),
+                "meta": parsed.get("meta") if isinstance(parsed.get("meta"), dict) else {},
+            }
+            proposal["retrieval"] = retrieval
+            return json.dumps(proposal, ensure_ascii=False), {
+                "provider": "watchkeeper_local",
+                "mode": self.mode,
+                "profile": self.legacy_profile,
+                "source_url": self.legacy_assist_url,
+            }
 
         return json.dumps(fallback_proposal, ensure_ascii=False), {
             "provider": "stub_local",
@@ -209,4 +273,3 @@ class LLMClient:
                 "parse_mode": parse_mode,
                 "error": str(exc),
             }
-

@@ -72,6 +72,15 @@ Set-EnvDefault -Name "WKV_SUP_STATS_DIR" -Value $statsDir
 Set-EnvDefault -Name "WKV_SUP_STATS_LINE_SEC" -Value "10"
 Set-EnvDefault -Name "WKV_QDRANT_PID_FILE" -Value $qdrantPidPath
 Set-EnvDefault -Name "WKV_SUP_AUX_APPS_AUTORUN" -Value "1"
+Set-EnvDefault -Name "WKV_ADVISORY_ENABLED" -Value "1"
+Set-EnvDefault -Name "WKV_ADVISORY_PORT" -Value "8790"
+Set-EnvDefault -Name "WKV_ADVISORY_URL" -Value "http://127.0.0.1:8790/assist"
+Set-EnvDefault -Name "WKV_ADVISORY_HEALTH_URL" -Value "http://127.0.0.1:8790/health"
+Set-EnvDefault -Name "WKV_ADVISORY_LLM_MODE" -Value "legacy_http"
+Set-EnvDefault -Name "WKV_LEGACY_ASSIST_URL" -Value "http://127.0.0.1:8000/assist"
+Set-EnvDefault -Name "WKV_LEGACY_PROFILE" -Value "watchkeeper"
+Set-EnvDefault -Name "WKV_AI_PORT" -Value "8791"
+Set-EnvDefault -Name "WKV_KNOWLEDGE_HEALTH_URL" -Value "http://127.0.0.1:8791/health"
 
 $sammiExe = Resolve-PreferredPath -Candidates @(
   (Join-Path $userProfile "Desktop\SAMMI.2022.4.3-x64\x64\SAMMI Core.exe"),
@@ -185,6 +194,12 @@ if (-not $Quiet) {
   Write-Host "  WK_TTS_MODEL=$([Environment]::GetEnvironmentVariable('WK_TTS_MODEL','Process'))"
   Write-Host "  WKV_QDRANT_BIN=$([Environment]::GetEnvironmentVariable('WKV_QDRANT_BIN','Process'))"
   Write-Host "  WKV_SUP_AUX_APPS_AUTORUN=$([Environment]::GetEnvironmentVariable('WKV_SUP_AUX_APPS_AUTORUN','Process'))"
+  Write-Host "  WKV_ADVISORY_URL=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_URL','Process'))"
+  Write-Host "  WKV_ADVISORY_HEALTH_URL=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_HEALTH_URL','Process'))"
+  Write-Host "  WKV_ADVISORY_LLM_MODE=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_LLM_MODE','Process'))"
+  Write-Host "  WKV_LEGACY_ASSIST_URL=$([Environment]::GetEnvironmentVariable('WKV_LEGACY_ASSIST_URL','Process'))"
+  Write-Host "  WKV_AI_PORT=$([Environment]::GetEnvironmentVariable('WKV_AI_PORT','Process'))"
+  Write-Host "  WKV_KNOWLEDGE_HEALTH_URL=$([Environment]::GetEnvironmentVariable('WKV_KNOWLEDGE_HEALTH_URL','Process'))"
   Write-Host "  WKV_SUP_SAMMI_EXE=$([Environment]::GetEnvironmentVariable('WKV_SUP_SAMMI_EXE','Process'))"
   Write-Host "  WKV_SUP_JINX_EXE=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_EXE','Process'))"
   Write-Host "  WKV_SUP_JINX_ARGS=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_ARGS','Process'))"
