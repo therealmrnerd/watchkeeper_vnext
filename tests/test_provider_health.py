@@ -55,6 +55,7 @@ class ProviderHealthTests(unittest.TestCase):
             base_url="https://example.invalid/health",
             timeout_sec=1.0,
             opener=lambda req, timeout=0: _FakeResponse(status=200),
+            ping_probe=lambda host, timeout=0: (53, None),
         )
 
         result = probe.probe()
@@ -64,7 +65,10 @@ class ProviderHealthTests(unittest.TestCase):
         self.assertEqual(result.http_code, 200)
         self.assertEqual(result.rate_limit_state, ProviderRateLimitState.OK)
         self.assertTrue(result.tool_calls_allowed)
-        self.assertEqual(result.message, "healthy")
+        details = json.loads(result.message)
+        self.assertEqual(details["kind"], "provider_probe")
+        self.assertEqual(details["ping_ms"], 53)
+        self.assertIn("request_latency_ms", details)
 
     def test_probe_429_returns_throttled(self) -> None:
         def _raise_429(req, timeout=0):
@@ -81,6 +85,7 @@ class ProviderHealthTests(unittest.TestCase):
             base_url="https://example.invalid/health",
             timeout_sec=1.0,
             opener=_raise_429,
+            ping_probe=lambda host, timeout=0: (51, None),
         )
 
         result = probe.probe()
@@ -97,14 +102,17 @@ class ProviderHealthTests(unittest.TestCase):
             base_url="https://example.invalid/health",
             timeout_sec=1.0,
             opener=lambda req, timeout=0: (_ for _ in ()).throw(OSError("timeout")),
+            ping_probe=lambda host, timeout=0: (52, None),
         )
 
         result = probe.probe()
 
-        self.assertEqual(result.status, ProviderHealthStatus.DOWN)
+        self.assertEqual(result.status, ProviderHealthStatus.DEGRADED)
         self.assertIsNone(result.http_code)
         self.assertFalse(result.tool_calls_allowed)
-        self.assertIn("timeout", result.message)
+        details = json.loads(result.message)
+        self.assertEqual(details["ping_ms"], 52)
+        self.assertIn("timeout", details["request_error"])
 
     def test_scheduler_run_once_persists_provider_health(self) -> None:
         spansh_probe = HttpProviderHealthProbe(
@@ -112,12 +120,14 @@ class ProviderHealthTests(unittest.TestCase):
             base_url="https://example.invalid/spansh",
             timeout_sec=1.0,
             opener=lambda req, timeout=0: _FakeResponse(status=200),
+            ping_probe=lambda host, timeout=0: (53, None),
         )
         edsm_probe = HttpProviderHealthProbe(
             provider_id=ProviderId.EDSM,
             base_url="https://example.invalid/edsm",
             timeout_sec=1.0,
             opener=lambda req, timeout=0: _FakeResponse(status=200),
+            ping_probe=lambda host, timeout=0: (54, None),
         )
         scheduler = ProviderHealthScheduler(
             db_path=self.db_path,

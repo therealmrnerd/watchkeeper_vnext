@@ -115,6 +115,13 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
+def _state_value_with_fallback(state: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in state:
+            return state.get(key)
+    return None
+
+
 def _query_capabilities() -> list[dict[str, Any]]:
     with connect_db() as con:
         rows = con.execute(
@@ -708,6 +715,28 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         or state.get("ed.status.running")
         or state.get("ed.process.running")
     )
+    ed_system_name = _state_value_with_fallback(state, "ed.status.system_name", "ed.telemetry.system_name")
+    ed_system_address = _state_value_with_fallback(state, "ed.status.system_address", "ed.telemetry.system_address")
+    ed_ship_name = _state_value_with_fallback(state, "ed.status.ship_name", "ed.telemetry.ship_name")
+    ed_ship_model = _state_value_with_fallback(state, "ed.status.ship_model", "ed.telemetry.ship_model")
+    ed_dock_state = _state_value_with_fallback(state, "ed.status.docked", "ed.telemetry.dock_state")
+    ed_supercruise = _state_value_with_fallback(state, "ed.status.supercruise", "ed.telemetry.supercruise")
+    ed_landed = _state_value_with_fallback(state, "ed.status.landed", "ed.telemetry.landed")
+    ed_shields_up = _state_value_with_fallback(state, "ed.status.shields_up", "ed.telemetry.shield_up")
+    ed_lights_on = _state_value_with_fallback(state, "ed.status.lights_on", "ed.telemetry.lights_on")
+    ed_night_vision = _state_value_with_fallback(state, "ed.status.night_vision", "ed.telemetry.night_vision")
+    ed_flight_assist_off = _state_value_with_fallback(
+        state,
+        "ed.status.flight_assist_off",
+        "ed.telemetry.flight_assist_off",
+    )
+    ed_landing_gear_down = _state_value_with_fallback(
+        state,
+        "ed.status.landing_gear_down",
+        "ed.telemetry.landing_gear_down",
+    )
+    inara_secret = get_provider_secret_entry("inara", PROVIDER_SECRETS_PATH)
+    ed_commander_name = str(inara_secret.get("commander_name") or "").strip() or None
     jinx_running = bool(state.get("app.jinx.running"))
     sammi_running = bool(state.get("app.sammi.running"))
     ytmd_running = bool(state.get("music.app_running"))
@@ -778,9 +807,19 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         "handover": {
             "ed_running": ed_running,
             "ed_state": {
-                "landed": state.get("ed.status.landed"),
-                "shields_up": state.get("ed.status.shields_up"),
-                "lights_on": state.get("ed.status.lights_on"),
+                "commander_name": ed_commander_name,
+                "ship_name": ed_ship_name,
+                "ship_model": ed_ship_model,
+                "system_name": ed_system_name,
+                "system_address": ed_system_address,
+                "docked": ed_dock_state,
+                "supercruise": ed_supercruise,
+                "landed": ed_landed,
+                "shields_up": ed_shields_up,
+                "lights_on": ed_lights_on,
+                "night_vision": ed_night_vision,
+                "flight_assist_off": ed_flight_assist_off,
+                "landing_gear_down": ed_landing_gear_down,
             },
             "apps": {
                 "ed_running": ed_running,
@@ -808,6 +847,16 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ed.status.landed",
                 "ed.status.shields_up",
                 "ed.status.lights_on",
+                "ed.telemetry.system_name",
+                "ed.telemetry.system_address",
+                "ed.telemetry.dock_state",
+                "ed.telemetry.supercruise",
+                "ed.telemetry.landed",
+                "ed.telemetry.landing_gear_down",
+                "ed.telemetry.shield_up",
+                "ed.telemetry.lights_on",
+                "ed.telemetry.flight_assist_off",
+                "ed.telemetry.night_vision",
                 "music.status.playing",
                 "music.playing",
                 "music.now_playing.title",

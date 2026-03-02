@@ -169,8 +169,11 @@ class ParserState:
             "dock_state": None,
             "supercruise": None,
             "landed": None,
+            "landing_gear_down": None,
             "shield_up": None,
             "lights_on": None,
+            "flight_assist_off": None,
+            "night_vision": None,
             "status_source_mtime": None,
             "journal_source": None,
             "last_event": None,
@@ -207,9 +210,12 @@ class ParserState:
         if isinstance(flags, int):
             self.telemetry["dock_state"] = bool(flags & (1 << 0))
             self.telemetry["landed"] = bool(flags & (1 << 1))
+            self.telemetry["landing_gear_down"] = bool(flags & (1 << 2))
             self.telemetry["shield_up"] = bool(flags & (1 << 3))
             self.telemetry["supercruise"] = bool(flags & (1 << 4))
+            self.telemetry["flight_assist_off"] = bool(flags & (1 << 5))
             self.telemetry["lights_on"] = bool(flags & (1 << 8))
+            self.telemetry["night_vision"] = bool(flags & (1 << 28))
         self.telemetry["last_event"] = "status_update"
 
     def apply_journal_event(self, ev: dict[str, Any]) -> None:

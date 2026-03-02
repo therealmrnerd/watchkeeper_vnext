@@ -1987,9 +1987,14 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.telemetry.system_name": telemetry.get("system_name"),
         "ed.telemetry.system_address": telemetry.get("system_address"),
         "ed.telemetry.hull_percent": telemetry.get("hull_percent"),
+        "ed.telemetry.dock_state": telemetry.get("dock_state"),
+        "ed.telemetry.supercruise": telemetry.get("supercruise"),
         "ed.telemetry.landed": telemetry.get("landed"),
+        "ed.telemetry.landing_gear_down": telemetry.get("landing_gear_down"),
         "ed.telemetry.shield_up": telemetry.get("shield_up"),
         "ed.telemetry.lights_on": telemetry.get("lights_on"),
+        "ed.telemetry.flight_assist_off": telemetry.get("flight_assist_off"),
+        "ed.telemetry.night_vision": telemetry.get("night_vision"),
     }
 
 

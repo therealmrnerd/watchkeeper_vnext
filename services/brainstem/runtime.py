@@ -325,6 +325,11 @@ ED_PROVIDER_HEALTH_SCHEDULER = ProviderHealthScheduler(
     min_interval_sec=PROVIDER_HEALTH_MIN_SEC,
     max_interval_sec=PROVIDER_HEALTH_MAX_SEC,
     startup_probe=PROVIDER_HEALTH_STARTUP_PROBE,
+    probe_factory=(
+        lambda: build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH, DB_PATH)
+        if PROVIDER_HEALTH_ENABLED
+        else []
+    ),
 )
 ED_PROVIDER_QUERY_SERVICE = ProviderQueryService(
     db_path=DB_PATH,

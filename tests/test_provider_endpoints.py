@@ -149,6 +149,14 @@ class ProviderEndpointsTests(unittest.TestCase):
         cls.handlers = importlib.import_module("handlers")
         cls.runtime.ensure_db()
         cls.runtime.DB_SERVICE.set_state(
+            state_key="ed.running",
+            state_value=True,
+            source="test",
+            observed_at_utc="2026-02-28T11:59:00Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        cls.runtime.DB_SERVICE.set_state(
             state_key="ed.telemetry.system_name",
             state_value="Sol",
             source="test",

@@ -201,45 +201,48 @@
     </section>
 
     <section id="tab-edstatus" class="tab-panel">
-      <div class="panel ed-hud-banner">
-        <div class="row ed-status-head">
-          <h2>External ED Status</h2>
-          <button id="refreshEdStatusBtn" class="secondary header-chip">Refresh</button>
-        </div>
-        <div id="edStatusMeta" class="muted">Waiting for provider data.</div>
-        <div id="edSystemBadges" class="ed-badge-row"></div>
-      </div>
-      <div class="ed-hud-layout">
-        <aside class="ed-hud-sidebar">
-          <div class="panel ed-hud-panel ed-provider-panel">
-            <h2>Provider Status</h2>
-            <div id="edProviderCards" class="ed-provider-stack"></div>
-          </div>
-        </aside>
-        <div class="ed-hud-main">
-          <div class="panel ed-hud-panel ed-system-panel">
-            <h2>Current System</h2>
-            <div class="ed-box-caption">Resolved external system model and current source state.</div>
-            <div id="edSystemSummary" class="ed-summary-grid"></div>
-          </div>
-          <div class="ed-hud-detail-grid">
-            <div class="panel ed-hud-panel">
-              <h2>Bodies</h2>
-              <div class="ed-box-caption">Cached orbital bodies for the active system.</div>
-              <div id="edBodiesBadges" class="ed-badge-row"></div>
-              <div id="edBodiesMeta" class="muted">No data yet.</div>
-              <div id="edBodiesList" class="ed-card-list"></div>
+        <div class="panel ed-hud-banner">
+          <div class="row ed-status-head">
+            <div class="ed-banner-side ed-banner-side-left">
+              <div class="ed-banner-block">
+                <h2>Commander</h2>
+                <div id="edCommanderMeta" class="muted ed-status-inline-meta">-</div>
+              </div>
+              <div class="ed-banner-block">
+                <h2>Current Ship</h2>
+                <div id="edShipMeta" class="muted ed-status-inline-meta">-</div>
+              </div>
             </div>
-            <div class="panel ed-hud-panel">
-              <h2>Stations</h2>
-              <div class="ed-box-caption">Stations and surface ports known for the active system.</div>
-              <div id="edStationsBadges" class="ed-badge-row"></div>
-              <div id="edStationsMeta" class="muted">No data yet.</div>
-              <div id="edStationsList" class="ed-card-list"></div>
+              <div class="ed-banner-side ed-banner-side-right">
+                <div class="ed-banner-inline">
+                  <h2>External ED Status</h2>
+                  <div id="edStatusMeta" class="muted ed-status-inline-meta">Waiting for provider data.</div>
+                  <div id="edSystemBadges" class="ed-badge-row ed-status-inline-badges"></div>
+                </div>
+              </div>
+            <button id="refreshEdStatusBtn" class="secondary header-chip ed-refresh-btn" aria-label="Refresh ED status" title="Refresh ED status">&#x21bb;</button>
             </div>
           </div>
+        <div class="ed-hud-layout">
+          <aside class="ed-hud-sidebar">
+            <div class="panel ed-hud-panel ed-provider-panel">
+              <h2>Provider Status</h2>
+              <div id="edProviderCards" class="ed-provider-stack"></div>
+            </div>
+          </aside>
+            <div class="ed-hud-main">
+              <div class="ed-hud-overview-grid">
+                <div class="panel ed-hud-panel ed-ship-state-panel">
+                  <h2>Ship Status</h2>
+                  <div id="edShipStateGrid" class="ed-ship-state-grid"></div>
+                </div>
+                <div class="panel ed-hud-panel ed-system-panel">
+                  <h2>Current System</h2>
+                  <div id="edSystemSummary" class="ed-summary-grid"></div>
+                </div>
+              </div>
+            </div>
         </div>
-      </div>
     </section>
 
     <section id="tab-config" class="tab-panel">

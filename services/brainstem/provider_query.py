@@ -30,6 +30,7 @@ from provider_config import load_runtime_provider_config
 from provider_health import (
     HttpProviderHealthProbe,
     InaraHealthProbe,
+    _ed_checks_enabled,
     list_provider_health,
     upsert_provider_health,
 )
@@ -198,6 +199,7 @@ def query_provider_health(
         settings,
     )
     stored = get_provider_health_map(db_path)
+    ed_checks_active = _ed_checks_enabled(db_path)
     providers_cfg = config.get("providers", {})
     out: dict[str, Any] = {}
     for provider_id, cfg in providers_cfg.items():
@@ -242,6 +244,22 @@ def query_provider_health(
             "health_details": _provider_health_message_details(stored.get(provider_id)),
             "activity_summary": _provider_activity_summary(db_path, provider_id, stored.get(provider_id)),
         }
+        if not ed_checks_active and provider_id in {"spansh", "edsm", "inara"}:
+            out[provider_id]["health"] = {
+                "provider": provider_id,
+                "status": "unknown",
+                "checked_at": out[provider_id]["health"]["checked_at"] if isinstance(out[provider_id]["health"], dict) else None,
+                "latency_ms": None,
+                "http": {"code": None},
+                "rate_limit": {"state": "unknown", "retry_after_s": None},
+                "capabilities": {"tool_calls_allowed": False, "degraded_readonly": bool(out[provider_id]["features"].get("read_only", True))},
+                "message": "checks disabled while Elite Dangerous is not running",
+            }
+            out[provider_id]["health_details"] = {
+                "kind": "provider_probe",
+                "suppressed": True,
+                "reason": "ed_not_running",
+            }
     out[ProviderId.FRONTIER.value] = {
         "enabled": True,
         "base_url": FRONTIER_STATUS_SITE_URL or FRONTIER_HEALTH_URL or None,
@@ -265,6 +283,22 @@ def query_provider_health(
             stored.get(ProviderId.FRONTIER.value),
         ),
     }
+    if not ed_checks_active:
+        out[ProviderId.FRONTIER.value]["health"] = {
+            "provider": ProviderId.FRONTIER.value,
+            "status": "unknown",
+            "checked_at": out[ProviderId.FRONTIER.value]["health"]["checked_at"] if isinstance(out[ProviderId.FRONTIER.value]["health"], dict) else None,
+            "latency_ms": None,
+            "http": {"code": None},
+            "rate_limit": {"state": "unknown", "retry_after_s": None},
+            "capabilities": {"tool_calls_allowed": False, "degraded_readonly": True},
+            "message": "checks disabled while Elite Dangerous is not running",
+        }
+        out[ProviderId.FRONTIER.value]["health_details"] = {
+            "kind": "frontier_connection",
+            "suppressed": True,
+            "reason": "ed_not_running",
+        }
     return {"ok": True, "providers": out}
 
 

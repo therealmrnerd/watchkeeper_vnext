@@ -47,10 +47,19 @@
     "landed": {
       "type": ["boolean", "null"]
     },
+    "landing_gear_down": {
+      "type": ["boolean", "null"]
+    },
     "shield_up": {
       "type": ["boolean", "null"]
     },
     "lights_on": {
+      "type": ["boolean", "null"]
+    },
+    "flight_assist_off": {
+      "type": ["boolean", "null"]
+    },
+    "night_vision": {
       "type": ["boolean", "null"]
     },
     "status_source_mtime": {

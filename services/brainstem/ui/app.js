@@ -75,9 +75,12 @@
     providerInaraLatency: document.getElementById("providerInaraLatency"),
     refreshEdStatusBtn: document.getElementById("refreshEdStatusBtn"),
     edStatusMeta: document.getElementById("edStatusMeta"),
+    edCommanderMeta: document.getElementById("edCommanderMeta"),
+    edShipMeta: document.getElementById("edShipMeta"),
     edSystemBadges: document.getElementById("edSystemBadges"),
     edProviderCards: document.getElementById("edProviderCards"),
     edSystemSummary: document.getElementById("edSystemSummary"),
+    edShipStateGrid: document.getElementById("edShipStateGrid"),
     edBodiesBadges: document.getElementById("edBodiesBadges"),
     edBodiesMeta: document.getElementById("edBodiesMeta"),
     edBodiesList: document.getElementById("edBodiesList"),
@@ -357,6 +360,35 @@
       inara: "icons/inara.ico",
     };
     return logos[provider] || "";
+  }
+
+  function fallbackProviderItem(providerId) {
+    const provider = String(providerId || "").trim().toLowerCase();
+    if (provider === "frontier") {
+      return {
+        enabled: true,
+        base_url: "https://customersupport.frontier.co.uk",
+        features: {
+          service_health: true,
+          read_only: true,
+        },
+        auth_summary: null,
+        sync: {},
+        health: {
+          provider: "frontier",
+          status: "unknown",
+          checked_at: null,
+          latency_ms: null,
+          message: "frontier probe pending",
+        },
+        health_details: null,
+        activity_summary: {
+          last_success_at: null,
+          last_failure_at: null,
+        },
+      };
+    }
+    return null;
   }
 
   function providerFeatureLabel(providerId, features) {
@@ -724,7 +756,7 @@
     const enabledCards = [];
     const disabledCards = [];
     for (const providerId of order) {
-      const item = providers && typeof providers === "object" ? providers[providerId] : null;
+      const item = (providers && typeof providers === "object" ? providers[providerId] : null) || fallbackProviderItem(providerId);
       if (!item) {
         continue;
       }
@@ -742,13 +774,29 @@
       const brand = document.createElement("div");
       brand.className = "ed-provider-card-brand";
 
-      const logoWrap = document.createElement("span");
+      const providerUrl = String(item.base_url || "").replace(/^https?:\/\//, "");
+
+      const logoWrap = document.createElement(providerUrl ? "button" : "span");
       logoWrap.className = "ed-provider-logo-wrap";
+      if (providerUrl) {
+        logoWrap.type = "button";
+        logoWrap.classList.add("ed-provider-logo-link");
+        logoWrap.title = `Open ${providerDisplayName(providerId)}`;
+        logoWrap.setAttribute("aria-label", `Open ${providerDisplayName(providerId)}`);
+        logoWrap.addEventListener("click", (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          openProviderSite(providerId);
+        });
+      }
 
       const logo = document.createElement("img");
       logo.className = "ed-provider-logo";
       logo.src = providerLogoSrc(providerId);
       logo.alt = `${providerDisplayName(providerId)} logo`;
+
+      const summary = document.createElement("div");
+      summary.className = "ed-provider-card-summary";
 
       const title = document.createElement("div");
       title.className = "ed-provider-card-title";
@@ -756,28 +804,34 @@
 
       logoWrap.appendChild(logo);
       brand.appendChild(logoWrap);
-      brand.appendChild(title);
-
-      const statusNode = document.createElement("div");
-      statusNode.className = "ed-provider-card-state";
-      statusNode.textContent = status;
-
       top.appendChild(brand);
-      top.appendChild(statusNode);
-
-      const meta = document.createElement("div");
-      meta.className = "ed-provider-card-meta";
-      const latencyMs = health && typeof health.latency_ms === "number" ? health.latency_ms : null;
-      meta.textContent = [
-        item.enabled ? "enabled" : "disabled",
-        latencyMs !== null ? `~${latencyMs}ms` : "latency -",
-      ].join(" | ");
 
       const auth = item && typeof item.auth_summary === "object" ? item.auth_summary : null;
       const sync = item && typeof item.sync === "object" ? item.sync : null;
       const activity = item && typeof item.activity_summary === "object" ? item.activity_summary : null;
       const healthDetails = item && typeof item.health_details === "object" ? item.health_details : null;
       const features = item && typeof item.features === "object" ? item.features : {};
+      const providerProbe = healthDetails && healthDetails.kind === "provider_probe" ? healthDetails : null;
+
+      const summaryPrimary = document.createElement("div");
+      summaryPrimary.className = "ed-provider-card-summary-line";
+      summaryPrimary.textContent = [item.enabled ? "enabled" : "disabled", providerUrl || "no endpoint"].join(" | ");
+
+      const summarySecondary = document.createElement("div");
+      summarySecondary.className = "ed-provider-card-summary-line ed-provider-card-summary-line-dim";
+      summarySecondary.textContent = `${formatProviderActivityLabel("Last ok", activity && activity.last_success_at)} | ${formatProviderActivityLabel("Last issue", activity && activity.last_failure_at)}`;
+
+      summary.appendChild(summaryPrimary);
+      summary.appendChild(summarySecondary);
+      summary.appendChild(title);
+      brand.appendChild(summary);
+
+      const statusNode = document.createElement("div");
+      statusNode.className = "ed-provider-card-state";
+      statusNode.textContent = status;
+
+      top.appendChild(statusNode);
+      const latencyMs = health && typeof health.latency_ms === "number" ? health.latency_ms : null;
 
       const detail = document.createElement("div");
       detail.className = "ed-provider-card-detail";
@@ -801,22 +855,93 @@
           ? `${sync.location_debounce_s}s debounce`
           : "no debounce";
         detail.textContent = `${configured} | ${debounce}`;
+      } else if (providerId === "edsm" && status === "down") {
+        detail.textContent = providerProbe && providerProbe.ping_ms !== null && providerProbe.ping_ms !== undefined
+          ? `Ping ${formatInteger(providerProbe.ping_ms)}ms | Timed out`
+          : "Timed out";
       } else {
-        const url = String(item.base_url || "").replace(/^https?:\/\//, "");
-        detail.textContent = url || "no endpoint";
+        const pingText = providerProbe && providerProbe.ping_ms !== null && providerProbe.ping_ms !== undefined
+          ? `Ping ${formatInteger(providerProbe.ping_ms)}ms`
+          : "Ping -";
+        const requestText = providerProbe && providerProbe.request_latency_ms !== null && providerProbe.request_latency_ms !== undefined
+          ? `HTTP ${formatInteger(providerProbe.request_latency_ms)}ms`
+          : (latencyMs !== null ? `HTTP ${formatInteger(latencyMs)}ms` : "HTTP -");
+        detail.textContent = `${pingText} | ${requestText}`;
       }
 
-      const activityNode = document.createElement("div");
-      activityNode.className = "ed-provider-card-activity";
+      let activityText = "";
       if (providerId === "frontier" && healthDetails && healthDetails.kind === "frontier_connection") {
         const samples = formatInteger(healthDetails.samples);
         const successful = formatInteger(healthDetails.successful_samples);
         const httpCode = healthDetails.http_code !== undefined && healthDetails.http_code !== null
           ? `HTTP ${healthDetails.http_code}`
           : "HTTP -";
-        activityNode.textContent = `${successful}/${samples} samples ok | ${httpCode} | ${formatProviderActivityLabel("Last check", health && health.checked_at)}`;
+        const externalStatus = healthDetails && typeof healthDetails.external_status === "object"
+          ? healthDetails.external_status
+          : null;
+        const externalLabel = externalStatus && String(externalStatus.status || "").trim()
+          ? `Orerve ${String(externalStatus.status).trim()} (unverified)`
+          : null;
+        activityText = [
+          `${successful}/${samples} samples ok`,
+          httpCode,
+          formatProviderActivityLabel("Last check", health && health.checked_at),
+          externalLabel,
+        ].filter(Boolean).join(" | ");
+      }
+
+      const metrics = document.createElement("div");
+      metrics.className = "ed-provider-metrics";
+      if (providerId === "frontier" && healthDetails && healthDetails.kind === "frontier_connection") {
+        appendProviderMetricRow(
+          metrics,
+          "Ping",
+          `${formatInteger(healthDetails.ping_ms)} ms`,
+          metricBarRatio(healthDetails.ping_ms, 400),
+          "primary"
+        );
+        appendProviderMetricRow(
+          metrics,
+          "Latency",
+          `${formatInteger(healthDetails.latency_ms)} ms`,
+          metricBarRatio(healthDetails.latency_ms, 600),
+          "primary"
+        );
+        appendProviderMetricRow(
+          metrics,
+          "Jitter",
+          `${formatInteger(healthDetails.jitter_ms)} ms`,
+          metricBarRatio(healthDetails.jitter_ms, 120),
+          "secondary"
+        );
+        appendProviderMetricRow(
+          metrics,
+          "Loss",
+          `${formatInteger(healthDetails.packet_loss_pct)} %`,
+          metricBarRatio(healthDetails.packet_loss_pct, 100),
+          "danger"
+        );
       } else {
-        activityNode.textContent = `${formatProviderActivityLabel("Last ok", activity && activity.last_success_at)} | ${formatProviderActivityLabel("Last issue", activity && activity.last_failure_at)}`;
+        const pingMs = providerProbe && providerProbe.ping_ms !== null && providerProbe.ping_ms !== undefined
+          ? Number(providerProbe.ping_ms)
+          : null;
+        const requestMs = providerProbe && providerProbe.request_latency_ms !== null && providerProbe.request_latency_ms !== undefined
+          ? Number(providerProbe.request_latency_ms)
+          : latencyMs;
+        appendProviderMetricRow(
+          metrics,
+          "Ping",
+          pingMs !== null && Number.isFinite(pingMs) ? `${formatInteger(pingMs)} ms` : "-",
+          pingMs !== null && Number.isFinite(pingMs) ? metricBarRatio(pingMs, 500) : 0,
+          "secondary"
+        );
+        appendProviderMetricRow(
+          metrics,
+          "HTTP",
+          requestMs !== null && Number.isFinite(requestMs) ? `${formatInteger(requestMs)} ms` : (status === "down" ? "Timed out" : "-"),
+          requestMs !== null && Number.isFinite(requestMs) ? metricBarRatio(requestMs, 1000) : 0,
+          "primary"
+        );
       }
 
       const tags = document.createElement("div");
@@ -836,22 +961,17 @@
       }
 
       card.appendChild(top);
-      card.appendChild(meta);
       card.appendChild(detail);
-      card.appendChild(activityNode);
+      if (activityText) {
+        const activityNode = document.createElement("div");
+        activityNode.className = "ed-provider-card-activity";
+        activityNode.textContent = activityText;
+        card.appendChild(activityNode);
+      }
+      card.appendChild(metrics);
       card.appendChild(tags);
       const actions = document.createElement("div");
       actions.className = "ed-provider-card-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "secondary header-chip ed-provider-open-btn";
-      openBtn.textContent = "Open Site";
-      openBtn.addEventListener("click", (evt) => {
-        evt.preventDefault();
-        evt.stopPropagation();
-        openProviderSite(providerId);
-      });
-      actions.appendChild(openBtn);
       if (providerId === "inara") {
         const syncBtn = document.createElement("button");
         syncBtn.type = "button";
@@ -865,7 +985,9 @@
           await syncCurrentLocationToInara(syncBtn);
         });
         actions.appendChild(syncBtn);
-        card.appendChild(actions);
+        if (actions.childElementCount) {
+          card.appendChild(actions);
+        }
         if (state.inaraManualAction && state.inaraManualAction.text) {
           const resultNode = document.createElement("div");
           resultNode.className = `ed-provider-action-result ed-provider-action-result-${state.inaraManualAction.status || "idle"}`;
@@ -877,11 +999,13 @@
           resultText.textContent = state.inaraManualAction.text;
           resultNode.appendChild(resultState);
           resultNode.appendChild(resultText);
-          card.appendChild(resultNode);
+            card.appendChild(resultNode);
+          }
+        } else {
+          if (actions.childElementCount) {
+            card.appendChild(actions);
+          }
         }
-      } else {
-        card.appendChild(actions);
-      }
       if (item.enabled === false) {
         card.classList.add("ed-provider-card-compact");
         disabledCards.push(card);
@@ -1068,6 +1192,49 @@
     return `${prefix}: ${ts}`;
   }
 
+  function clamp01(value) {
+    const asNum = Number(value);
+    if (!Number.isFinite(asNum)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(1, asNum));
+  }
+
+  function boolStatusLabel(value, onLabel, offLabel, unknownLabel) {
+    if (value === null || value === undefined || value === "") {
+      return unknownLabel || "Unknown";
+    }
+    return asBool(value) ? onLabel : offLabel;
+  }
+
+  function deriveEdFlightStatus(edState, edRunning) {
+    if (!edRunning) {
+      return "Offline";
+    }
+    if (!edState || typeof edState !== "object") {
+      return "Unknown";
+    }
+    if (asBool(edState.docked)) {
+      return "Docked";
+    }
+    if (asBool(edState.landed)) {
+      return "Landed";
+    }
+    if (asBool(edState.supercruise)) {
+      return "Supercruise";
+    }
+    return "Normal Space";
+  }
+
+  function metricBarRatio(value, maxValue) {
+    const asNum = Number(value);
+    const maxNum = Number(maxValue);
+    if (!Number.isFinite(asNum) || !Number.isFinite(maxNum) || maxNum <= 0) {
+      return 0;
+    }
+    return clamp01(1 - (asNum / maxNum));
+  }
+
   function formatKeystoreUpdated(value) {
     const text = String(value || "").trim();
     if (!text) {
@@ -1158,8 +1325,23 @@
   }
 
   function setEdMeta(text) {
-    if (el.edStatusMeta) {
-      el.edStatusMeta.textContent = String(text || "");
+      if (el.edStatusMeta) {
+        el.edStatusMeta.textContent = String(text || "");
+      }
+    }
+
+  function renderEdHeaderMeta(sitrep) {
+    const handover = sitrep && typeof sitrep === "object" ? sitrep.handover || {} : {};
+    const edState = handover && typeof handover.ed_state === "object" ? handover.ed_state : {};
+    const commanderName = String(edState.commander_name || "-").trim() || "-";
+    const shipName = String(edState.ship_name || "").trim();
+    const shipModel = String(edState.ship_model || "").trim();
+    const shipText = shipName && shipModel ? `${shipName} | ${shipModel}` : (shipName || shipModel || "-");
+    if (el.edCommanderMeta) {
+      el.edCommanderMeta.textContent = commanderName;
+    }
+    if (el.edShipMeta) {
+      el.edShipMeta.textContent = shipText;
     }
   }
 
@@ -1193,6 +1375,357 @@
     item.appendChild(title);
     item.appendChild(body);
     node.appendChild(item);
+  }
+
+  function edTileGlyph(label) {
+    const text = String(label || "").trim().toUpperCase();
+    const map = {
+      "SYSTEM": "SY",
+      "ADDRESS": "AD",
+      "SOURCE": "SO",
+      "STATUS": "ST",
+      "BODIES": "BD",
+      "STATIONS": "SN",
+      "PRIMARY ECONOMY": "EC",
+      "SECURITY": "SC",
+      "POPULATION": "PO",
+      "COORDINATES": "CR",
+      "PERMIT": "PM",
+      "FETCHED": "TS",
+      "FLIGHT STATUS": "FL",
+      "SHIELDS": "SH",
+      "LIGHTS": "LG",
+      "NIGHT VISION": "NV",
+      "FLIGHT ASSIST": "FA",
+      "LANDING GEAR": "GR",
+    };
+    if (map[text]) {
+      return map[text];
+    }
+    return text.replace(/[^A-Z0-9]/g, "").slice(0, 2) || "--";
+  }
+
+  function edSummaryIconMarkup(label) {
+    const key = String(label || "").trim().toLowerCase();
+    if (key === "system") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <circle cx="32" cy="32" r="8" fill="currentColor"/>
+          <circle cx="32" cy="32" r="20" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 32h12M40 32h12M32 12v12M32 40v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    if (key === "address") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <rect x="12" y="14" width="40" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M20 24h24M20 32h24M20 40h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M46 12v8M46 44v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    if (key === "source" || key === "cached") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <path d="M32 12l16 8v12c0 11-7 18-16 20-9-2-16-9-16-20V20l16-8Z" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M25 32l5 5 10-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      `;
+    }
+    if (key === "status") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <circle cx="32" cy="32" r="18" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M32 22v12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="32" cy="40" r="2.5" fill="currentColor"/>
+        </svg>
+      `;
+    }
+    if (key === "bodies") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <circle cx="22" cy="34" r="8" fill="currentColor"/>
+          <circle cx="41" cy="24" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M14 20c8-9 25-10 36 0M13 46c10 8 28 7 38-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    if (key === "stations") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-summary-svg" aria-hidden="true">
+          <rect x="16" y="16" width="32" height="32" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M24 24h16v16H24z" fill="currentColor"/>
+          <path d="M8 32h8M48 32h8M32 8v8M32 48v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    return `<div class="ed-summary-glyph">${edTileGlyph(label)}</div>`;
+  }
+
+  function appendEdSummaryItem(node, label, value, tone) {
+    if (!node) {
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = "ed-summary-item";
+    item.dataset.tone = tone || "neutral";
+
+    const body = document.createElement("div");
+    body.className = "ed-summary-value";
+    body.textContent = value;
+
+    const iconWrap = document.createElement("div");
+    iconWrap.className = "ed-summary-icon-wrap";
+    iconWrap.dataset.tone = tone || "neutral";
+    iconWrap.dataset.icon = String(label || "").trim().toLowerCase().replace(/\s+/g, "-");
+    iconWrap.innerHTML = edSummaryIconMarkup(label);
+
+    const title = document.createElement("div");
+    title.className = "ed-summary-label";
+    title.textContent = label;
+
+    item.appendChild(iconWrap);
+    item.appendChild(body);
+    item.appendChild(title);
+    node.appendChild(item);
+  }
+
+  function appendProviderMetricRow(node, label, valueText, ratio, tone) {
+    if (!node) {
+      return;
+    }
+    const row = document.createElement("div");
+    row.className = "ed-provider-metric";
+
+    const head = document.createElement("div");
+    head.className = "ed-provider-metric-head";
+
+    const title = document.createElement("span");
+    title.className = "ed-provider-metric-label";
+    title.textContent = label;
+
+    const value = document.createElement("span");
+    value.className = "ed-provider-metric-value";
+    value.textContent = valueText;
+
+    head.appendChild(title);
+    head.appendChild(value);
+
+    const track = document.createElement("div");
+    track.className = "ed-provider-metric-track";
+
+    const fill = document.createElement("div");
+    fill.className = `ed-provider-metric-fill ed-provider-metric-fill-${tone || "normal"}`;
+    fill.style.width = `${Math.round(clamp01(ratio) * 100)}%`;
+
+    track.appendChild(fill);
+    row.appendChild(head);
+    row.appendChild(track);
+    node.appendChild(row);
+  }
+
+  function appendShipStateTile(node, label, value, tone) {
+    if (!node) {
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = "ed-ship-state-item";
+    item.dataset.tone = tone || "neutral";
+
+    const head = document.createElement("div");
+    head.className = "ed-summary-head";
+
+    const title = document.createElement("div");
+    title.className = "ed-ship-state-label";
+    title.textContent = label;
+
+    const glyph = document.createElement("div");
+    glyph.className = "ed-summary-glyph";
+    glyph.textContent = edTileGlyph(label);
+
+    const body = document.createElement("div");
+    body.className = "ed-ship-state-value";
+    body.textContent = value;
+
+    head.appendChild(title);
+    head.appendChild(glyph);
+    item.appendChild(head);
+    item.appendChild(body);
+    node.appendChild(item);
+  }
+
+  function shipStateBooleanState(value) {
+    if (value === null || value === undefined || value === "") {
+      return "neutral";
+    }
+    return asBool(value) ? "active" : "inactive";
+  }
+
+  function shipStateIconMarkup(kind) {
+    const icon = String(kind || "").trim().toLowerCase();
+    if (icon === "nightvision") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <rect x="5" y="5" width="54" height="54" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M10 22h44M10 32h44M10 42h44M22 10v44M32 10v44M42 10v44" stroke="currentColor" stroke-width="1.6" opacity="0.45"/>
+          <path d="M14 32c6-9 14-13 18-13s12 4 18 13c-6 9-14 13-18 13s-12-4-18-13Z" fill="currentColor"/>
+          <circle cx="32" cy="32" r="7" fill="#2b1400"/>
+        </svg>
+      `;
+    }
+    if (icon === "flightassist") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <path d="M18 14c-6 4-10 11-10 18 0 8 4 15 10 19" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path d="M46 14c6 4 10 11 10 18 0 8-4 15-10 19" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path d="M18 14l2-8M18 14l8 1M46 14l-2-8M46 14l-8 1M18 51l2 8M18 51l8-1M46 51l-2 8M46 51l-8-1" stroke="currentColor" stroke-width="3" fill="none"/>
+          <rect x="21" y="24" width="22" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path d="M26 20v-5M32 20v-5M38 20v-5M26 44v5M32 44v5M38 44v5M19 28h-5M19 36h-5M45 28h5M45 36h5" stroke="currentColor" stroke-width="3"/>
+        </svg>
+      `;
+    }
+    if (icon === "landinggear") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <path d="M41 15v20l-10 10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <path d="M23 45h18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <path d="M16 28l8 8 8-8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      `;
+    }
+    if (icon === "lights") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <circle cx="22" cy="32" r="12" fill="currentColor"/>
+          <path d="M40 22h12M40 32h12M40 42h12" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    if (icon === "shields") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <path d="M32 10 18 15v12c0 12 7 20 14 27 7-7 14-15 14-27V15Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+          <path d="M24 31h16M32 23v16" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      `;
+    }
+    if (icon === "flightstatus") {
+      return `
+        <svg viewBox="0 0 64 64" class="ed-ship-state-svg" aria-hidden="true">
+          <path d="M10 44h44" stroke="currentColor" stroke-width="3" opacity="0.35"/>
+          <path d="M16 36c7-2 18-10 24-18l2 10 8 6-14 3-8 9Z" fill="currentColor"/>
+        </svg>
+      `;
+    }
+    return `<div class="ed-summary-glyph">${edTileGlyph(kind)}</div>`;
+  }
+
+  function shipStateImageSrc(kind, valueText) {
+    const icon = String(kind || "").trim().toLowerCase();
+    const value = String(valueText || "").trim().toLowerCase();
+    if (icon === "nightvision") {
+      return "icons/night-vision-active.png";
+    }
+    if (icon === "flightassist") {
+      return "icons/rotation-correction-active.png";
+    }
+    if (icon === "landinggear") {
+      return "icons/landing-gear-active.png";
+    }
+    if (icon === "lights") {
+      return "icons/ship-lights-active.png";
+    }
+    if (icon === "flightstatus") {
+      if (value.includes("witch space") || value.includes("jump")) {
+        return "icons/hyperspace-active.png";
+      }
+      if (value.includes("supercruise")) {
+        return "icons/nav-panel-active.png";
+      }
+      if (value.includes("combat")) {
+        return "icons/hardpoints-active.png";
+      }
+    }
+    return "";
+  }
+
+  function appendShipStateButton(node, label, valueText, stateKey, stateValue) {
+    if (!node) {
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = "ed-ship-state-item ed-ship-state-button";
+    item.dataset.tone = stateKey === "flightstatus" ? "accent" : toneForBoolean(stateValue);
+    item.dataset.state = stateKey === "flightstatus" ? (String(valueText || "").toLowerCase().includes("offline") ? "inactive" : "active") : shipStateBooleanState(stateValue);
+
+    const labelNode = document.createElement("div");
+    labelNode.className = "ed-ship-state-label";
+    labelNode.textContent = label;
+
+    const main = document.createElement("div");
+    main.className = "ed-ship-state-main";
+
+    const valueNode = document.createElement("div");
+    valueNode.className = "ed-ship-state-word";
+    valueNode.textContent = valueText;
+
+    const iconWrap = document.createElement("div");
+    iconWrap.className = "ed-ship-state-icon-wrap";
+    iconWrap.dataset.state = item.dataset.state;
+    iconWrap.dataset.icon = stateKey;
+    const imageSrc = shipStateImageSrc(stateKey, valueText);
+    if (imageSrc) {
+      const image = document.createElement("img");
+      image.className = "ed-ship-state-icon-image";
+      image.src = imageSrc;
+      image.alt = `${label} icon`;
+      iconWrap.appendChild(image);
+    } else {
+      iconWrap.innerHTML = shipStateIconMarkup(stateKey);
+    }
+
+    main.appendChild(iconWrap);
+    main.appendChild(valueNode);
+    item.appendChild(main);
+    item.appendChild(labelNode);
+    node.appendChild(item);
+  }
+
+  function toneForBoolean(value) {
+    if (value === null || value === undefined || value === "") {
+      return "neutral";
+    }
+    return asBool(value) ? "good" : "warn";
+  }
+
+  function renderEdShipState(sitrep) {
+    clearNode(el.edShipStateGrid);
+    if (!el.edShipStateGrid) {
+      return;
+    }
+    const handover = sitrep && typeof sitrep === "object" ? sitrep.handover || {} : {};
+    const edState = handover && typeof handover.ed_state === "object" ? handover.ed_state : {};
+    const edRunning = Boolean(handover.ed_running);
+
+    appendShipStateButton(el.edShipStateGrid, "Flight Status", deriveEdFlightStatus(edState, edRunning), "flightstatus", edRunning);
+    appendShipStateButton(el.edShipStateGrid, "Shields", boolStatusLabel(edState.shields_up, "ON", "OFF", "----"), "shields", edState.shields_up);
+    appendShipStateButton(el.edShipStateGrid, "Lights", boolStatusLabel(edState.lights_on, "ON", "OFF", "----"), "lights", edState.lights_on);
+    appendShipStateButton(el.edShipStateGrid, "Night Vision", boolStatusLabel(edState.night_vision, "ON", "OFF", "----"), "nightvision", edState.night_vision);
+    appendShipStateButton(
+      el.edShipStateGrid,
+      "Flight Assist",
+      boolStatusLabel(edState.flight_assist_off, "OFF", "ON", "----"),
+      "flightassist",
+      edState.flight_assist_off === null || edState.flight_assist_off === undefined ? null : !asBool(edState.flight_assist_off)
+    );
+    appendShipStateButton(
+      el.edShipStateGrid,
+      "Landing Gear",
+      boolStatusLabel(edState.landing_gear_down, "EXTENDED", "RETRACTED", "----"),
+      "landinggear",
+      edState.landing_gear_down
+    );
   }
 
   function renderEdCardList(node, items, buildCard) {
@@ -1246,27 +1779,36 @@
     clearNode(el.edSystemSummary);
     renderEdBadges(el.edSystemBadges, result);
     if (!result || !result.ok || !result.data) {
-      appendSummaryItem(el.edSystemSummary, "Status", "Unavailable");
+      const edState = state.latestSitrep && state.latestSitrep.handover && state.latestSitrep.handover.ed_state
+        ? state.latestSitrep.handover.ed_state
+        : {};
+      appendEdSummaryItem(el.edSystemSummary, "System", String(edState.system_name || "-"), "accent");
+      appendEdSummaryItem(el.edSystemSummary, "Address", formatInteger(edState.system_address), "neutral");
+      appendEdSummaryItem(el.edSystemSummary, "Source", "LOCAL", "good");
+      appendEdSummaryItem(el.edSystemSummary, "Status", "Unavailable", "warn");
+      appendEdSummaryItem(el.edSystemSummary, "Bodies", "-", "neutral");
+      appendEdSummaryItem(el.edSystemSummary, "Stations", "-", "neutral");
       return;
     }
     const data = result.data || {};
     const coords = data.coords && typeof data.coords === "object" ? data.coords : {};
-    appendSummaryItem(el.edSystemSummary, "System", String(data.name || result.current_system_state?.system_name || "-"));
-    appendSummaryItem(el.edSystemSummary, "Address", formatInteger(data.system_address || result.current_system_state?.system_address));
-    appendSummaryItem(el.edSystemSummary, "Source", String(result.provider || "-").toUpperCase());
-    appendSummaryItem(el.edSystemSummary, "Cached", result.cache && result.cache.hit ? "Yes" : "No");
-    appendSummaryItem(el.edSystemSummary, "Bodies", formatInteger(data.body_count));
-    appendSummaryItem(el.edSystemSummary, "Stations", formatInteger(data.station_count));
-    appendSummaryItem(el.edSystemSummary, "Primary Economy", String(data.primary_economy || "-"));
-    appendSummaryItem(el.edSystemSummary, "Security", String(data.security || "-"));
-    appendSummaryItem(el.edSystemSummary, "Population", formatInteger(data.population));
-    appendSummaryItem(
+    appendEdSummaryItem(el.edSystemSummary, "System", String(data.name || result.current_system_state?.system_name || "-"), "accent");
+    appendEdSummaryItem(el.edSystemSummary, "Address", formatInteger(data.system_address || result.current_system_state?.system_address), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Source", String(result.provider || "-").toUpperCase(), "good");
+    appendEdSummaryItem(el.edSystemSummary, "Cached", result.cache && result.cache.hit ? "Yes" : "No", result.cache && result.cache.hit ? "good" : "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Bodies", formatInteger(data.body_count), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Stations", formatInteger(data.station_count), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Primary Economy", String(data.primary_economy || "-"), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Security", String(data.security || "-"), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Population", formatInteger(data.population), "neutral");
+    appendEdSummaryItem(
       el.edSystemSummary,
       "Coordinates",
-      `${formatDecimal(coords.x, 2)}, ${formatDecimal(coords.y, 2)}, ${formatDecimal(coords.z, 2)}`
+      `${formatDecimal(coords.x, 2)}, ${formatDecimal(coords.y, 2)}, ${formatDecimal(coords.z, 2)}`,
+      "neutral"
     );
-    appendSummaryItem(el.edSystemSummary, "Permit", data.needs_permit ? String(data.known_permit || "Required") : "No");
-    appendSummaryItem(el.edSystemSummary, "Fetched", formatProviderTimestamp(result.fetched_at));
+    appendEdSummaryItem(el.edSystemSummary, "Permit", data.needs_permit ? String(data.known_permit || "Required") : "No", data.needs_permit ? "warn" : "good");
+    appendEdSummaryItem(el.edSystemSummary, "Fetched", formatProviderTimestamp(result.fetched_at), "neutral");
   }
 
   function renderBodyCard(item) {
@@ -1337,6 +1879,7 @@
       const current = await apiGet("/providers/current-system");
       state.latestEdProviderCurrent = current;
       renderEdSystemSummary(current);
+      renderEdShipState(state.latestSitrep);
       if (!current.ok || !current.data) {
         state.latestEdProviderCurrent = null;
         setEdMeta(current.error ? `Current system unavailable: ${current.error}` : "Current system unavailable.");
@@ -1386,6 +1929,7 @@
     } catch (err) {
       state.latestEdProviderCurrent = null;
       renderEdSystemSummary(null);
+      renderEdShipState(state.latestSitrep);
       renderEdBadges(el.edBodiesBadges, null);
       renderEdBadges(el.edStationsBadges, null);
       renderEdLookupResult(el.edBodiesMeta, el.edBodiesList, null, "bodies", renderBodyCard);
@@ -2458,6 +3002,8 @@
       state.latestSitrep = data;
       updateBridgePanel(data);
       renderQuickSitrep(data);
+      renderEdHeaderMeta(data);
+      renderEdShipState(data);
       renderServices(data.services || {});
       if (el.runtimeInfo) {
         el.runtimeInfo.textContent = JSON.stringify(data.runtime || {}, null, 2);

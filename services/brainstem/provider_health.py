@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 import random
 import sqlite3
+import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,14 +40,88 @@ def _as_provider_id(raw: str) -> ProviderId:
     return ProviderId(str(raw or "").strip().lower())
 
 
+def _ed_checks_enabled(db_path: Path | None) -> bool:
+    if db_path is None:
+        return True
+    try:
+        with _connect(Path(db_path)) as con:
+            rows = con.execute(
+                """
+                SELECT state_value_json
+                FROM state_current
+                WHERE state_key IN ('ed.running','ed.status.running','ed.process.running','app.ed.running')
+                """
+            ).fetchall()
+    except Exception:
+        return True
+    for row in rows:
+        if str(row["state_value_json"] or "").strip().lower() in {"true", "1"}:
+            return True
+    return False
+
+
 FRONTIER_HEALTH_ENABLED = os.getenv("WKV_FRONTIER_HEALTH_ENABLED", "1").strip().lower() in {
     "1",
     "true",
     "yes",
 }
 FRONTIER_HEALTH_URL = os.getenv("WKV_FRONTIER_HEALTH_URL", "https://auth.frontierstore.net/").strip()
+FRONTIER_EXTERNAL_STATUS_URL = os.getenv("WKV_FRONTIER_EXTERNAL_STATUS_URL", "https://ed-server-status.orerve.net/").strip()
 FRONTIER_HEALTH_SAMPLES = max(2, int(os.getenv("WKV_FRONTIER_HEALTH_SAMPLES", "4")))
 FRONTIER_HEALTH_SAMPLE_PAUSE_SEC = max(0.0, float(os.getenv("WKV_FRONTIER_HEALTH_SAMPLE_PAUSE_SEC", "0.12")))
+
+
+def _host_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    return str(parsed.hostname or "").strip()
+
+
+def _parse_ping_output(output: str) -> int | None:
+    text = str(output or "")
+    match = re.search(r"Average = (\d+)ms", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"time[=<]\s*(\d+)ms", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"min/avg/max(?:/[a-z]+)? = [\d.]+/([\d.]+)/[\d.]+", text, re.IGNORECASE)
+    if match:
+        return int(round(float(match.group(1))))
+    return None
+
+
+def icmp_ping_host(host: str, timeout_sec: float) -> tuple[int | None, str | None]:
+    target = str(host or "").strip()
+    if not target:
+        return None, "host_missing"
+    try:
+        timeout_ms = max(250, int(float(timeout_sec) * 1000))
+    except Exception:
+        timeout_ms = 1000
+    if os.name == "nt":
+        cmd = ["ping", "-n", "1", "-w", str(timeout_ms), target]
+    else:
+        timeout_s = max(1, int(round(timeout_ms / 1000.0)))
+        cmd = ["ping", "-c", "1", "-W", str(timeout_s), target]
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=max(2.0, float(timeout_sec) + 1.0),
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "ping_unavailable"
+    except subprocess.TimeoutExpired:
+        return None, "ping_timeout"
+    output = f"{completed.stdout or ''}\n{completed.stderr or ''}"
+    ping_ms = _parse_ping_output(output)
+    if completed.returncode == 0 and ping_ms is not None:
+        return ping_ms, None
+    if completed.returncode == 0:
+        return None, "ping_parse_failed"
+    return None, "ping_failed"
 
 
 def upsert_provider_health(db_path: Path, health: ProviderHealth) -> dict[str, Any]:
@@ -121,6 +198,7 @@ class HttpProviderHealthProbe:
     timeout_sec: float
     read_only: bool = True
     opener: Callable[..., Any] = urllib.request.urlopen
+    ping_probe: Callable[[str, float], tuple[int | None, str | None]] = icmp_ping_host
 
     def probe(self) -> ProviderHealth:
         checked_at = _utc_now_iso()
@@ -139,30 +217,51 @@ class HttpProviderHealthProbe:
                 message="base_url missing",
             )
 
+        host = _host_from_url(url)
+        ping_ms, ping_error = self.ping_probe(host, self.timeout_sec)
         req = urllib.request.Request(url, method="GET")
         started = time.time()
         try:
             with self.opener(req, timeout=self.timeout_sec) as resp:
                 code = int(getattr(resp, "status", 200))
                 resp.read(1)
-            latency_ms = int((time.time() - started) * 1000)
-            status = ProviderHealthStatus.OK if code < 400 else ProviderHealthStatus.DEGRADED
+            request_latency_ms = int((time.time() - started) * 1000)
+            if ping_ms is None:
+                status = ProviderHealthStatus.DOWN
+            else:
+                status = ProviderHealthStatus.OK if code < 400 else ProviderHealthStatus.DEGRADED
             return ProviderHealth(
                 provider=self.provider_id,
                 status=status,
                 checked_at=checked_at,
-                latency_ms=latency_ms,
+                latency_ms=request_latency_ms,
                 http_code=code,
                 rate_limit_state=ProviderRateLimitState.OK,
                 retry_after_s=None,
                 tool_calls_allowed=status in {ProviderHealthStatus.OK, ProviderHealthStatus.DEGRADED},
                 degraded_readonly=self.read_only,
-                message="healthy" if status == ProviderHealthStatus.OK else f"http_{code}",
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": request_latency_ms,
+                        "http_code": code,
+                        "request_ok": code < 400,
+                        "status_text": "healthy" if status == ProviderHealthStatus.OK else f"http_{code}",
+                    },
+                    separators=(",", ":"),
+                ),
             )
         except urllib.error.HTTPError as exc:
             code = int(exc.code)
-            latency_ms = int((time.time() - started) * 1000)
-            if code == 429:
+            request_latency_ms = int((time.time() - started) * 1000)
+            if ping_ms is None:
+                status = ProviderHealthStatus.DOWN
+                rate_state = ProviderRateLimitState.UNKNOWN
+            elif code == 429:
                 status = ProviderHealthStatus.THROTTLED
                 rate_state = ProviderRateLimitState.THROTTLED
             elif 400 <= code < 500:
@@ -180,18 +279,33 @@ class HttpProviderHealthProbe:
                 provider=self.provider_id,
                 status=status,
                 checked_at=checked_at,
-                latency_ms=latency_ms,
+                latency_ms=request_latency_ms,
                 http_code=code,
                 rate_limit_state=rate_state,
                 retry_after_s=retry_after_s,
                 tool_calls_allowed=status in {ProviderHealthStatus.OK, ProviderHealthStatus.DEGRADED},
                 degraded_readonly=self.read_only,
-                message=f"http_{code}",
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": request_latency_ms,
+                        "http_code": code,
+                        "request_ok": False,
+                        "request_error": f"http_{code}",
+                        "status_text": f"http_{code}",
+                    },
+                    separators=(",", ":"),
+                ),
             )
         except Exception as exc:
+            request_error = str(exc)
             return ProviderHealth(
                 provider=self.provider_id,
-                status=ProviderHealthStatus.DOWN,
+                status=ProviderHealthStatus.DOWN if ping_ms is None else ProviderHealthStatus.DEGRADED,
                 checked_at=checked_at,
                 latency_ms=None,
                 http_code=None,
@@ -199,7 +313,21 @@ class HttpProviderHealthProbe:
                 retry_after_s=None,
                 tool_calls_allowed=False,
                 degraded_readonly=self.read_only,
-                message=str(exc),
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": None,
+                        "http_code": None,
+                        "request_ok": False,
+                        "request_error": request_error,
+                        "status_text": request_error,
+                    },
+                    separators=(",", ":"),
+                ),
             )
 
 
@@ -252,6 +380,31 @@ class FrontierHealthProbe:
     sample_count: int = FRONTIER_HEALTH_SAMPLES
     sample_pause_sec: float = FRONTIER_HEALTH_SAMPLE_PAUSE_SEC
     opener: Callable[..., Any] = urllib.request.urlopen
+    external_status_url: str | None = FRONTIER_EXTERNAL_STATUS_URL
+
+    def _fetch_external_status(self) -> dict[str, Any] | None:
+        url = str(self.external_status_url or "").strip()
+        if not url:
+            return None
+        req = urllib.request.Request(url, method="GET")
+        try:
+            with self.opener(req, timeout=self.timeout_sec) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                code = int(getattr(resp, "status", 200))
+            payload = json.loads(body) if body else {}
+            if isinstance(payload, dict):
+                payload["_source"] = "orerve"
+                payload["_verified"] = False
+                payload["_http_code"] = code
+                return payload
+        except Exception as exc:
+            return {
+                "_source": "orerve",
+                "_verified": False,
+                "_http_code": None,
+                "_error": str(exc),
+            }
+        return None
 
     def probe(self) -> ProviderHealth:
         checked_at = _utc_now_iso()
@@ -274,6 +427,7 @@ class FrontierHealthProbe:
         observed_codes: list[int] = []
         last_error: str | None = None
         throttled = False
+        external_status = self._fetch_external_status()
 
         for index in range(max(2, int(self.sample_count))):
             req = urllib.request.Request(url, method="GET")
@@ -328,6 +482,7 @@ class FrontierHealthProbe:
                         "packet_loss_pct": loss_pct,
                         "error": last_error or "probe_failed",
                         "http_code": http_code,
+                        "external_status": external_status,
                     },
                     separators=(",", ":"),
                 ),
@@ -359,6 +514,7 @@ class FrontierHealthProbe:
             "jitter_ms": jitter_ms,
             "http_code": http_code,
             "status_text": "healthy" if status == ProviderHealthStatus.OK else (last_error or f"http_{http_code}"),
+            "external_status": external_status,
         }
         return ProviderHealth(
             provider=self.provider_id,
@@ -383,6 +539,7 @@ class InaraHealthProbe:
     app_key: str
     commander_name: str
     opener: Callable[..., Any] = urllib.request.urlopen
+    ping_probe: Callable[[str, float], tuple[int | None, str | None]] = icmp_ping_host
 
     def probe(self) -> ProviderHealth:
         checked_at = _utc_now_iso()
@@ -438,34 +595,49 @@ class InaraHealthProbe:
                 degraded_readonly=False,
                 message="auth.commander_name missing",
             )
+        host = _host_from_url(str(self.base_url).strip())
+        ping_ms, ping_error = self.ping_probe(host, self.timeout_sec)
         req = urllib.request.Request(str(self.base_url).strip(), method="GET")
         started = time.time()
         try:
             with self.opener(req, timeout=self.timeout_sec) as resp:
                 code = int(getattr(resp, "status", 200))
                 resp.read(1)
-            latency_ms = int((time.time() - started) * 1000)
-            status = ProviderHealthStatus.OK if code < 400 else ProviderHealthStatus.DEGRADED
+            request_latency_ms = int((time.time() - started) * 1000)
+            status = ProviderHealthStatus.OK if code < 400 and ping_ms is not None else ProviderHealthStatus.DEGRADED
             return ProviderHealth(
                 provider=self.provider_id,
                 status=status,
                 checked_at=checked_at,
-                latency_ms=latency_ms,
+                latency_ms=request_latency_ms,
                 http_code=code,
                 rate_limit_state=ProviderRateLimitState.OK,
                 retry_after_s=None,
                 tool_calls_allowed=status in {ProviderHealthStatus.OK, ProviderHealthStatus.DEGRADED},
                 degraded_readonly=False,
-                message="healthy" if status == ProviderHealthStatus.OK else f"http_{code}",
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": request_latency_ms,
+                        "http_code": code,
+                        "request_ok": code < 400,
+                        "status_text": "healthy" if status == ProviderHealthStatus.OK else f"http_{code}",
+                    },
+                    separators=(",", ":"),
+                ),
             )
         except urllib.error.HTTPError as exc:
             code = int(exc.code)
-            latency_ms = int((time.time() - started) * 1000)
+            request_latency_ms = int((time.time() - started) * 1000)
             return ProviderHealth(
                 provider=self.provider_id,
-                status=ProviderHealthStatus.THROTTLED if code == 429 else ProviderHealthStatus.DOWN,
+                status=ProviderHealthStatus.THROTTLED if code == 429 else (ProviderHealthStatus.DOWN if ping_ms is None else ProviderHealthStatus.DEGRADED),
                 checked_at=checked_at,
-                latency_ms=latency_ms,
+                latency_ms=request_latency_ms,
                 http_code=code,
                 rate_limit_state=(
                     ProviderRateLimitState.THROTTLED if code == 429 else ProviderRateLimitState.UNKNOWN
@@ -473,12 +645,26 @@ class InaraHealthProbe:
                 retry_after_s=None,
                 tool_calls_allowed=False,
                 degraded_readonly=False,
-                message=f"http_{code}",
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": request_latency_ms,
+                        "http_code": code,
+                        "request_ok": False,
+                        "request_error": f"http_{code}",
+                        "status_text": f"http_{code}",
+                    },
+                    separators=(",", ":"),
+                ),
             )
         except Exception as exc:
             return ProviderHealth(
                 provider=self.provider_id,
-                status=ProviderHealthStatus.DOWN,
+                status=ProviderHealthStatus.DOWN if ping_ms is None else ProviderHealthStatus.DEGRADED,
                 checked_at=checked_at,
                 latency_ms=None,
                 http_code=None,
@@ -486,7 +672,21 @@ class InaraHealthProbe:
                 retry_after_s=None,
                 tool_calls_allowed=False,
                 degraded_readonly=False,
-                message=str(exc),
+                message=json.dumps(
+                    {
+                        "kind": "provider_probe",
+                        "host": host,
+                        "ping_ms": ping_ms,
+                        "ping_ok": ping_ms is not None,
+                        "ping_error": ping_error,
+                        "request_latency_ms": None,
+                        "http_code": None,
+                        "request_ok": False,
+                        "request_error": str(exc),
+                        "status_text": str(exc),
+                    },
+                    separators=(",", ":"),
+                ),
             )
 
 
@@ -498,6 +698,8 @@ def build_provider_health_probes(
     config = load_runtime_provider_config(config_path, secrets_path)
     if db_path is not None:
         config = apply_runtime_settings_overrides(config, load_runtime_settings(Path(db_path)))
+    if not _ed_checks_enabled(Path(db_path) if db_path is not None else None):
+        return []
     providers = config.get("providers", {})
     probes: list[Any] = []
     if FRONTIER_HEALTH_ENABLED and str(FRONTIER_HEALTH_URL or "").strip():
@@ -560,6 +762,7 @@ class ProviderHealthScheduler:
         max_interval_sec: int = 3600,
         startup_probe: bool = True,
         rng: random.Random | None = None,
+        probe_factory: Callable[[], list[Any]] | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.probes = list(probes)
@@ -567,11 +770,17 @@ class ProviderHealthScheduler:
         self.max_interval_sec = max(self.min_interval_sec, int(max_interval_sec))
         self.startup_probe = bool(startup_probe)
         self._rng = rng or random.Random()
+        self._probe_factory = probe_factory
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     def run_once(self) -> dict[str, dict[str, Any]]:
+        if self._probe_factory is not None:
+            try:
+                self.update_probes(self._probe_factory())
+            except Exception:
+                pass
         results: dict[str, dict[str, Any]] = {}
         with self._lock:
             probes = list(self.probes)
