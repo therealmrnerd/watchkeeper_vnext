@@ -289,7 +289,7 @@
     el.llmToggleBtn.classList.toggle("inactive", !loaded);
     el.llmToggleBtn.classList.toggle("loading", loading);
     el.llmToggleBtn.disabled = loading;
-    el.llmToggleBtn.textContent = loading ? "..." : (loaded ? "LLM" : "OFF");
+    el.llmToggleBtn.textContent = loading ? "LOADING" : (loaded ? "DISENGAGE" : "ENGAGE");
     const device = String(llm.device || "").trim();
     const errorText = String(llm.last_error || payload.error || "").trim();
     el.llmToggleBtn.title = loaded

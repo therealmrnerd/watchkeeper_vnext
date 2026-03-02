@@ -42,6 +42,24 @@ function Resolve-PreferredPath {
   return $Candidates[0]
 }
 
+function Resolve-PreferredPython {
+  param(
+    [string[]]$Candidates
+  )
+  foreach ($candidate in $Candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if ($candidate -eq "python") {
+      return $candidate
+    }
+    if (Test-Path $candidate) {
+      return (Resolve-Path $candidate).Path
+    }
+  }
+  return "python"
+}
+
 $dbPath = Join-Path $dataDir "watchkeeper_vnext.db"
 $schemaDir = Join-Path $root "schemas\sqlite"
 $schemaPath = Join-Path $schemaDir "001_brainstem_core.sql"
@@ -83,6 +101,13 @@ Set-EnvDefault -Name "WKV_LEGACY_ASSIST_URL" -Value "http://127.0.0.1:8000/assis
 Set-EnvDefault -Name "WKV_LEGACY_PROFILE" -Value "watchkeeper"
 Set-EnvDefault -Name "WKV_AI_PORT" -Value "8791"
 Set-EnvDefault -Name "WKV_KNOWLEDGE_HEALTH_URL" -Value "http://127.0.0.1:8791/health"
+
+$advisoryPython = Resolve-PreferredPython -Candidates @(
+  "C:\ai\openvino_env\Scripts\python.exe",
+  "C:\Users\chief\openvino_env\Scripts\python.exe",
+  "python"
+)
+Set-EnvDefault -Name "WKV_ADVISORY_PYTHON" -Value $advisoryPython
 
 $sammiExe = Resolve-PreferredPath -Candidates @(
   (Join-Path $userProfile "Desktop\SAMMI.2022.4.3-x64\x64\SAMMI Core.exe"),
@@ -201,6 +226,7 @@ if (-not $Quiet) {
   Write-Host "  WKV_ADVISORY_LLM_STATUS_URL=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_LLM_STATUS_URL','Process'))"
   Write-Host "  WKV_ADVISORY_LLM_CONTROL_URL=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_LLM_CONTROL_URL','Process'))"
   Write-Host "  WKV_ADVISORY_LLM_MODE=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_LLM_MODE','Process'))"
+  Write-Host "  WKV_ADVISORY_PYTHON=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_PYTHON','Process'))"
   Write-Host "  WKV_LEGACY_ASSIST_URL=$([Environment]::GetEnvironmentVariable('WKV_LEGACY_ASSIST_URL','Process'))"
   Write-Host "  WKV_AI_PORT=$([Environment]::GetEnvironmentVariable('WKV_AI_PORT','Process'))"
   Write-Host "  WKV_KNOWLEDGE_HEALTH_URL=$([Environment]::GetEnvironmentVariable('WKV_KNOWLEDGE_HEALTH_URL','Process'))"

@@ -56,6 +56,7 @@ from provider_secrets import clear_provider_secret_entry, save_inara_secret_entr
 from settings_store import load_runtime_settings, runtime_setting_enabled, save_runtime_settings
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+ADVISORY_LLM_CONTROL_TIMEOUT_SEC = float(os.getenv("WKV_ADVISORY_LLM_CONTROL_TIMEOUT_SEC", "180"))
 
 
 def _list_process_names() -> set[str]:
@@ -907,7 +908,7 @@ def control_advisory_llm_action(payload: dict[str, Any], source: str) -> dict[st
         headers={"Content-Type": "application/json"},
     )
     try:
-        with request.urlopen(req, timeout=max(ADVISORY_TIMEOUT_SEC, 15.0)) as resp:
+        with request.urlopen(req, timeout=max(ADVISORY_TIMEOUT_SEC, ADVISORY_LLM_CONTROL_TIMEOUT_SEC)) as resp:
             raw_body = resp.read().decode("utf-8", errors="replace")
     except error.HTTPError as exc:
         message = exc.read().decode("utf-8", errors="replace")
