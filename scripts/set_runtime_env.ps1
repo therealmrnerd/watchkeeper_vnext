@@ -104,8 +104,8 @@ Set-EnvDefault -Name "WKV_AI_PORT" -Value "8791"
 Set-EnvDefault -Name "WKV_KNOWLEDGE_HEALTH_URL" -Value "http://127.0.0.1:8791/health"
 
 $advisoryPython = Resolve-PreferredPython -Candidates @(
-  "C:\ai\openvino_env\Scripts\python.exe",
   "C:\Users\chief\openvino_env\Scripts\python.exe",
+  "C:\ai\openvino_env\Scripts\python.exe",
   "python"
 )
 Set-EnvDefault -Name "WKV_ADVISORY_PYTHON" -Value $advisoryPython
