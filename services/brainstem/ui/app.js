@@ -25,8 +25,12 @@
     policyView: "pending",
     autoAssistMode: "standby",
     manualAssistMode: null,
+    lastSammiRefreshMarker: "",
   };
   const DEFAULT_CONFIRM_WINDOW_SEC = 12;
+  const SITREP_FAST_POLL_MS = 350;
+  const SITREP_FULL_POLL_MS = 10000;
+  let sitrepRequestInFlight = false;
 
   const el = {
     watchTier: document.getElementById("watchTier"),
@@ -82,6 +86,7 @@
     edSystemBadges: document.getElementById("edSystemBadges"),
     edProviderCards: document.getElementById("edProviderCards"),
     edSystemSummary: document.getElementById("edSystemSummary"),
+    edStationSummary: document.getElementById("edStationSummary"),
     edShipStateGrid: document.getElementById("edShipStateGrid"),
     edSemanticDebug: document.getElementById("edSemanticDebug"),
     edBodiesBadges: document.getElementById("edBodiesBadges"),
@@ -1823,6 +1828,11 @@
     const edRunning = Boolean(handover.ed_running);
     const semanticPrimaryMode = String(semantic.primary_mode || "").trim().toLowerCase();
     const semanticOnlineState = String(semantic.online_state || "").trim().toLowerCase();
+    const semanticFlightStatus = String(semantic.flight_status || "").trim().toLowerCase();
+    const semanticDockingState = String(semantic.docking_state || "").trim().toLowerCase();
+    const isDocked = semanticFlightStatus === "docked" || semanticDockingState === "docked" || asBool(edState.docked);
+    const stationServicesAvailable = semantic.station_services_available;
+    const marketAccessAvailable = semantic.market_access_available;
     const semanticLightsOn = semanticPrimaryMode === "unknown" ? null : edState.lights_on;
     const semanticNightVisionOn = semanticPrimaryMode === "unknown" ? null : edState.night_vision;
     const semanticLandingGearDown = semanticPrimaryMode === "unknown" ? null : edState.landing_gear_down;
@@ -1833,6 +1843,40 @@
       shieldsLabel = "----";
     } else if (semanticShieldState === "red" || semanticShieldState === "orange") {
       shieldsLabel = edState.shields_up === false ? "OFF" : shieldsLabel;
+    }
+
+    if (isDocked) {
+      appendShipStateButton(el.edShipStateGrid, "Flight Status", deriveEdFlightStatus(edState, edRunning), "flightstatus", edRunning);
+      appendShipStateButton(el.edShipStateGrid, "Shields", shieldsLabel, "shields", edState.shields_up);
+      appendShipStateButton(
+        el.edShipStateGrid,
+        "Lights",
+        semanticBoolStatusLabel(semanticLightsOn, "ON", "OFF", "----"),
+        "lights",
+        semanticLightsOn
+      );
+      appendShipStateButton(
+        el.edShipStateGrid,
+        "Night Vision",
+        semanticBoolStatusLabel(semanticNightVisionOn, "ON", "OFF", "----"),
+        "nightvision",
+        semanticNightVisionOn
+      );
+      appendShipStateButton(
+        el.edShipStateGrid,
+        "Station Services",
+        semanticBoolStatusLabel(stationServicesAvailable, "YES", "NO", "----"),
+        "services",
+        stationServicesAvailable
+      );
+      appendShipStateButton(
+        el.edShipStateGrid,
+        "Market Access",
+        semanticBoolStatusLabel(marketAccessAvailable, "YES", "NO", "----"),
+        "market",
+        marketAccessAvailable
+      );
+      return;
     }
 
     appendShipStateButton(el.edShipStateGrid, "Flight Status", deriveEdFlightStatus(edState, edRunning), "flightstatus", edRunning);
@@ -1960,32 +2004,59 @@
         ? state.latestSitrep.handover.ed_state
         : {};
       appendEdSummaryItem(el.edSystemSummary, "System", String(edState.system_name || "-"), "accent");
-      appendEdSummaryItem(el.edSystemSummary, "Address", formatInteger(edState.system_address), "neutral");
-      appendEdSummaryItem(el.edSystemSummary, "Source", "LOCAL", "good");
       appendEdSummaryItem(el.edSystemSummary, "Status", "Unavailable", "warn");
       appendEdSummaryItem(el.edSystemSummary, "Bodies", "-", "neutral");
       appendEdSummaryItem(el.edSystemSummary, "Stations", "-", "neutral");
       return;
     }
     const data = result.data || {};
-    const coords = data.coords && typeof data.coords === "object" ? data.coords : {};
     appendEdSummaryItem(el.edSystemSummary, "System", String(data.name || result.current_system_state?.system_name || "-"), "accent");
-    appendEdSummaryItem(el.edSystemSummary, "Address", formatInteger(data.system_address || result.current_system_state?.system_address), "neutral");
-    appendEdSummaryItem(el.edSystemSummary, "Source", String(result.provider || "-").toUpperCase(), "good");
-    appendEdSummaryItem(el.edSystemSummary, "Cached", result.cache && result.cache.hit ? "Yes" : "No", result.cache && result.cache.hit ? "good" : "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Status", "Available", "good");
     appendEdSummaryItem(el.edSystemSummary, "Bodies", formatInteger(data.body_count), "neutral");
     appendEdSummaryItem(el.edSystemSummary, "Stations", formatInteger(data.station_count), "neutral");
     appendEdSummaryItem(el.edSystemSummary, "Primary Economy", String(data.primary_economy || "-"), "neutral");
     appendEdSummaryItem(el.edSystemSummary, "Security", String(data.security || "-"), "neutral");
     appendEdSummaryItem(el.edSystemSummary, "Population", formatInteger(data.population), "neutral");
+    appendEdSummaryItem(el.edSystemSummary, "Fetched", formatProviderTimestamp(result.fetched_at), "neutral");
+  }
+
+  function renderEdCurrentStation(result) {
+    clearNode(el.edStationSummary);
+    if (!el.edStationSummary) {
+      return;
+    }
+    if (!result || !result.ok || !result.data) {
+      appendEdSummaryItem(el.edStationSummary, "Station", "-", "neutral");
+      appendEdSummaryItem(el.edStationSummary, "Type", "-", "neutral");
+      appendEdSummaryItem(el.edStationSummary, "Services", "-", "neutral");
+      appendEdSummaryItem(el.edStationSummary, "Market", "No", "warn");
+      appendEdSummaryItem(el.edStationSummary, "Docked", "No", "neutral");
+      appendEdSummaryItem(el.edStationSummary, "Source", "-", "neutral");
+      return;
+    }
+    const data = result.data || {};
+    const services = Array.isArray(data.services) ? data.services : [];
+    const docked = asBool(result.current_station_state && result.current_station_state.docked);
+    const stationServices = asBool(result.semantic && result.semantic.station_services_available);
+    const marketAccess = asBool(result.semantic && result.semantic.market_access_available);
+    appendEdSummaryItem(el.edStationSummary, "Station", String(data.name || result.current_station_state?.station_name || "-"), "accent");
+    appendEdSummaryItem(el.edStationSummary, "Type", String(data.station_type || "-"), "neutral");
+    appendEdSummaryItem(el.edStationSummary, "Services", formatInteger(services.length), stationServices ? "good" : "neutral");
+    appendEdSummaryItem(el.edStationSummary, "Market", marketAccess ? "Yes" : "No", marketAccess ? "good" : "warn");
+    appendEdSummaryItem(el.edStationSummary, "Docked", docked ? "Yes" : "No", docked ? "good" : "neutral");
+    appendEdSummaryItem(el.edStationSummary, "Source", String(data.provider || "-").toUpperCase(), "good");
     appendEdSummaryItem(
-      el.edSystemSummary,
-      "Coordinates",
-      `${formatDecimal(coords.x, 2)}, ${formatDecimal(coords.y, 2)}, ${formatDecimal(coords.z, 2)}`,
+      el.edStationSummary,
+      "Top Services",
+      services.length ? services.slice(0, 3).join(", ") : "-",
       "neutral"
     );
-    appendEdSummaryItem(el.edSystemSummary, "Permit", data.needs_permit ? String(data.known_permit || "Required") : "No", data.needs_permit ? "warn" : "good");
-    appendEdSummaryItem(el.edSystemSummary, "Fetched", formatProviderTimestamp(result.fetched_at), "neutral");
+    appendEdSummaryItem(
+      el.edStationSummary,
+      "Live Board",
+      data.market_data && data.market_data.available ? "Live" : (marketAccess ? "Pending" : "Unavailable"),
+      data.market_data && data.market_data.available ? "good" : "warn"
+    );
   }
 
   function renderBodyCard(item) {
@@ -2060,6 +2131,7 @@
       if (!current.ok || !current.data) {
         state.latestEdProviderCurrent = null;
         setEdMeta(current.error ? `Current system unavailable: ${current.error}` : "Current system unavailable.");
+        renderEdCurrentStation(null);
         renderEdBadges(el.edBodiesBadges, null);
         renderEdBadges(el.edStationsBadges, null);
         renderEdLookupResult(el.edBodiesMeta, el.edBodiesList, null, "bodies", renderBodyCard);
@@ -2068,11 +2140,15 @@
         return;
       }
 
-      const [bodiesResult, stationsResult] = await Promise.allSettled([
+      const [stationResult, bodiesResult, stationsResult] = await Promise.allSettled([
+        apiGet("/providers/current-station"),
         apiGet("/providers/current-system/bodies?limit=20&max_age_s=86400&allow_stale_if_error=true"),
         apiGet("/providers/current-system/stations?limit=20&max_age_s=86400&allow_stale_if_error=true"),
       ]);
 
+      const stationDetailPayload = stationResult.status === "fulfilled"
+        ? stationResult.value
+        : { ok: false, error: String(stationResult.reason?.message || stationResult.reason || "request_failed") };
       const bodiesPayload = bodiesResult.status === "fulfilled"
         ? bodiesResult.value
         : { ok: false, error: String(bodiesResult.reason?.message || bodiesResult.reason || "request_failed") };
@@ -2080,6 +2156,7 @@
         ? stationsResult.value
         : { ok: false, error: String(stationsResult.reason?.message || stationsResult.reason || "request_failed") };
 
+      renderEdCurrentStation(stationDetailPayload);
       renderEdBadges(el.edBodiesBadges, bodiesPayload);
       renderEdBadges(el.edStationsBadges, stationsPayload);
       renderEdLookupResult(
@@ -2106,6 +2183,7 @@
     } catch (err) {
       state.latestEdProviderCurrent = null;
       renderEdSystemSummary(null);
+      renderEdCurrentStation(null);
       renderEdShipState(state.latestSitrep);
       renderEdBadges(el.edBodiesBadges, null);
       renderEdBadges(el.edStationsBadges, null);
@@ -3173,26 +3251,56 @@
     }
   }
 
-  async function loadSitrep() {
+  function getSammiRefreshMarker(data) {
+    const handover = data && typeof data === "object" ? data.handover || {} : {};
+    const apps = handover && typeof handover === "object" ? handover.apps || {} : {};
+    const sammiApi = apps && typeof apps === "object" ? apps.sammi_api || {} : {};
+    const lastPushAt = String(sammiApi.last_push_at || "").trim();
+    const lastPushCountRaw = sammiApi.last_push_count;
+    const lastPushCount = (typeof lastPushCountRaw === "number" || typeof lastPushCountRaw === "string")
+      ? String(lastPushCountRaw)
+      : "";
+    if (!lastPushAt && !lastPushCount) {
+      return "";
+    }
+    return `${lastPushAt}|${lastPushCount}`;
+  }
+
+  async function loadSitrep(fullRefresh) {
+    const includeDiagnostics = fullRefresh !== false;
+    if (sitrepRequestInFlight) {
+      return;
+    }
+    sitrepRequestInFlight = true;
     try {
       const data = await apiGet("/sitrep");
       state.latestSitrep = data;
       updateBridgePanel(data);
+      const marker = getSammiRefreshMarker(data);
+      if (marker && marker !== state.lastSammiRefreshMarker) {
+        state.lastSammiRefreshMarker = marker;
+      }
+      // Always refresh live state panels on each sitrep poll.
+      // SAMMI marker is retained for diagnostics/telemetry, not as a render gate.
       renderQuickSitrep(data);
       renderEdHeaderMeta(data);
       renderEdShipState(data);
       renderEdSemanticDebug(data);
-      renderServices(data.services || {});
-      if (el.runtimeInfo) {
-        el.runtimeInfo.textContent = JSON.stringify(data.runtime || {}, null, 2);
-      }
-      if (el.handoverInfo) {
-        el.handoverInfo.textContent = JSON.stringify(data.handover || {}, null, 2);
+      if (includeDiagnostics) {
+        renderServices(data.services || {});
+        if (el.runtimeInfo) {
+          el.runtimeInfo.textContent = JSON.stringify(data.runtime || {}, null, 2);
+        }
+        if (el.handoverInfo) {
+          el.handoverInfo.textContent = JSON.stringify(data.handover || {}, null, 2);
+        }
       }
     } catch (err) {
       if (el.runtimeInfo) {
         el.runtimeInfo.textContent = `sitrep error: ${String(err.message || err)}`;
       }
+    } finally {
+      sitrepRequestInFlight = false;
     }
   }
 
@@ -3497,7 +3605,7 @@
       applyDemoScenario(el.policyDemoSelect.value);
     }
 
-    await loadSitrep();
+    await loadSitrep(true);
     await loadProviderHealth();
     await loadInaraCredentials();
     await loadOpenAiCredentials();
@@ -3510,7 +3618,8 @@
     await loadLogTail();
     await loadEvents();
     startEventStream();
-    setInterval(loadSitrep, 10000);
+    setInterval(() => loadSitrep(false), SITREP_FAST_POLL_MS);
+    setInterval(() => loadSitrep(true), SITREP_FULL_POLL_MS);
     setInterval(loadProviderHealth, 60000);
     setInterval(loadLlmStatus, 15000);
     setInterval(loadObsStatus, 15000);

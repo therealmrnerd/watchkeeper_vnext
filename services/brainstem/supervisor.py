@@ -211,6 +211,10 @@ JINX_ARTNET_IP = os.getenv("WKV_SUP_JINX_ARTNET_IP", "127.0.0.1").strip() or "12
 JINX_ARTNET_UNIVERSE = int(os.getenv("WKV_SUP_JINX_ARTNET_UNIVERSE", "7"))
 JINX_BRIGHTNESS = int(os.getenv("WKV_SUP_JINX_BRIGHTNESS", "200"))
 JINX_OFF_EFFECT = os.getenv("WKV_SUP_JINX_OFF_EFFECT", "S1").strip() or "S1"
+JINX_POST_LAUNCH_SUPPRESS_SEC = max(
+    0.0,
+    float(os.getenv("WKV_SUP_JINX_POST_LAUNCH_SUPPRESS_SEC", "12")),
+)
 
 ED_AHK_ENABLED = os.getenv("WKV_SUP_ED_AHK_ENABLED", "1").strip().lower() in {
     "1",
@@ -289,6 +293,7 @@ _jinx_last_environment: str | None = None
 _jinx_last_effect_key: str | None = None
 _jinx_last_effect_code: str | None = None
 _jinx_last_manual_request: str | None = None
+_jinx_post_launch_suppress_until = 0.0
 _stats_last_line_write_monotonic = 0.0
 SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS = [
     "flightstatus",
@@ -1181,10 +1186,18 @@ def _trigger_jinx_effect(effect: str, reason: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def _read_current_ed_environment() -> str | None:
+    status = _read_json_file(ED_STATUS_PATH)
+    flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else None
+    flags2 = _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else None
+    return _map_environment(status, flags, flags2)
+
+
 def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) -> None:
     global _jinx_sync_state
     global _jinx_last_environment
     global _jinx_last_manual_request
+    global _jinx_post_launch_suppress_until
 
     if not JINX_ENABLED:
         return
@@ -1223,6 +1236,7 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
     sync_now = _jinx_sync_state
     if sync_raw is not None:
         sync_now = "on" if str(sync_raw).strip().lower() == "on" else "off"
+    suppress_auto_effect = time.monotonic() < _jinx_post_launch_suppress_until
 
     manual_effect = None
     row_effect = db.get_state("jinx.effect")
@@ -1244,31 +1258,25 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
     error_text: str | None = None
 
     if isinstance(manual_effect, str):
-        if manual_effect != _jinx_last_manual_request:
+        if suppress_auto_effect:
+            _jinx_last_manual_request = manual_effect
+        elif manual_effect != _jinx_last_manual_request:
             _jinx_last_manual_request = manual_effect
             selected_effect = manual_effect
     elif JINX_SYNC_ENABLED and sync_now == "on" and ed_running and jinx_running:
-        status = _read_json_file(ED_STATUS_PATH)
-        flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else None
-        flags2 = (
-            _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else None
-        )
-        current_environment = _map_environment(status, flags, flags2)
-        if current_environment != _jinx_last_environment:
+        current_environment = _read_current_ed_environment()
+        if suppress_auto_effect:
+            _jinx_last_environment = current_environment
+        elif current_environment != _jinx_last_environment:
             env_map = _load_jinx_env_map()
             selected_effect = env_map.get(current_environment)
             _jinx_last_environment = current_environment
 
-    if JINX_SYNC_ENABLED and sync_now != _jinx_sync_state:
+    if (not suppress_auto_effect) and JINX_SYNC_ENABLED and sync_now != _jinx_sync_state:
         if sync_now == "off":
             selected_effect = JINX_OFF_EFFECT
         elif sync_now == "on" and not selected_effect and ed_running and jinx_running:
-            status = _read_json_file(ED_STATUS_PATH)
-            flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else None
-            flags2 = (
-                _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else None
-            )
-            current_environment = _map_environment(status, flags, flags2)
+            current_environment = _read_current_ed_environment()
             env_map = _load_jinx_env_map()
             selected_effect = env_map.get(current_environment)
             _jinx_last_environment = current_environment
@@ -2500,6 +2508,8 @@ def process_aux_apps(
     global _sammi_restart_suppress_until
     global _sammi_restart_suppress_initialized
     global _sammi_last_seen_monotonic
+    global _jinx_post_launch_suppress_until
+    global _jinx_last_environment
 
     correlation_id = str(uuid.uuid4())
     now = utc_now_iso()
@@ -2602,6 +2612,8 @@ def process_aux_apps(
             if ok:
                 jinx_running = True
                 _jinx_missing_cycles = 0
+                _jinx_post_launch_suppress_until = time.monotonic() + JINX_POST_LAUNCH_SUPPRESS_SEC
+                _jinx_last_environment = _read_current_ed_environment()
             else:
                 jinx_error = err or "failed to launch"
         elif JINX_ENABLED and jinx_path and not jinx_running and jinx_error is None:
