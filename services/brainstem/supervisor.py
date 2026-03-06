@@ -245,7 +245,9 @@ SAMMI_API_PASSWORD = os.getenv("WKV_SAMMI_API_PASSWORD", "").strip()
 SAMMI_API_TIMEOUT_SEC = float(os.getenv("WKV_SAMMI_API_TIMEOUT_SEC", "0.6"))
 SAMMI_API_BACKOFF_SEC = float(os.getenv("WKV_SAMMI_API_BACKOFF_SEC", "5"))
 SAMMI_API_ERROR_LOG_SEC = float(os.getenv("WKV_SAMMI_API_ERROR_LOG_SEC", "5"))
-SAMMI_API_MAX_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE", "12"))
+SAMMI_API_MAX_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE", "20"))
+SAMMI_API_MIN_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE", "6"))
+SAMMI_API_CYCLE_BUDGET_MS = float(os.getenv("WKV_SAMMI_API_CYCLE_BUDGET_MS", "550"))
 SAMMI_API_ONLY_WHEN_ED = os.getenv("WKV_SAMMI_API_ONLY_WHEN_ED", "1").strip().lower() in {
     "1",
     "true",
@@ -268,6 +270,7 @@ SAMMI_NEW_WRITE_IGNORE_VARS = {
 _sammi_backoff_until = 0.0
 _sammi_last_error_at = 0.0
 _sammi_last_sent: dict[str, Any] = {}
+_sammi_last_sent_at: dict[str, float] = {}
 _sammi_heartbeat = 0
 _ed_ahk_last_launch_attempt = 0.0
 _sammi_last_launch_attempt = 0.0
@@ -287,17 +290,53 @@ _jinx_last_effect_key: str | None = None
 _jinx_last_effect_code: str | None = None
 _jinx_last_manual_request: str | None = None
 _stats_last_line_write_monotonic = 0.0
-SAMMI_PRIORITY_VARS = [
+SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS = [
+    "flightstatus",
+    "docked",
+    "landed",
+    "supercruise",
+    "landing_gear",
     "lights",
     "nightvision",
-    "cargoscoop",
-    "landing_gear",
-    "landed",
-    "shields_up",
+    "fa",
     "hardpoints",
-    "supercruise",
-    "docked",
-    "flightstatus",
+    "cargoscoop",
+    "silent_running",
+    "scooping_fuel",
+    "shields_up",
+    "low_fuel",
+    "overheating",
+    "is_in_danger",
+    "being_interdicted",
+    "fsd_charging",
+    "fsd_cooldown",
+    "fsd_hyperdrive_charging",
+    "fsd_mass_locked",
+    "fsd_jump",
+    "speed",
+    "Speed",
+    "heading",
+    "altitude",
+    "temperature",
+    "health",
+    "fuel_main",
+    "fuel_reservoir",
+]
+SAMMI_RATE_LIMIT_SEC: dict[str, float] = {
+    "Heartbeat": float(os.getenv("WKV_SAMMI_RATE_HEARTBEAT_SEC", "1.0")),
+    "timestamp": float(os.getenv("WKV_SAMMI_RATE_TIMESTAMP_SEC", "1.0")),
+    "event": float(os.getenv("WKV_SAMMI_RATE_EVENT_SEC", "0.4")),
+    "speed": float(os.getenv("WKV_SAMMI_RATE_SPEED_SEC", "0.25")),
+    "Speed": float(os.getenv("WKV_SAMMI_RATE_SPEED_SEC", "0.25")),
+    "heading": float(os.getenv("WKV_SAMMI_RATE_HEADING_SEC", "0.25")),
+    "altitude": float(os.getenv("WKV_SAMMI_RATE_ALTITUDE_SEC", "0.25")),
+    "temperature": float(os.getenv("WKV_SAMMI_RATE_TEMPERATURE_SEC", "0.5")),
+    "health": float(os.getenv("WKV_SAMMI_RATE_HEALTH_SEC", "0.5")),
+    "fuel_main": float(os.getenv("WKV_SAMMI_RATE_FUEL_SEC", "0.5")),
+    "fuel_reservoir": float(os.getenv("WKV_SAMMI_RATE_FUEL_SEC", "0.5")),
+    "hull_percent": float(os.getenv("WKV_SAMMI_RATE_HULL_SEC", "0.5")),
+}
+SAMMI_PRIORITY_VARS = SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS + [
     "gui_focus",
     "target_set",
     "current_system",
@@ -1728,6 +1767,8 @@ def _build_sammi_variable_map(db: BrainstemDB, *, ed_running: bool) -> dict[str,
             var_map["longitude"] = str(status.get("Longitude"))
         if status.get("Altitude") is not None:
             var_map["altitude"] = str(status.get("Altitude"))
+        if status.get("Speed") is not None:
+            var_map["speed"] = str(status.get("Speed"))
         if status.get("Heading") is not None:
             var_map["heading"] = str(status.get("Heading"))
         if status.get("Oxygen") is not None:
@@ -1861,10 +1902,13 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         var_map["sync"] = "off"
     changed = 0
     deferred = 0
+    suppressed = 0
     t0 = time.perf_counter()
     error_text: str | None = None
     sent_count = 0
     max_per_cycle = max(1, int(SAMMI_API_MAX_UPDATES_PER_CYCLE))
+    min_per_cycle = max(1, min(max_per_cycle, int(SAMMI_API_MIN_UPDATES_PER_CYCLE)))
+    cycle_budget_ms = max(0.0, float(SAMMI_API_CYCLE_BUDGET_MS))
     pulse_var_names = [SAMMI_NEW_WRITE_VAR]
     if SAMMI_NEW_WRITE_COMPAT_VAR and SAMMI_NEW_WRITE_COMPAT_VAR not in pulse_var_names:
         pulse_var_names.append(SAMMI_NEW_WRITE_COMPAT_VAR)
@@ -1884,6 +1928,7 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
                 error_text = err or "sammi_request_failed"
             return False
         _sammi_last_sent[name] = value
+        _sammi_last_sent_at[name] = time.monotonic()
         changed += 1
         sent_count += 1
         return True
@@ -1893,6 +1938,12 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         if name in pulse_var_names:
             continue
         if _sammi_last_sent.get(name) != value:
+            min_interval = SAMMI_RATE_LIMIT_SEC.get(name)
+            if min_interval is not None:
+                last_sent_at = _sammi_last_sent_at.get(name, 0.0)
+                if (time.monotonic() - last_sent_at) < max(0.0, float(min_interval)):
+                    suppressed += 1
+                    continue
             changed_items.append((name, value))
     priority_rank = {name: idx for idx, name in enumerate(SAMMI_PRIORITY_VARS)}
     changed_items.sort(key=lambda item: priority_rank.get(item[0], 9999))
@@ -1910,12 +1961,20 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         if sent_count >= max_per_cycle:
             deferred += 1
             continue
+        if (
+            cycle_budget_ms > 0.0
+            and sent_count >= min_per_cycle
+            and ((time.perf_counter() - t0) * 1000.0) >= cycle_budget_ms
+        ):
+            deferred += max(0, len(changed_items) - idx)
+            break
         ok, err = _sammi_post("setVariable", {"name": name, "value": value})
         if not ok:
             error_text = err or "sammi_request_failed"
             deferred += max(0, len(changed_items) - idx - 1)
             break
         _sammi_last_sent[name] = value
+        _sammi_last_sent_at[name] = time.monotonic()
         changed += 1
         sent_count += 1
 
@@ -1946,8 +2005,49 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         emit_event=False,
     )
     db.set_state(
+        state_key="app.sammi.api.max_updates_per_cycle",
+        state_value=max_per_cycle,
+        source="sammi_bridge",
+        observed_at_utc=utc_now_iso(),
+        confidence=1.0,
+        emit_event=False,
+    )
+    db.set_state(
+        state_key="app.sammi.api.min_updates_per_cycle",
+        state_value=min_per_cycle,
+        source="sammi_bridge",
+        observed_at_utc=utc_now_iso(),
+        confidence=1.0,
+        emit_event=False,
+    )
+    db.set_state(
+        state_key="app.sammi.api.cycle_budget_ms",
+        state_value=cycle_budget_ms,
+        source="sammi_bridge",
+        observed_at_utc=utc_now_iso(),
+        confidence=1.0,
+        emit_event=False,
+    )
+    if changed > 0:
+        db.set_state(
+            state_key="app.sammi.api.last_push_at",
+            state_value=utc_now_iso(),
+            source="sammi_bridge",
+            observed_at_utc=utc_now_iso(),
+            confidence=1.0,
+            emit_event=False,
+        )
+    db.set_state(
         state_key="app.sammi.api.deferred_count",
         state_value=deferred,
+        source="sammi_bridge",
+        observed_at_utc=utc_now_iso(),
+        confidence=1.0,
+        emit_event=False,
+    )
+    db.set_state(
+        state_key="app.sammi.api.suppressed_count",
+        state_value=suppressed,
         source="sammi_bridge",
         observed_at_utc=utc_now_iso(),
         confidence=1.0,
@@ -2069,7 +2169,7 @@ def collect_ed_state() -> dict[str, Any]:
             destination_body = body
     published = journal_harvest.get("published") if isinstance(journal_harvest, dict) else None
     if not destination_name and isinstance(published, dict):
-        for key in ("j.SupercruiseDestinationDrop.Type", "j.SupercruiseDestinationDrop.Body"):
+        for key in ("j.SupercruiseDestinationDrop.Body", "j.SupercruiseDestinationDrop.BodyName"):
             value = published.get(key)
             if isinstance(value, str) and value.strip():
                 destination_name = value.strip()
@@ -2081,11 +2181,9 @@ def collect_ed_state() -> dict[str, Any]:
             destination_body_type = body_type.strip()
     station_name = None
     if isinstance(published, dict):
-        for key in ("j.Docked.StationName", "j.SupercruiseDestinationDrop.Type"):
-            value = published.get(key)
-            if isinstance(value, str) and value.strip():
-                station_name = value.strip()
-                break
+        value = published.get("j.Docked.StationName")
+        if isinstance(value, str) and value.strip():
+            station_name = value.strip()
     return {
         "ed.running": running,
         "ed.process_name": ed_running_name if running else None,

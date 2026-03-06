@@ -27,6 +27,14 @@ function Set-EnvDefault {
   }
 }
 
+function Set-EnvProcess {
+  param(
+    [string]$Name,
+    [string]$Value
+  )
+  [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+}
+
 function Resolve-PreferredPath {
   param(
     [string[]]$Candidates
@@ -161,7 +169,11 @@ Set-EnvDefault -Name "WKV_SAMMI_API_ENABLED" -Value "1"
 Set-EnvDefault -Name "WKV_SAMMI_API_HOST" -Value "127.0.0.1"
 Set-EnvDefault -Name "WKV_SAMMI_API_PORT" -Value "9450"
 Set-EnvDefault -Name "WKV_SAMMI_API_TIMEOUT_SEC" -Value "0.6"
-Set-EnvDefault -Name "WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE" -Value "12"
+# Force this runtime cap each startup so stale shell/session env values do not
+# silently pin throughput to older defaults.
+Set-EnvProcess -Name "WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE" -Value "20"
+Set-EnvProcess -Name "WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE" -Value "6"
+Set-EnvProcess -Name "WKV_SAMMI_API_CYCLE_BUDGET_MS" -Value "550"
 Set-EnvDefault -Name "WKV_SAMMI_API_ONLY_WHEN_ED" -Value "1"
 Set-EnvDefault -Name "WKV_SAMMI_NEW_WRITE_VAR" -Value "ID116.new_write"
 Set-EnvDefault -Name "WKV_SAMMI_NEW_WRITE_COMPAT_VAR" -Value "ID116.new_write"
@@ -251,6 +263,8 @@ if (-not $Quiet) {
   Write-Host "  WKV_SAMMI_API_PORT=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_PORT','Process'))"
   Write-Host "  WKV_SAMMI_API_TIMEOUT_SEC=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_TIMEOUT_SEC','Process'))"
   Write-Host "  WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE','Process'))"
+  Write-Host "  WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE','Process'))"
+  Write-Host "  WKV_SAMMI_API_CYCLE_BUDGET_MS=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_CYCLE_BUDGET_MS','Process'))"
   Write-Host "  WKV_SAMMI_API_ONLY_WHEN_ED=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_API_ONLY_WHEN_ED','Process'))"
   Write-Host "  WKV_SAMMI_NEW_WRITE_VAR=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_NEW_WRITE_VAR','Process'))"
   Write-Host "  WKV_SAMMI_NEW_WRITE_COMPAT_VAR=$([Environment]::GetEnvironmentVariable('WKV_SAMMI_NEW_WRITE_COMPAT_VAR','Process'))"
