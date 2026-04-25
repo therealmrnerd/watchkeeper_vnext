@@ -49,7 +49,6 @@
     promptInput: document.getElementById("promptInput"),
     sendAssistBtn: document.getElementById("sendAssistBtn"),
     clearPromptBtn: document.getElementById("clearPromptBtn"),
-    saveMacroBtn: document.getElementById("saveMacroBtn"),
     assistMeta: document.getElementById("assistMeta"),
     assistResponse: document.getElementById("assistResponse"),
     copyResponseBtn: document.getElementById("copyResponseBtn"),
@@ -2204,7 +2203,15 @@
     }
     try {
       const result = await apiPost("/app/open", { app_id: app });
-      setAssistMeta(`opened ${result.app_id}`);
+      if (result.launched) {
+        setAssistMeta(`opened ${result.app_id}`);
+      } else if (result.note) {
+        setAssistMeta(String(result.note));
+      } else if (result.already_running) {
+        setAssistMeta(`${result.app_id} is already running`);
+      } else {
+        setAssistMeta(`open ${app} completed`);
+      }
     } catch (err) {
       setAssistMeta(`open ${app} failed: ${String(err.message || err)}`);
     } finally {
@@ -3273,9 +3280,11 @@
     }
     sitrepRequestInFlight = true;
     try {
-      const data = await apiGet("/sitrep");
+      const data = await apiGet(includeDiagnostics ? "/sitrep" : "/sitrep?fast=1&events_limit=0");
       state.latestSitrep = data;
-      updateBridgePanel(data);
+      if (includeDiagnostics) {
+        updateBridgePanel(data);
+      }
       const marker = getSammiRefreshMarker(data);
       if (marker && marker !== state.lastSammiRefreshMarker) {
         state.lastSammiRefreshMarker = marker;
@@ -3584,6 +3593,15 @@
     }
   }
 
+  function scheduleVisiblePoll(fn, ms) {
+    return setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
+      fn();
+    }, ms);
+  }
+
   async function init() {
     state.demoEnabled = isDemoModeEnabled();
     bind();
@@ -3618,13 +3636,13 @@
     await loadLogTail();
     await loadEvents();
     startEventStream();
-    setInterval(() => loadSitrep(false), SITREP_FAST_POLL_MS);
-    setInterval(() => loadSitrep(true), SITREP_FULL_POLL_MS);
-    setInterval(loadProviderHealth, 60000);
-    setInterval(loadLlmStatus, 15000);
-    setInterval(loadObsStatus, 15000);
-    setInterval(loadEdStatus, 15000);
-    setInterval(loadTwitchRecent, 6000);
+    scheduleVisiblePoll(() => loadSitrep(false), SITREP_FAST_POLL_MS);
+    scheduleVisiblePoll(() => loadSitrep(true), SITREP_FULL_POLL_MS);
+    scheduleVisiblePoll(loadProviderHealth, 60000);
+    scheduleVisiblePoll(loadLlmStatus, 15000);
+    scheduleVisiblePoll(loadObsStatus, 15000);
+    scheduleVisiblePoll(loadEdStatus, 15000);
+    scheduleVisiblePoll(loadTwitchRecent, 6000);
     setInterval(updateConfirmExpiryLabels, 500);
   }
 

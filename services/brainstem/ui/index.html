@@ -28,7 +28,7 @@
         </div>
       </div>
       <div class="bridge-cell">
-        <span class="bridge-label">AI Advisory</span>
+        <span class="bridge-label">Major Tom</span>
         <div class="bridge-status-row">
           <span id="advisoryStatus" class="bridge-value status-offline">offline</span>
           <span id="advisoryLatency" class="bridge-sub">-</span>
@@ -86,11 +86,10 @@
           </div>
           <div class="panel">
             <label for="promptInput">Prompt</label>
-            <textarea id="promptInput" rows="6" placeholder="Ask Watchkeeper..."></textarea>
+            <textarea id="promptInput" rows="6" placeholder="Ask Major Tom..."></textarea>
             <div class="row">
               <button id="sendAssistBtn">Send</button>
               <button id="clearPromptBtn" class="secondary">Clear</button>
-              <button id="saveMacroBtn" class="secondary" disabled title="Reserved for later">Save as Macro</button>
               <span id="assistMeta" class="muted"></span>
             </div>
           </div>
@@ -233,13 +232,17 @@
           </aside>
             <div class="ed-hud-main">
               <div class="ed-hud-overview-grid">
-                <div class="panel ed-hud-panel ed-ship-state-panel">
+                <div class="panel ed-hud-panel ed-ship-state-panel" id="edShipStatusSection">
                   <h2>Ship Status</h2>
                   <div id="edShipStateGrid" class="ed-ship-state-grid"></div>
                 </div>
                 <div class="panel ed-hud-panel ed-system-panel">
                   <h2>Current System</h2>
                   <div id="edSystemSummary" class="ed-summary-grid"></div>
+                </div>
+                <div class="panel ed-hud-panel ed-station-panel">
+                  <h2>Current Station</h2>
+                  <div id="edStationSummary" class="ed-summary-grid"></div>
                 </div>
               </div>
               <div class="panel ed-hud-panel ed-semantic-debug-panel">

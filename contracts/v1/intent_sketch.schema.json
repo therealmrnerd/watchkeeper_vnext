@@ -5,20 +5,12 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version",
     "intent",
-    "response_text",
-    "needs_clarification",
-    "clarification_question",
-    "tool_name",
-    "tool_arg",
-    "confidence_band"
+    "say",
+    "tool",
+    "arg"
   ],
   "properties": {
-    "schema_version": {
-      "type": "string",
-      "const": "1.0"
-    },
     "intent": {
       "type": "string",
       "enum": [
@@ -27,19 +19,12 @@
         "tool_request"
       ]
     },
-    "response_text": {
+    "say": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 480
+      "maxLength": 240
     },
-    "needs_clarification": {
-      "type": "boolean"
-    },
-    "clarification_question": {
-      "type": "string",
-      "maxLength": 160
-    },
-    "tool_name": {
+    "tool": {
       "type": "string",
       "enum": [
         "none",
@@ -48,17 +33,9 @@
         "music_next"
       ]
     },
-    "tool_arg": {
+    "arg": {
       "type": "string",
-      "maxLength": 64
-    },
-    "confidence_band": {
-      "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high"
-      ]
+      "maxLength": 32
     }
   }
 }

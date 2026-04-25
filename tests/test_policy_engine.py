@@ -62,6 +62,13 @@ class PolicyEngineTests(unittest.TestCase):
             {REASON_DENY_NOT_ALLOWED_IN_CONDITION, REASON_DENY_EXPLICITLY_DENIED},
         )
 
+    def test_standby_allows_music_next(self) -> None:
+        decision = self.engine.evaluate(
+            self._req(condition="STANDBY", tool="music_next")
+        )
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.deny_reason_code, REASON_ALLOW)
+
     def test_game_allows_keypress_with_good_stt_and_foreground(self) -> None:
         decision = self.engine.evaluate(
             self._req(

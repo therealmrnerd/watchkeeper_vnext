@@ -41,12 +41,15 @@ HARDWARE_PROBE_JSON = Path(
 )
 HARDWARE_MEMORY_THRESHOLD = float(os.getenv("WKV_HARDWARE_MEMORY_THRESHOLD", "0.90"))
 HARDWARE_LOOP_SEC = float(os.getenv("WKV_SUP_HARDWARE_SEC", "10"))
+CLOCK_LOOP_SEC = float(os.getenv("WKV_SUP_CLOCK_SEC", "10"))
+ED_GAME_YEAR_OFFSET = int(os.getenv("WKV_ED_GAME_YEAR_OFFSET", "1286"))
 SUP_STATS_TXT_ENABLED = os.getenv("WKV_SUP_STATS_TXT_ENABLED", "1").strip().lower() in {
     "1",
     "true",
     "yes",
 }
-SUP_STATS_DIR = Path(os.getenv("WKV_SUP_STATS_DIR", str(ROOT_DIR / "stats")))
+DEFAULT_SUP_STATS_DIR = Path(r"C:\ai\watchkeeper_vnext\stats")
+SUP_STATS_DIR = Path(os.getenv("WKV_SUP_STATS_DIR", str(DEFAULT_SUP_STATS_DIR)))
 SUP_STATS_LINE_SEC = max(0.0, float(os.getenv("WKV_SUP_STATS_LINE_SEC", "10")))
 SUP_STATS_CPU_TEMP_FILE = os.getenv("WKV_SUP_STATS_CPU_TEMP_FILE", "cpu-temp.txt").strip() or "cpu-temp.txt"
 SUP_STATS_CPU_USAGE_FILE = (
@@ -140,6 +143,8 @@ AUX_APPS_AUTORUN = os.getenv("WKV_SUP_AUX_APPS_AUTORUN", "0").strip().lower() in
 }
 AUX_APPS_LAUNCH_BACKOFF_SEC = max(1.0, float(os.getenv("WKV_SUP_AUX_LAUNCH_BACKOFF_SEC", "10")))
 SAMMI_RESTART_GRACE_SEC = max(0.0, float(os.getenv("WKV_SUP_SAMMI_RESTART_GRACE_SEC", "30")))
+APP_ED_PATH = os.getenv("WKV_APP_ED_PATH", "").strip()
+APP_YTMD_PATH = os.getenv("WKV_APP_YTMD_PATH", "").strip()
 
 SAMMI_ENABLED = os.getenv("WKV_SUP_SAMMI_ENABLED", "1").strip().lower() in {
     "1",
@@ -211,10 +216,6 @@ JINX_ARTNET_IP = os.getenv("WKV_SUP_JINX_ARTNET_IP", "127.0.0.1").strip() or "12
 JINX_ARTNET_UNIVERSE = int(os.getenv("WKV_SUP_JINX_ARTNET_UNIVERSE", "7"))
 JINX_BRIGHTNESS = int(os.getenv("WKV_SUP_JINX_BRIGHTNESS", "200"))
 JINX_OFF_EFFECT = os.getenv("WKV_SUP_JINX_OFF_EFFECT", "S1").strip() or "S1"
-JINX_POST_LAUNCH_SUPPRESS_SEC = max(
-    0.0,
-    float(os.getenv("WKV_SUP_JINX_POST_LAUNCH_SUPPRESS_SEC", "12")),
-)
 
 ED_AHK_ENABLED = os.getenv("WKV_SUP_ED_AHK_ENABLED", "1").strip().lower() in {
     "1",
@@ -293,7 +294,8 @@ _jinx_last_environment: str | None = None
 _jinx_last_effect_key: str | None = None
 _jinx_last_effect_code: str | None = None
 _jinx_last_manual_request: str | None = None
-_jinx_post_launch_suppress_until = 0.0
+_jinx_manual_seeded = False
+_jinx_server_was_running = False
 _stats_last_line_write_monotonic = 0.0
 SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS = [
     "flightstatus",
@@ -341,6 +343,11 @@ SAMMI_RATE_LIMIT_SEC: dict[str, float] = {
     "fuel_reservoir": float(os.getenv("WKV_SAMMI_RATE_FUEL_SEC", "0.5")),
     "hull_percent": float(os.getenv("WKV_SAMMI_RATE_HULL_SEC", "0.5")),
 }
+
+try:
+    SUP_STATS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 SAMMI_PRIORITY_VARS = SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS + [
     "gui_focus",
     "target_set",
@@ -1193,11 +1200,24 @@ def _read_current_ed_environment() -> str | None:
     return _map_environment(status, flags, flags2)
 
 
+def _parse_jinx_sync_state(sync_raw: Any, current_state: str) -> tuple[str, bool]:
+    """Return normalized sync state and whether the value was explicit/valid."""
+    if sync_raw is None:
+        return current_state, False
+    text = str(sync_raw).strip().lower()
+    if text in {"on", "1", "true", "yes"}:
+        return "on", True
+    if text in {"off", "0", "false", "no"}:
+        return "off", True
+    return current_state, False
+
+
 def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) -> None:
     global _jinx_sync_state
     global _jinx_last_environment
     global _jinx_last_manual_request
-    global _jinx_post_launch_suppress_until
+    global _jinx_manual_seeded
+    global _jinx_server_was_running
 
     if not JINX_ENABLED:
         return
@@ -1227,16 +1247,16 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
             emit_event=False,
         )
         return
-    if not ed_running:
-        return
     if not jinx_running:
+        _jinx_server_was_running = False
+        return
+    if not ed_running:
+        _jinx_server_was_running = True
         return
 
     sync_raw = _sammi_get_variable(JINX_SYNC_VAR_NAME)
-    sync_now = _jinx_sync_state
-    if sync_raw is not None:
-        sync_now = "on" if str(sync_raw).strip().lower() == "on" else "off"
-    suppress_auto_effect = time.monotonic() < _jinx_post_launch_suppress_until
+    sync_now, sync_is_explicit = _parse_jinx_sync_state(sync_raw, _jinx_sync_state)
+    just_became_running = not _jinx_server_was_running
 
     manual_effect = None
     row_effect = db.get_state("jinx.effect")
@@ -1253,27 +1273,40 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
         if chase.isdigit():
             manual_effect = f"C{int(chase)}"
 
+    # Avoid replaying stale manual state (e.g. persisted scene/effect from older session)
+    # when supervisor/stack restarts.
+    if not _jinx_manual_seeded:
+        _jinx_manual_seeded = True
+        if isinstance(manual_effect, str):
+            _jinx_last_manual_request = manual_effect
+            manual_effect = None
+
     current_environment = None
     selected_effect = None
     error_text: str | None = None
 
-    if isinstance(manual_effect, str):
-        if suppress_auto_effect:
+    if just_became_running:
+        # Process lifecycle and command lifecycle are intentionally separate:
+        # launching Jinx server must not imply any Art-Net effect command.
+        current_environment = _read_current_ed_environment()
+        _jinx_last_environment = current_environment
+        _jinx_sync_state = sync_now
+        if isinstance(manual_effect, str):
             _jinx_last_manual_request = manual_effect
-        elif manual_effect != _jinx_last_manual_request:
+        _jinx_server_was_running = True
+    elif isinstance(manual_effect, str):
+        if manual_effect != _jinx_last_manual_request:
             _jinx_last_manual_request = manual_effect
             selected_effect = manual_effect
     elif JINX_SYNC_ENABLED and sync_now == "on" and ed_running and jinx_running:
         current_environment = _read_current_ed_environment()
-        if suppress_auto_effect:
-            _jinx_last_environment = current_environment
-        elif current_environment != _jinx_last_environment:
+        if current_environment != _jinx_last_environment:
             env_map = _load_jinx_env_map()
             selected_effect = env_map.get(current_environment)
             _jinx_last_environment = current_environment
 
-    if (not suppress_auto_effect) and JINX_SYNC_ENABLED and sync_now != _jinx_sync_state:
-        if sync_now == "off":
+    if JINX_SYNC_ENABLED and sync_is_explicit and sync_now != _jinx_sync_state:
+        if sync_now == "off" and JINX_OFF_EFFECT:
             selected_effect = JINX_OFF_EFFECT
         elif sync_now == "on" and not selected_effect and ed_running and jinx_running:
             current_environment = _read_current_ed_environment()
@@ -1289,6 +1322,7 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
         error_text = "jinx_not_running"
 
     _jinx_sync_state = sync_now
+    _jinx_server_was_running = True
     db.set_state(
         state_key="app.jinx.sync_enabled",
         state_value=JINX_SYNC_ENABLED,
@@ -2255,6 +2289,56 @@ def make_state_items(
     return items
 
 
+def _isoformat_ms(dt: datetime) -> str:
+    return dt.isoformat(timespec="milliseconds")
+
+
+def _ed_game_datetime_from_utc(utc_dt: datetime) -> datetime:
+    try:
+        return utc_dt.replace(year=utc_dt.year + ED_GAME_YEAR_OFFSET)
+    except ValueError:
+        return utc_dt.replace(year=utc_dt.year + ED_GAME_YEAR_OFFSET, day=28)
+
+
+def _clock_datetimes() -> tuple[datetime, datetime]:
+    # Ask the OS for local time directly so Windows timezone/DST rules are applied.
+    local_dt = datetime.now().astimezone()
+    utc_dt = local_dt.astimezone(timezone.utc)
+    return utc_dt, local_dt
+
+
+def collect_clock_state() -> dict[str, Any]:
+    utc_dt, local_dt = _clock_datetimes()
+    timezone_name = local_dt.tzname() or ""
+    timezone_offset = local_dt.strftime("%z")
+    if timezone_offset and len(timezone_offset) == 5:
+        timezone_offset = f"{timezone_offset[:3]}:{timezone_offset[3:]}"
+    ed_game_dt = _ed_game_datetime_from_utc(utc_dt)
+    return {
+        "system.time.utc_iso": _isoformat_ms(utc_dt).replace("+00:00", "Z"),
+        "system.time.local_iso": _isoformat_ms(local_dt),
+        "system.time.local_date": local_dt.strftime("%Y-%m-%d"),
+        "system.time.local_time": local_dt.strftime("%H:%M:%S"),
+        "system.time.timezone": timezone_name,
+        "system.time.utc_offset": timezone_offset,
+        "system.time.unix_ts": int(utc_dt.timestamp()),
+        "ed.game_time.utc_iso": _isoformat_ms(ed_game_dt).replace("+00:00", "Z"),
+        "ed.game_time.date": ed_game_dt.strftime("%Y-%m-%d"),
+        "ed.game_time.time": ed_game_dt.strftime("%H:%M:%S"),
+        "ed.game_time.year_offset": ED_GAME_YEAR_OFFSET,
+    }
+
+
+def process_clock(db: BrainstemDB) -> None:
+    items = make_state_items(
+        values=collect_clock_state(),
+        source="clock_probe",
+        correlation_id=str(uuid.uuid4()),
+        mode="standby",
+    )
+    db.batch_set_state(items=items, emit_events=False)
+
+
 def process_hardware(db: BrainstemDB) -> None:
     correlation_id = str(uuid.uuid4())
     values = collect_hardware_state()
@@ -2508,7 +2592,6 @@ def process_aux_apps(
     global _sammi_restart_suppress_until
     global _sammi_restart_suppress_initialized
     global _sammi_last_seen_monotonic
-    global _jinx_post_launch_suppress_until
     global _jinx_last_environment
 
     correlation_id = str(uuid.uuid4())
@@ -2612,8 +2695,6 @@ def process_aux_apps(
             if ok:
                 jinx_running = True
                 _jinx_missing_cycles = 0
-                _jinx_post_launch_suppress_until = time.monotonic() + JINX_POST_LAUNCH_SUPPRESS_SEC
-                _jinx_last_environment = _read_current_ed_environment()
             else:
                 jinx_error = err or "failed to launch"
         elif JINX_ENABLED and jinx_path and not jinx_running and jinx_error is None:
@@ -2685,6 +2766,8 @@ def process_aux_apps(
         "app.jinx.path": str(jinx_path) if jinx_path else JINX_EXE or None,
         "app.jinx.running": jinx_running,
         "app.jinx.last_error": jinx_error,
+        "app.ed.path": APP_ED_PATH or None,
+        "app.ytmd.path": APP_YTMD_PATH or None,
         "app.ed_ahk.enabled": ED_AHK_ENABLED,
         "app.ed_ahk.path": str(ed_ahk_path) if ed_ahk_path else ED_AHK_PATH or None,
         "app.ed_ahk.running": ed_ahk_running,
@@ -2991,12 +3074,17 @@ def run_supervisor_loop() -> None:
     managed_ed_ahk_pid: int | None = None
 
     now = time.monotonic()
+    next_clock = now
     next_hardware = now
     next_ed = now
     next_music = now
 
     while True:
         now = time.monotonic()
+
+        if now >= next_clock:
+            process_clock(db)
+            next_clock = now + CLOCK_LOOP_SEC
 
         if now >= next_hardware:
             jinx_sync_enabled = _jinx_lighting_enabled()
@@ -3054,7 +3142,7 @@ def run_supervisor_loop() -> None:
                 previous_ed_running,
             )
 
-        next_due = min(next_hardware, next_ed, next_music)
+        next_due = min(next_clock, next_hardware, next_ed, next_music)
         sleep_for = max(0.05, min(LOOP_SLEEP_SEC, next_due - time.monotonic()))
         time.sleep(sleep_for)
 
@@ -3062,6 +3150,7 @@ def run_supervisor_loop() -> None:
 def run_supervisor_once() -> None:
     db = BrainstemDB(DB_PATH, SCHEMA_PATH)
     db.ensure_schema()
+    process_clock(db)
     ed_running, _ = process_ed(db, previous_running=None, previous_system=None)
     process_edparser(
         db,

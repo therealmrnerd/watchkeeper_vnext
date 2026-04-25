@@ -26,7 +26,11 @@ class OpenVinoLocalRuntime:
         genai_module: Any | None = None,
         gc_hook: Callable[[], None] | None = None,
     ) -> None:
-        self.model_dir = Path(model_dir or os.getenv("WK_PHI3_DIR", "")).expanduser()
+        self.model_dir = Path(
+            model_dir
+            or os.getenv("WKV_ADVISORY_MODEL_DIR", "")
+            or os.getenv("WK_PHI3_DIR", "")
+        ).expanduser()
         self.device = (device or os.getenv("WKV_ADVISORY_MODEL_DEVICE", "GPU")).strip() or "GPU"
         self.tokenizer_loader = tokenizer_loader
         self.model_loader = model_loader

@@ -66,6 +66,9 @@ MUSIC_ACTIVE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_ACTIVE_INTERVAL_SEC", "2"
 MUSIC_IDLE_INTERVAL_SEC = float(os.getenv("WKV_MUSIC_IDLE_INTERVAL_SEC", "12"))
 YTMD_CACHE_MAX_SEC = float(os.getenv("WKV_YTMD_CACHE_MAX_SEC", "8"))
 RUNTIME_SETTINGS_KEY = "runtime_settings"
+ED_GAME_YEAR_OFFSET = int(os.getenv("WKV_ED_GAME_YEAR_OFFSET", "1286"))
+_runtime_settings_cache: dict[str, Any] = {"loaded_at": 0.0, "syncs": None}
+_RUNTIME_SETTINGS_CACHE_SEC = float(os.getenv("WKV_RUNTIME_SETTINGS_CACHE_SEC", "5"))
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -86,6 +89,25 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def _isoformat_ms(dt: datetime) -> str:
+    return dt.isoformat(timespec="milliseconds")
+
+
+def _ed_game_datetime_from_utc(utc_dt: datetime) -> datetime:
+    try:
+        return utc_dt.replace(year=utc_dt.year + ED_GAME_YEAR_OFFSET)
+    except ValueError:
+        # 29 Feb has no equivalent in some target years; use 28 Feb rather than failing the collector.
+        return utc_dt.replace(year=utc_dt.year + ED_GAME_YEAR_OFFSET, day=28)
+
+
+def _clock_datetimes() -> tuple[datetime, datetime]:
+    # Ask the OS for local time directly so Windows timezone/DST rules are applied.
+    local_dt = datetime.now().astimezone()
+    utc_dt = local_dt.astimezone(timezone.utc)
+    return utc_dt, local_dt
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="ignore").strip()
@@ -94,6 +116,18 @@ def _read_text(path: Path) -> str:
 
 
 def _runtime_sync_enabled(sync_id: str, default: bool = True) -> bool:
+    now = time.monotonic()
+    cached_syncs = _runtime_settings_cache.get("syncs")
+    if (
+        isinstance(cached_syncs, dict)
+        and (now - float(_runtime_settings_cache.get("loaded_at") or 0.0))
+        <= max(0.0, _RUNTIME_SETTINGS_CACHE_SEC)
+    ):
+        item = cached_syncs.get(sync_id)
+        if not isinstance(item, dict) or "enabled" not in item:
+            return bool(default)
+        return bool(item.get("enabled"))
+
     try:
         con = sqlite3.connect(DB_PATH, timeout=1.0)
         try:
@@ -106,6 +140,7 @@ def _runtime_sync_enabled(sync_id: str, default: bool = True) -> bool:
     except Exception:
         return bool(default)
     if not row:
+        _runtime_settings_cache.update({"loaded_at": now, "syncs": {}})
         return bool(default)
     try:
         payload = json.loads(str(row[0]))
@@ -113,7 +148,9 @@ def _runtime_sync_enabled(sync_id: str, default: bool = True) -> bool:
         return bool(default)
     syncs = payload.get("syncs")
     if not isinstance(syncs, dict):
+        _runtime_settings_cache.update({"loaded_at": now, "syncs": {}})
         return bool(default)
+    _runtime_settings_cache.update({"loaded_at": now, "syncs": syncs})
     item = syncs.get(sync_id)
     if not isinstance(item, dict) or "enabled" not in item:
         return bool(default)
@@ -418,6 +455,13 @@ def collect_system_state() -> dict[str, Any]:
     memory.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
     ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory))
 
+    utc_dt, local_dt = _clock_datetimes()
+    timezone_name = local_dt.tzname() or ""
+    timezone_offset = local_dt.strftime("%z")
+    if timezone_offset and len(timezone_offset) == 5:
+        timezone_offset = f"{timezone_offset[:3]}:{timezone_offset[3:]}"
+    ed_game_dt = _ed_game_datetime_from_utc(utc_dt)
+
     uptime_ms = ctypes.windll.kernel32.GetTickCount64()
     memory_total = int(memory.ullTotalPhys)
     memory_avail = int(memory.ullAvailPhys)
@@ -425,6 +469,17 @@ def collect_system_state() -> dict[str, Any]:
     memory_pct = (memory_used / memory_total) if memory_total > 0 else 0.0
 
     return {
+        "system.time.utc_iso": _isoformat_ms(utc_dt).replace("+00:00", "Z"),
+        "system.time.local_iso": _isoformat_ms(local_dt),
+        "system.time.local_date": local_dt.strftime("%Y-%m-%d"),
+        "system.time.local_time": local_dt.strftime("%H:%M:%S"),
+        "system.time.timezone": timezone_name,
+        "system.time.utc_offset": timezone_offset,
+        "system.time.unix_ts": int(utc_dt.timestamp()),
+        "ed.game_time.utc_iso": _isoformat_ms(ed_game_dt).replace("+00:00", "Z"),
+        "ed.game_time.date": ed_game_dt.strftime("%Y-%m-%d"),
+        "ed.game_time.time": ed_game_dt.strftime("%H:%M:%S"),
+        "ed.game_time.year_offset": ED_GAME_YEAR_OFFSET,
         "hw.cpu.logical_cores": os.cpu_count(),
         "hw.memory": {
             "total_bytes": memory_total,

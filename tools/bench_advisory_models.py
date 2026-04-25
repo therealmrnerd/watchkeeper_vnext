@@ -23,6 +23,7 @@ from router import build_assist_prompt, build_fallback_proposal, select_expert_p
 
 
 MODEL_CANDIDATES = {
+    "qwen3-4b-int4": ROOT_DIR / "models" / "llm" / "qwen3-4b-int4-ov",
     "phi3-mini-4k": ROOT_DIR / "models" / "llm" / "phi3-mini-4k-int4-ov",
     "phi3-mini-128k": ROOT_DIR / "models" / "llm" / "phi3-mini-128k-int4-ov",
     "qwen2.5-7b": ROOT_DIR / "models" / "llm" / "qwen2.5-7b-instruct-ov-8bit",

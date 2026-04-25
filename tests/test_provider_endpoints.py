@@ -164,6 +164,76 @@ class ProviderEndpointsTests(unittest.TestCase):
             confidence=1.0,
             emit_event=False,
         )
+        cls.runtime.DB_SERVICE.set_state(
+            state_key="ed.telemetry.station_name",
+            state_value="Galileo",
+            source="test",
+            observed_at_utc="2026-02-28T12:00:10Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        cls.runtime.DB_SERVICE.set_state(
+            state_key="ed.semantic.opportunity.station_services_available",
+            state_value=True,
+            source="test",
+            observed_at_utc="2026-02-28T12:00:10Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        cls.runtime.DB_SERVICE.set_state(
+            state_key="ed.semantic.opportunity.market_access_available",
+            state_value=True,
+            source="test",
+            observed_at_utc="2026-02-28T12:00:10Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        with cls.runtime.connect_db() as con:
+            con.execute(
+                """
+                INSERT INTO ed_systems(
+                    system_address,name,primary_source,last_refreshed_at,expires_at,updated_at_utc
+                )
+                VALUES(?,?,?,?,?,?)
+                ON CONFLICT(system_address) DO UPDATE SET
+                    name=excluded.name,
+                    primary_source=excluded.primary_source,
+                    last_refreshed_at=excluded.last_refreshed_at,
+                    expires_at=excluded.expires_at,
+                    updated_at_utc=excluded.updated_at_utc
+                """,
+                (
+                    10477373803,
+                    "Sol",
+                    "spansh",
+                    "2026-02-28T12:00:00Z",
+                    "2026-03-01T12:00:00Z",
+                    "2026-02-28T12:00:00Z",
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO ed_stations(
+                    market_id,system_address,name,station_type,distance_to_arrival_ls,has_docking,
+                    services_json,last_refreshed_at,expires_at,source,updated_at_utc
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    128666,
+                    10477373803,
+                    "Galileo",
+                    "Orbis Starport",
+                    250.0,
+                    1,
+                    json.dumps(["Market", "Refuel", "Repair"]),
+                    "2026-02-28T12:00:00Z",
+                    "2026-03-01T12:00:00Z",
+                    "spansh",
+                    "2026-02-28T12:00:00Z",
+                ),
+            )
+            con.commit()
 
         upsert_provider_health(
             cls.db_path,
@@ -545,6 +615,68 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(body.get("operation"), "stations_lookup")
         self.assertEqual(body.get("data", {}).get("station_count"), 1)
         self.assertEqual(body.get("data", {}).get("items", [])[0].get("name"), "Galileo")
+
+    def test_get_current_station_returns_services_and_market_placeholder(self) -> None:
+        status, body = self._request("GET", "/providers/current-station")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body.get("current_station_state", {}).get("station_name"), "Galileo")
+        self.assertTrue(body.get("semantic", {}).get("station_services_available"))
+        self.assertTrue(body.get("semantic", {}).get("market_access_available"))
+        self.assertEqual(body.get("data", {}).get("station_type"), "Orbis Starport")
+        self.assertIn("Market", body.get("data", {}).get("services", []))
+        self.assertFalse(body.get("data", {}).get("market_data", {}).get("available"))
+
+    def test_get_current_system_returns_unavailable_when_ed_not_running(self) -> None:
+        self.runtime.DB_SERVICE.set_state(
+            state_key="ed.running",
+            state_value=False,
+            source="test",
+            observed_at_utc="2026-02-28T12:10:00Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        try:
+            status, body = self._request("GET", "/providers/current-system")
+            self.assertEqual(status, 200)
+            self.assertFalse(body.get("ok"))
+            self.assertEqual(body.get("deny_reason"), "ed_not_running")
+            self.assertEqual(body.get("error"), "Elite Dangerous is not running")
+        finally:
+            self.runtime.DB_SERVICE.set_state(
+                state_key="ed.running",
+                state_value=True,
+                source="test",
+                observed_at_utc="2026-02-28T12:10:01Z",
+                confidence=1.0,
+                emit_event=False,
+            )
+
+    def test_get_current_station_returns_unavailable_when_ed_not_running(self) -> None:
+        self.runtime.DB_SERVICE.set_state(
+            state_key="ed.running",
+            state_value=False,
+            source="test",
+            observed_at_utc="2026-02-28T12:11:00Z",
+            confidence=1.0,
+            emit_event=False,
+        )
+        try:
+            status, body = self._request("GET", "/providers/current-station")
+            self.assertEqual(status, 200)
+            self.assertFalse(body.get("ok"))
+            self.assertEqual(body.get("deny_reason"), "ed_not_running")
+            self.assertEqual(body.get("error"), "Elite Dangerous is not running")
+            self.assertFalse(body.get("semantic", {}).get("market_access_available"))
+        finally:
+            self.runtime.DB_SERVICE.set_state(
+                state_key="ed.running",
+                state_value=True,
+                source="test",
+                observed_at_utc="2026-02-28T12:11:01Z",
+                confidence=1.0,
+                emit_event=False,
+            )
 
 
 if __name__ == "__main__":

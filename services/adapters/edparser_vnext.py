@@ -271,10 +271,15 @@ class ParserState:
             if isinstance(system_address, int):
                 self.telemetry["system_address"] = system_address
         if event_name == "SupercruiseDestinationDrop":
-            stationish = ev.get("Type")
-            if isinstance(stationish, str) and stationish.strip():
-                self.telemetry["destination_name"] = stationish.strip()
-            body_type = ev.get("BodyType")
+            destination_name = None
+            for key in ("Body", "BodyName", "Name"):
+                value = ev.get(key)
+                if isinstance(value, str) and value.strip():
+                    destination_name = value.strip()
+                    break
+            if destination_name:
+                self.telemetry["destination_name"] = destination_name
+            body_type = ev.get("BodyType") or ev.get("Type")
             if isinstance(body_type, str) and body_type.strip():
                 self.telemetry["destination_body_type"] = body_type.strip()
         if event_name == "Docked":

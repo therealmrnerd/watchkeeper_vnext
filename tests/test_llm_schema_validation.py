@@ -47,6 +47,7 @@ class LLMSchemaValidationTests(unittest.TestCase):
             "response_text": "bad",
         }
         client = LLMClient(raw_generator=lambda prompt: json.dumps(bad_payload))
+        client.local_output_mode = "intent_proposal"
         proposal, meta = client.generate_intent_proposal(
             prompt="test prompt",
             fallback_proposal=_fallback_proposal(),
@@ -59,6 +60,7 @@ class LLMSchemaValidationTests(unittest.TestCase):
         good_payload = dict(_fallback_proposal())
         good_payload["request_id"] = "req-good-001"
         client = LLMClient(raw_generator=lambda prompt: json.dumps(good_payload))
+        client.local_output_mode = "intent_proposal"
         proposal, meta = client.generate_intent_proposal(
             prompt="test prompt",
             fallback_proposal=_fallback_proposal(),
@@ -73,14 +75,10 @@ class LLMSchemaValidationTests(unittest.TestCase):
                 return (
                     json.dumps(
                         {
-                            "schema_version": "1.0",
                             "intent": "tool_request",
-                            "response_text": "Advancing the music.",
-                            "needs_clarification": False,
-                            "clarification_question": "",
-                            "tool_name": "music_next",
-                            "tool_arg": "",
-                            "confidence_band": "high",
+                            "say": "Advancing the music.",
+                            "tool": "music_next",
+                            "arg": "",
                         }
                     ),
                     {"provider": "openvino_local", "backend": "openvino_genai"},

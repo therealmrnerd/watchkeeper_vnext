@@ -49,7 +49,7 @@ class _FakeGenAIModule:
 class _FakePipeline:
     def generate(self, prompt, config):
         if config.structured_output_config and config.structured_output_config.json_schema:
-            return "{\"schema_version\":\"1.0\",\"intent\":\"respond\",\"response_text\":\"Hello\",\"needs_clarification\":false,\"clarification_question\":\"\",\"tool_name\":\"none\",\"tool_arg\":\"\",\"confidence_band\":\"high\"}"
+            return "{\"intent\":\"respond\",\"say\":\"Hello\",\"tool\":\"none\",\"arg\":\"\"}"
         return "plain text"
 
 

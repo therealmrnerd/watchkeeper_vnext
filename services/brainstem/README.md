@@ -133,6 +133,43 @@ Well-known SAMMI runtime state keys:
 
 Reference: `docs/twitch_ingest.md`
 
+## Runtime App Launch Targets
+
+The UI quick app buttons call Brainstem `/app/open`. Launch targets are stored in state so the UI, supervisor, and tool layer agree on what "open this app" means.
+
+- `app.ed.path` - Elite Dangerous launcher target. This may be a URI such as the Epic launcher URI.
+- `app.sammi.path` - SAMMI Core executable.
+- `app.jinx.path` - Hi-Jinx executable. Launching Jinx is separate from sending Art-Net commands.
+- `app.ytmd.path` - YouTube Music Desktop executable. `music.source_path` is metadata/control source only and must not be treated as a launch target.
+
+Configured by:
+
+- `WKV_APP_ED_PATH`
+- `WKV_APP_YTMD_PATH`
+- `WKV_SUP_SAMMI_EXE`
+- `WKV_SUP_JINX_EXE`
+
+## Clock And System Context
+
+Brainstem publishes operator/system clock state for UI, advisory context, and diagnostics:
+
+- `system.time.utc_iso`
+- `system.time.local_iso`
+- `system.time.local_date`
+- `system.time.local_time`
+- `system.time.timezone`
+- `system.time.utc_offset`
+- `system.time.unix_ts`
+
+Elite Dangerous in-game clock state is derived from UTC using the configured year offset:
+
+- `ed.game_time.utc_iso`
+- `ed.game_time.date`
+- `ed.game_time.time`
+- `ed.game_time.year_offset`
+
+The default offset is `1286`, configurable with `WKV_ED_GAME_YEAR_OFFSET`.
+
 ## External ED Providers
 
 The external ED provider layer is live for read-only topology and health monitoring.
@@ -182,6 +219,10 @@ Live endpoints in this slice:
 - `GET /providers/current-system/stations`
   - serves cached normalized stations when present
   - read-through to `spansh` when cache is missing
+- `GET /providers/current-station`
+  - resolves the currently docked/selected station from local state
+  - returns cached station metadata and service list when present
+  - explicitly reports live commodity market board data as unavailable until a dedicated ingestion path exists
 
 Operational notes:
 

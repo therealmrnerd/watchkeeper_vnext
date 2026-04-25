@@ -73,12 +73,13 @@ $schemaDir = Join-Path $root "schemas\sqlite"
 $schemaPath = Join-Path $schemaDir "001_brainstem_core.sql"
 $edTelemetryPath = Join-Path $dataDir "ed_telemetry.json"
 $hardwareProbePath = Join-Path $dataDir "hardware_probe.json"
-$statsDir = Resolve-PreferredPath -Candidates @(
-  "C:\ai\Watchkeeper\stats",
-  (Join-Path $root "stats")
-)
+$statsDir = "C:\ai\watchkeeper_vnext\stats"
 $qdrantPidPath = Join-Path $dataDir "qdrant_runtime.pid.json"
 $userProfile = [Environment]::GetFolderPath("UserProfile")
+
+if (-not (Test-Path $statsDir)) {
+  New-Item -ItemType Directory -Path $statsDir -Force | Out-Null
+}
 
 Set-EnvDefault -Name "WKV_DB_PATH" -Value $dbPath
 Set-EnvDefault -Name "WKV_AI_DB_PATH" -Value $dbPath
@@ -94,8 +95,9 @@ Set-EnvDefault -Name "WKV_ED_TELEMETRY_JSON" -Value $edTelemetryPath
 Set-EnvDefault -Name "WKV_ED_TELEMETRY_OUT" -Value $edTelemetryPath
 Set-EnvDefault -Name "WKV_HARDWAREPROBE_JSON" -Value $hardwareProbePath
 Set-EnvDefault -Name "WKV_SUP_STATS_TXT_ENABLED" -Value "1"
-Set-EnvDefault -Name "WKV_SUP_STATS_DIR" -Value $statsDir
+Set-EnvProcess -Name "WKV_SUP_STATS_DIR" -Value $statsDir
 Set-EnvDefault -Name "WKV_SUP_STATS_LINE_SEC" -Value "10"
+Set-EnvDefault -Name "WKV_SUP_CLOCK_SEC" -Value "10"
 Set-EnvDefault -Name "WKV_QDRANT_PID_FILE" -Value $qdrantPidPath
 Set-EnvDefault -Name "WKV_SUP_AUX_APPS_AUTORUN" -Value "1"
 Set-EnvDefault -Name "WKV_ADVISORY_ENABLED" -Value "1"
@@ -139,12 +141,18 @@ $edAhkPath = Resolve-PreferredPath -Candidates @(
   (Join-Path $userProfile "Desktop\ED.ahk"),
   "C:\ai\Watchkeeper\Tools\ED.ahk"
 )
+$edLaunchTarget = "com.epicgames.launcher://apps/3db17abfd650423f993291624b1b2ac1%3A9b8ee44da2e84b139c7444ab002cbc35%3A9c203b6ed35846e8a4a9ff1e314f6593?action=launch&silent=true"
+$ytmdExe = Resolve-PreferredPath -Candidates @(
+  (Join-Path $userProfile "AppData\Local\youtube_music_desktop_app\youtube-music-desktop-app.exe")
+)
 $ahkExe = Resolve-PreferredPath -Candidates @(
   "C:\Program Files\AutoHotkey\AutoHotkey64.exe",
   "C:\Program Files\AutoHotkey\AutoHotkey.exe",
   "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
   "C:\Program Files\AutoHotkey\v2\AutoHotkey.exe"
 )
+Set-EnvDefault -Name "WKV_APP_ED_PATH" -Value $edLaunchTarget
+Set-EnvDefault -Name "WKV_APP_YTMD_PATH" -Value $ytmdExe
 Set-EnvDefault -Name "WKV_SUP_SAMMI_EXE" -Value $sammiExe
 Set-EnvDefault -Name "WKV_SUP_SAMMI_AUTORUN" -Value "1"
 Set-EnvDefault -Name "WKV_SUP_SAMMI_RESTART_SUPPRESS_SEC" -Value "45"
@@ -193,7 +201,8 @@ $qdrantBin = Resolve-PreferredPath -Candidates @(
 Set-EnvDefault -Name "WKV_QDRANT_BIN" -Value $qdrantBin
 Set-EnvDefault -Name "WKV_QDRANT_WORKDIR" -Value (Split-Path -Parent $qdrantBin)
 
-$phi3ModelPath = Resolve-PreferredPath -Candidates @(
+$advisoryModelPath = Resolve-PreferredPath -Candidates @(
+  (Join-Path $root "models\llm\qwen3-4b-int4-ov"),
   (Join-Path $root "models\llm\phi3-mini-4k-int4-ov"),
   (Join-Path $root "models\llm\qwen2.5-7b-instruct-ov-8bit")
 )
@@ -208,7 +217,9 @@ $ttsModelPath = Resolve-PreferredPath -Candidates @(
 )
 $voskPath = Join-Path $root "models\stt\vosk-model-small-en-us-0.15"
 
-Set-EnvDefault -Name "WK_PHI3_DIR" -Value $phi3ModelPath
+Set-EnvDefault -Name "WKV_ADVISORY_MODEL_DIR" -Value $advisoryModelPath
+Set-EnvDefault -Name "WK_PHI3_DIR" -Value $advisoryModelPath
+Set-EnvDefault -Name "WKV_ADVISORY_LOCAL_OUTPUT_MODE" -Value "intent_sketch"
 Set-EnvDefault -Name "WHISPER_MODEL_DIR" -Value $whisperModelPath
 Set-EnvDefault -Name "WK_TTS_MODEL" -Value $ttsModelPath
 if (Test-Path $voskPath) {
@@ -232,7 +243,9 @@ if (-not $Quiet) {
   Write-Host "  WKV_AI_DB_PATH=$([Environment]::GetEnvironmentVariable('WKV_AI_DB_PATH','Process'))"
   Write-Host "  WKV_NOW_PLAYING_DIR=$([Environment]::GetEnvironmentVariable('WKV_NOW_PLAYING_DIR','Process'))"
   Write-Host "  WKV_NOW_PLAYING_FALLBACK_DIR=$([Environment]::GetEnvironmentVariable('WKV_NOW_PLAYING_FALLBACK_DIR','Process'))"
+  Write-Host "  WKV_ADVISORY_MODEL_DIR=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_MODEL_DIR','Process'))"
   Write-Host "  WK_PHI3_DIR=$([Environment]::GetEnvironmentVariable('WK_PHI3_DIR','Process'))"
+  Write-Host "  WKV_ADVISORY_LOCAL_OUTPUT_MODE=$([Environment]::GetEnvironmentVariable('WKV_ADVISORY_LOCAL_OUTPUT_MODE','Process'))"
   Write-Host "  WHISPER_MODEL_DIR=$([Environment]::GetEnvironmentVariable('WHISPER_MODEL_DIR','Process'))"
   Write-Host "  WK_TTS_MODEL=$([Environment]::GetEnvironmentVariable('WK_TTS_MODEL','Process'))"
   Write-Host "  WKV_QDRANT_BIN=$([Environment]::GetEnvironmentVariable('WKV_QDRANT_BIN','Process'))"
@@ -249,6 +262,8 @@ if (-not $Quiet) {
   Write-Host "  WKV_KNOWLEDGE_HEALTH_URL=$([Environment]::GetEnvironmentVariable('WKV_KNOWLEDGE_HEALTH_URL','Process'))"
   Write-Host "  WKV_SUP_SAMMI_EXE=$([Environment]::GetEnvironmentVariable('WKV_SUP_SAMMI_EXE','Process'))"
   Write-Host "  WKV_SUP_JINX_EXE=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_EXE','Process'))"
+  Write-Host "  WKV_APP_ED_PATH=$([Environment]::GetEnvironmentVariable('WKV_APP_ED_PATH','Process'))"
+  Write-Host "  WKV_APP_YTMD_PATH=$([Environment]::GetEnvironmentVariable('WKV_APP_YTMD_PATH','Process'))"
   Write-Host "  WKV_SUP_JINX_ARGS=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_ARGS','Process'))"
   Write-Host "  WKV_SUP_JINX_SYNC_ENABLED=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_SYNC_ENABLED','Process'))"
   Write-Host "  WKV_SUP_JINX_SENDER_PATH=$([Environment]::GetEnvironmentVariable('WKV_SUP_JINX_SENDER_PATH','Process'))"

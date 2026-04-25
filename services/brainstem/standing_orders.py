@@ -56,9 +56,9 @@ class StandingOrders:
         mapping = {
             "keypress": "input.keypress",
             "set_lights": "sammi.set_lights",
-            "music_next": "sammi.music_next",
-            "music_pause": "sammi.music_pause",
-            "music_resume": "sammi.music_resume",
+            "music_next": "music.next",
+            "music_pause": "music.pause",
+            "music_resume": "music.resume",
         }
         return mapping.get(tool_name, tool_name)
 

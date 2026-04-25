@@ -2,6 +2,21 @@ from __future__ import annotations
 
 from ..util import looks_like_fleet_carrier_callsign
 
+STATIONISH_TOKENS = (
+    "hub",
+    "station",
+    "outpost",
+    "port",
+    "terminal",
+    "base",
+    "dock",
+    "starport",
+    "installation",
+    "settlement",
+    "carrier",
+    "cove",
+)
+
 
 def derive_target_type(raw, _sem, _now_ms: int):
     status = raw.get_status() or {}
@@ -22,7 +37,7 @@ def derive_target_type(raw, _sem, _now_ms: int):
             lower_name = destination_name.lower()
             if looks_like_fleet_carrier_callsign(destination_name):
                 return _out("fleet_carrier", ["Status.Destination.Name"])
-            if any(token in lower_name for token in ("hub", "station", "outpost", "port", "terminal", "base")):
+            if any(token in lower_name for token in STATIONISH_TOKENS):
                 return _out("station", ["Status.Destination.Name"])
         return {"type": "enum", "value": "none", "confidence": "best_effort", "derived_from": ["Status.Target", "Status.Destination"]}
 

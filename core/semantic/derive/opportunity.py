@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+STATIONISH_TOKENS = (
+    "hub",
+    "station",
+    "outpost",
+    "port",
+    "terminal",
+    "base",
+    "dock",
+    "starport",
+    "installation",
+    "settlement",
+    "carrier",
+    "cove",
+)
+
 
 def derive_can_request_docking(raw, sem, _now_ms: int):
     flight = _semantic_value(sem, "ed.semantic.flight.flight_status")
@@ -14,7 +29,7 @@ def derive_can_request_docking(raw, sem, _now_ms: int):
         and (
             target in {"station", "outpost", "fleet_carrier"}
             or destination_body_type in {"station", "outpost", "fleetcarrier", "fleet_carrier"}
-            or any(token in destination_name.lower() for token in ("hub", "station", "outpost", "port", "terminal", "base"))
+            or any(token in destination_name.lower() for token in STATIONISH_TOKENS)
         )
     )
 

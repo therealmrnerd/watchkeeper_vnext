@@ -12,7 +12,6 @@ for p in (THIS_DIR, ROOT_DIR):
         sys.path.insert(0, str(p))
 
 from llm_client import LLMClient
-from local_runtime import OpenVinoLocalRuntime
 from retrieval import RetrievalPackBuilder
 from router import (
     apply_expert_action_permissions,
@@ -25,8 +24,34 @@ from router import (
 HOST = os.getenv("WKV_ADVISORY_HOST", "127.0.0.1")
 PORT = int(os.getenv("WKV_ADVISORY_PORT", "8790"))
 RETRIEVAL_BUILDER = RetrievalPackBuilder()
-LOCAL_RUNTIME = OpenVinoLocalRuntime()
-LLM_CLIENT = LLMClient(local_runtime=LOCAL_RUNTIME)
+_advisory_mode = os.getenv("WKV_ADVISORY_LLM_MODE", "openai_only").strip().lower()
+if _advisory_mode not in {"openai_only", "openvino_local", "native", "phi3_openvino", "stub", "disabled"}:
+    _advisory_mode = "openai_only"
+LLM_CLIENT = LLMClient(mode=_advisory_mode)
+
+
+def _llm_status_payload() -> dict[str, Any]:
+    if LLM_CLIENT.mode in {"openvino_local", "native", "phi3_openvino"}:
+        runtime = LLM_CLIENT.local_runtime.status()
+        return {
+            "loaded": bool(runtime.get("loaded")),
+            "loading": bool(runtime.get("loading")),
+            "provider": "openvino_local",
+            "backend": runtime.get("backend") or "none",
+            "device": runtime.get("device") or "GPU",
+            "model_dir": runtime.get("model_dir"),
+            "local_runtime": True,
+            "last_error": runtime.get("last_error"),
+        }
+    return {
+        "loaded": True,
+        "loading": False,
+        "provider": "openai",
+        "backend": "responses_structured",
+        "device": "cloud",
+        "local_runtime": False,
+        "last_error": None,
+    }
 
 
 class AdvisoryHandler(BaseHTTPRequestHandler):
@@ -64,12 +89,12 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "advisory",
                     "mode": LLM_CLIENT.mode,
-                    "llm": LOCAL_RUNTIME.status(),
+                    "llm": _llm_status_payload(),
                 },
             )
             return
         if self.path == "/llm/status":
-            self._send_json(200, {"ok": True, "llm": LOCAL_RUNTIME.status(), "mode": LLM_CLIENT.mode})
+            self._send_json(200, {"ok": True, "llm": _llm_status_payload(), "mode": LLM_CLIENT.mode})
             return
         self._send_json(404, {"ok": False, "error": "not_found"})
 
@@ -78,13 +103,35 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
             try:
                 body = self._read_json_body()
                 action = str(body.get("action") or "").strip().lower()
-                if action == "engage":
-                    status = LOCAL_RUNTIME.engage()
-                elif action == "disengage":
-                    status = LOCAL_RUNTIME.disengage()
-                else:
+                if action not in {"engage", "disengage"}:
                     raise ValueError("action must be 'engage' or 'disengage'")
-                self._send_json(200, {"ok": True, "action": action, "llm": status, "mode": LLM_CLIENT.mode})
+                if LLM_CLIENT.mode in {"openvino_local", "native", "phi3_openvino"}:
+                    runtime_status = (
+                        LLM_CLIENT.local_runtime.engage()
+                        if action == "engage"
+                        else LLM_CLIENT.local_runtime.disengage()
+                    )
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "action": action,
+                            "mode": LLM_CLIENT.mode,
+                            "llm": _llm_status_payload(),
+                            "runtime": runtime_status,
+                        },
+                    )
+                    return
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "action": action,
+                        "mode": LLM_CLIENT.mode,
+                        "llm": _llm_status_payload(),
+                        "note": "Advisory runs OpenAI-only; local runtime control is a no-op.",
+                    },
+                )
             except ValueError as exc:
                 self._send_json(400, {"ok": False, "error": str(exc)})
             except Exception as exc:
@@ -151,11 +198,6 @@ class AdvisoryHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if os.getenv("WKV_ADVISORY_LOAD_ON_START", "0").strip().lower() in {"1", "true", "yes"}:
-        try:
-            LOCAL_RUNTIME.engage()
-        except Exception:
-            pass
     server = ThreadingHTTPServer((HOST, PORT), AdvisoryHandler)
     print(f"Advisory API listening on http://{HOST}:{PORT}")
     try:

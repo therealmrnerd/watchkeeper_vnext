@@ -218,9 +218,9 @@ class PolicyEngine:
         mapping = {
             "keypress": "input.keypress",
             "set_lights": "sammi.set_lights",
-            "music_next": "sammi.music_next",
-            "music_pause": "sammi.music_pause",
-            "music_resume": "sammi.music_resume",
+            "music_next": "music.next",
+            "music_pause": "music.pause",
+            "music_resume": "music.resume",
             "edparser_start": "edparser.start",
             "edparser_stop": "edparser.stop",
             "edparser_status": "edparser.status",

@@ -25,6 +25,7 @@ data/*
 # Local/runtime artifacts
 storage/
 .qdrant-initialized
+stats/
 
 # Local model and ingest payloads (not published)
 models/

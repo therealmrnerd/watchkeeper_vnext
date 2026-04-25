@@ -255,8 +255,19 @@ def build_assist_prompt(
     *,
     output_contract: str = "intent_proposal",
 ) -> str:
-    system_prompt = _read_prompt(PROMPTS_DIR / "system.txt")
-    router_prompt = _read_prompt(PROMPTS_DIR / "router.txt")
+    if output_contract == "intent_sketch":
+        system_prompt = (
+            "You are Major Tom, Watchkeeper's in Universe Virtual Co-pilot.\n"
+            "Return exactly one short JSON object and nothing else.\n"
+            "No markdown. No reasoning. No prose outside JSON."
+        )
+        router_prompt = (
+            "Use intent='respond' for a normal reply, intent='clarify' when user intent is incomplete, "
+            "intent='tool_request' only when one listed tool is clearly needed."
+        )
+    else:
+        system_prompt = _read_prompt(PROMPTS_DIR / "system.txt")
+        router_prompt = _read_prompt(PROMPTS_DIR / "router.txt")
     expert_prompt = _read_prompt(EXPERTS_DIR / f"{expert_profile.get('expert_id','general')}.txt")
     sitrep_summary = ""
     sitrep = context_pack.get("sitrep")
@@ -323,20 +334,22 @@ def build_assist_prompt(
                     )
     if output_contract == "intent_sketch":
         response_template = {
-            "schema_version": "1.0",
             "intent": "respond",
-            "response_text": "Short helpful reply.",
-            "needs_clarification": False,
-            "clarification_question": "",
-            "tool_name": "none",
-            "tool_arg": "",
-            "confidence_band": "medium",
+            "say": "Short helpful reply.",
+            "tool": "none",
+            "arg": "",
         }
         contract_note = (
             "Return exactly one JSON object matching the IntentSketch shape below. "
-            "Use tool_name 'none' when no tool is needed. "
-            "If clarification is needed, set intent to 'clarify', needs_clarification to true, "
-            "and provide one short clarification_question."
+            "Use tool='none' when no tool is needed. "
+            "Put the visible user-facing reply or clarification question in 'say'."
+        )
+        tool_note = (
+            "Tool selection rules: "
+            "use tool='music_next' for requests to skip or advance music; "
+            "use tool='set_lights' with arg='default' or 'combat' for lighting requests; "
+            "use tool='keypress' only when the user explicitly asks for a specific key; "
+            "otherwise use tool='none'."
         )
     else:
         response_template = {
@@ -376,6 +389,7 @@ def build_assist_prompt(
         "Return exactly one JSON object.",
         "Do not include markdown fences or explanatory text.",
         contract_note,
+        tool_note if output_contract == "intent_sketch" else "",
         json.dumps(response_template, ensure_ascii=False, indent=2),
     ]
     return "\n".join([line for line in lines if line is not None]).strip()

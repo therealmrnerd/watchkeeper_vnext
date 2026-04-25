@@ -15,6 +15,7 @@
         "state.write",
         "log.append",
         "tts.speak",
+        "music.*",
         "edparser.start",
         "edparser.status",
         "edparser.stop"
@@ -35,6 +36,7 @@
         "sammi.*",
         "twitch.*",
         "tts.speak",
+        "music.*",
         "vector.search",
         "docs.read"
       ],
@@ -56,7 +58,8 @@
         "docs.*",
         "excel.*",
         "web.search",
-        "tts.speak"
+        "tts.speak",
+        "music.*"
       ],
       "deny_tools": ["input.keypress", "jinx.*", "sammi.*", "twitch.*"],
       "confirmation": {
@@ -64,7 +67,7 @@
       }
     },
     "TUTOR": {
-      "allowed_tools": ["state.read", "log.append", "docs.read", "vector.search", "tts.speak"],
+      "allowed_tools": ["state.read", "log.append", "docs.read", "vector.search", "tts.speak", "music.*"],
       "deny_tools": ["input.keypress", "files.write", "twitch.*", "sammi.*", "jinx.*"]
     },
     "RESTRICTED": {
@@ -75,7 +78,7 @@
       }
     },
     "DEGRADED": {
-      "allowed_tools": ["state.read", "state.write", "log.append", "tts.speak"],
+      "allowed_tools": ["state.read", "state.write", "log.append", "tts.speak", "music.*"],
       "deny_tools": ["web.search", "vector.search", "input.keypress", "twitch.*", "sammi.*", "jinx.*"],
       "notes": "Used when dependencies are failing (vector DB down, rate-limits, repeated errors)."
     }
@@ -107,6 +110,10 @@
       "rate_limit_per_minute": 12
     },
     "edparser.status": {
+      "risk": "LOW",
+      "rate_limit_per_minute": 30
+    },
+    "music.*": {
       "risk": "LOW",
       "rate_limit_per_minute": 30
     },

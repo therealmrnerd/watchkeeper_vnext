@@ -32,9 +32,9 @@ class LLMClient:
         intent_sketch_schema_path: str | Path | None = None,
         local_runtime: OpenVinoLocalRuntime | None = None,
     ) -> None:
-        self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "openvino_local")).strip().lower()
+        self.mode = (mode or os.getenv("WKV_ADVISORY_LLM_MODE", "openai_only")).strip().lower()
         self.local_output_mode = (
-            os.getenv("WKV_ADVISORY_LOCAL_OUTPUT_MODE", "intent_proposal").strip().lower() or "intent_proposal"
+            os.getenv("WKV_ADVISORY_LOCAL_OUTPUT_MODE", "intent_sketch").strip().lower() or "intent_sketch"
         )
         self.phi3_url = (phi3_url or os.getenv("WKV_PHI3_URL", "http://127.0.0.1:11434/api/generate")).strip()
         self.phi3_model = (phi3_model or os.getenv("WKV_PHI3_MODEL", "phi3:mini")).strip()
@@ -89,6 +89,7 @@ class LLMClient:
                 "mode": self.mode,
             }
 
+        # Local runtime branch is kept for explicit tests/dev-only mode.
         if self.mode in {"openvino_local", "native", "phi3_openvino"}:
             reply, runtime_meta = self.local_runtime.generate(
                 prompt=prompt,
@@ -103,109 +104,8 @@ class LLMClient:
                 "runtime": runtime_meta,
             }
 
-        if self.mode == "phi3":
-            payload = {
-                "model": self.phi3_model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-            }
-            req = request.Request(
-                self.phi3_url,
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                with self.http_opener(req, timeout=self.timeout_sec) as resp:
-                    raw_body = resp.read().decode("utf-8", errors="replace")
-            except error.HTTPError as exc:
-                message = exc.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"phi3 HTTP {exc.code}: {message}") from exc
-            except Exception as exc:
-                raise RuntimeError(f"phi3 request failed: {exc}") from exc
-
-            try:
-                parsed = json.loads(raw_body)
-                if isinstance(parsed, dict):
-                    if isinstance(parsed.get("response"), str):
-                        return parsed["response"], {
-                            "provider": "phi3_local",
-                            "mode": self.mode,
-                            "model": self.phi3_model,
-                        }
-                    if isinstance(parsed.get("output"), str):
-                        return parsed["output"], {
-                            "provider": "phi3_local",
-                            "mode": self.mode,
-                            "model": self.phi3_model,
-                        }
-            except Exception:
-                pass
-
-            return raw_body, {"provider": "phi3_local", "mode": self.mode, "model": self.phi3_model}
-
-        if self.mode in {"legacy_http", "legacy_local", "original_http"}:
-            request_payload = {
-                "message": str(fallback_proposal.get("user_text") or "").strip(),
-                "profile": self.legacy_profile,
-                "tool_policy": "never",
-                "memory_policy": "off",
-                "max_new_tokens": self.legacy_max_new_tokens,
-                "temperature": self.legacy_temperature,
-                "top_p": self.legacy_top_p,
-            }
-            req = request.Request(
-                self.legacy_assist_url,
-                data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                with self.http_opener(req, timeout=self.timeout_sec) as resp:
-                    raw_body = resp.read().decode("utf-8", errors="replace")
-            except error.HTTPError as exc:
-                message = exc.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"legacy_http HTTP {exc.code}: {message}") from exc
-            except Exception as exc:
-                raise RuntimeError(f"legacy_http request failed: {exc}") from exc
-
-            try:
-                parsed = json.loads(raw_body)
-            except Exception as exc:
-                raise RuntimeError(f"legacy_http returned non-JSON body: {exc}") from exc
-
-            if not isinstance(parsed, dict):
-                raise RuntimeError("legacy_http returned non-object response")
-
-            answer = str(parsed.get("answer") or parsed.get("reply") or "").strip()
-            if not answer:
-                raise RuntimeError("legacy_http returned empty answer")
-
-            proposal = dict(fallback_proposal)
-            proposal["response_text"] = answer
-            retrieval = proposal.get("retrieval")
-            if not isinstance(retrieval, dict):
-                retrieval = {"citation_ids": [], "confidence": 0.0}
-            retrieval["legacy_backend"] = {
-                "provider": "watchkeeper_local",
-                "profile": self.legacy_profile,
-                "mode": self.mode,
-                "used_model": parsed.get("used_model"),
-                "meta": parsed.get("meta") if isinstance(parsed.get("meta"), dict) else {},
-            }
-            proposal["retrieval"] = retrieval
-            return json.dumps(proposal, ensure_ascii=False), {
-                "provider": "watchkeeper_local",
-                "mode": self.mode,
-                "profile": self.legacy_profile,
-                "source_url": self.legacy_assist_url,
-            }
-
-        return json.dumps(fallback_proposal, ensure_ascii=False), {
-            "provider": "stub_local",
-            "mode": "fallback",
-        }
+        # Advisory runtime is OpenAI-only. Legacy/local branches are intentionally disabled.
+        return self._generate_raw_openai(prompt)
 
     def _openai_fallback_enabled(self) -> bool:
         try:
@@ -471,46 +371,35 @@ class LLMClient:
 
     def _repair_intent_sketch(self, sketch: dict[str, Any]) -> dict[str, Any]:
         repaired = dict(sketch) if isinstance(sketch, dict) else {}
-        repaired["schema_version"] = "1.0"
 
         intent = str(repaired.get("intent") or "").strip().lower()
         if intent not in {"respond", "clarify", "tool_request"}:
             intent = "respond"
         repaired["intent"] = intent
 
-        response_text = str(repaired.get("response_text") or "").strip()
-        repaired["response_text"] = (response_text or "I can help with that.")[:480]
+        say = str(
+            repaired.get("say")
+            or repaired.get("response_text")
+            or repaired.get("clarification_question")
+            or ""
+        ).strip()
+        repaired["say"] = (say or "I can help with that.")[:240]
 
-        tool_name = str(repaired.get("tool_name") or "").strip()
+        tool_name = str(repaired.get("tool") or repaired.get("tool_name") or "").strip()
         if tool_name not in {"none", "keypress", "set_lights", "music_next"}:
             tool_name = "none"
-        repaired["tool_name"] = tool_name
-        repaired["tool_arg"] = str(repaired.get("tool_arg") or "").strip()[:64]
+        repaired["tool"] = tool_name
+        repaired["arg"] = str(repaired.get("arg") or repaired.get("tool_arg") or "").strip()[:32]
 
-        confidence_band = str(repaired.get("confidence_band") or "").strip().lower()
-        if confidence_band not in {"low", "medium", "high"}:
-            confidence_band = "medium"
-        repaired["confidence_band"] = confidence_band
-
-        needs_clarification = bool(repaired.get("needs_clarification")) or intent == "clarify"
-        repaired["needs_clarification"] = needs_clarification
-        clarification_question = str(repaired.get("clarification_question") or "").strip()[:160]
-        if needs_clarification and not clarification_question:
-            clarification_question = "Please confirm the exact action you want me to take."
-        repaired["clarification_question"] = clarification_question
-
-        if repaired["needs_clarification"]:
+        if intent == "clarify":
             repaired["intent"] = "clarify"
-            repaired["tool_name"] = "none"
-            repaired["tool_arg"] = ""
-        elif repaired["tool_name"] == "none":
+            repaired["tool"] = "none"
+            repaired["arg"] = ""
+        elif repaired["tool"] == "none":
             repaired["intent"] = "respond"
         else:
             repaired["intent"] = "tool_request"
         return repaired
-
-    def _confidence_band_score(self, value: str) -> float:
-        return {"low": 0.35, "medium": 0.65, "high": 0.9}.get(str(value).strip().lower(), 0.5)
 
     def _normalize_keypress_arg(self, value: str) -> str | None:
         key = str(value or "").strip().lower()
@@ -529,13 +418,11 @@ class LLMClient:
     ) -> dict[str, Any]:
         repaired = self._repair_intent_sketch(sketch)
         proposal = dict(fallback_proposal)
-        proposal["response_text"] = repaired["response_text"]
-        proposal["needs_clarification"] = bool(repaired["needs_clarification"])
-        proposal["clarification_questions"] = (
-            [repaired["clarification_question"]] if repaired["needs_clarification"] else []
-        )
+        proposal["response_text"] = repaired["say"]
+        proposal["needs_clarification"] = repaired["intent"] == "clarify"
+        proposal["clarification_questions"] = [repaired["say"]] if proposal["needs_clarification"] else []
 
-        confidence = self._confidence_band_score(str(repaired.get("confidence_band") or "medium"))
+        confidence = 0.72 if repaired["intent"] == "tool_request" else 0.6
         retrieval = proposal.get("retrieval")
         if not isinstance(retrieval, dict):
             retrieval = {"citation_ids": [], "confidence": confidence}
@@ -543,8 +430,8 @@ class LLMClient:
         proposal["retrieval"] = retrieval
 
         actions: list[dict[str, Any]] = []
-        tool_name = str(repaired.get("tool_name") or "none")
-        tool_arg = str(repaired.get("tool_arg") or "").strip()
+        tool_name = str(repaired.get("tool") or "none")
+        tool_arg = str(repaired.get("arg") or "").strip()
         if not proposal["needs_clarification"] and tool_name != "none":
             if tool_name == "keypress":
                 key = self._normalize_keypress_arg(tool_arg)
@@ -740,10 +627,8 @@ class LLMClient:
         local_prompt: str | None = None,
         fallback_proposal: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        use_local_sketch = (
-            self.raw_generator is None
-            and self.mode in {"openvino_local", "native", "phi3_openvino"}
-            and self.local_output_mode == "intent_sketch"
+        use_local_sketch = self.local_output_mode == "intent_sketch" and (
+            self.raw_generator is not None or self.mode in {"openvino_local", "native", "phi3_openvino"}
         )
         try:
             raw_text, raw_meta = self._generate_raw(
@@ -755,24 +640,25 @@ class LLMClient:
             if "not engaged" in str(exc).lower():
                 safe = self._safe_disengaged(fallback_proposal, f"llm_disengaged:{exc}")
                 return safe, {
-                    "provider": "openvino_local",
+                    "provider": "openai",
                     "mode": self.mode,
                     "validation": "disengaged",
                     "error": str(exc),
                 }
-            proposal, meta = self._try_openai_fallback(
-                prompt=prompt,
-                fallback_proposal=fallback_proposal,
-                prior_error=f"llm_request_error:{exc}",
-                prior_meta={
-                    "provider": "openvino_local",
-                    "mode": self.mode,
-                    "validation": "request_error",
-                    "error": str(exc),
-                },
-            )
-            if proposal is not None and meta is not None:
-                return proposal, meta
+            if self.raw_generator is None:
+                proposal, meta = self._try_openai_fallback(
+                    prompt=prompt,
+                    fallback_proposal=fallback_proposal,
+                    prior_error=f"llm_request_error:{exc}",
+                    prior_meta={
+                        "provider": "openai",
+                        "mode": self.mode,
+                        "validation": "request_error",
+                        "error": str(exc),
+                    },
+                )
+                if proposal is not None and meta is not None:
+                    return proposal, meta
             safe = self._safe_no_action(fallback_proposal, f"llm_request_error:{exc}")
             return safe, {
                 "provider": "fail_safe",
@@ -783,16 +669,19 @@ class LLMClient:
 
         parsed, parse_mode = self._extract_json_object(raw_text)
         if parsed is None:
-            proposal, meta = self._try_openai_fallback(
-                prompt=prompt,
-                fallback_proposal=fallback_proposal,
-                prior_error="invalid_json",
-                prior_meta=raw_meta | {"validation": "invalid_json", "parse_mode": parse_mode},
-            )
-            if proposal is not None and meta is not None:
-                return proposal, meta
+            raw_excerpt = (raw_text or "").strip().replace("\r", " ").replace("\n", " ")[:240]
+            if self.raw_generator is None:
+                proposal, meta = self._try_openai_fallback(
+                    prompt=prompt,
+                    fallback_proposal=fallback_proposal,
+                    prior_error="invalid_json",
+                    prior_meta=raw_meta
+                    | {"validation": "invalid_json", "parse_mode": parse_mode, "raw_excerpt": raw_excerpt},
+                )
+                if proposal is not None and meta is not None:
+                    return proposal, meta
             safe = self._safe_no_action(fallback_proposal, "invalid_json")
-            return safe, raw_meta | {"validation": "safe_fallback", "parse_mode": parse_mode}
+            return safe, raw_meta | {"validation": "safe_fallback", "parse_mode": parse_mode, "raw_excerpt": raw_excerpt}
 
         if use_local_sketch:
             try:
@@ -805,19 +694,20 @@ class LLMClient:
                     "output_contract": "intent_sketch",
                 }
             except Exception as exc:
-                proposal, meta = self._try_openai_fallback(
-                    prompt=prompt,
-                    fallback_proposal=fallback_proposal,
-                    prior_error=f"intent_sketch_error:{exc}",
-                    prior_meta=raw_meta | {
-                        "validation": "repair_failed",
-                        "parse_mode": parse_mode,
-                        "error": str(exc),
-                        "output_contract": "intent_sketch",
-                    },
-                )
-                if proposal is not None and meta is not None:
-                    return proposal, meta
+                if self.raw_generator is None:
+                    proposal, meta = self._try_openai_fallback(
+                        prompt=prompt,
+                        fallback_proposal=fallback_proposal,
+                        prior_error=f"intent_sketch_error:{exc}",
+                        prior_meta=raw_meta | {
+                            "validation": "repair_failed",
+                            "parse_mode": parse_mode,
+                            "error": str(exc),
+                            "output_contract": "intent_sketch",
+                        },
+                    )
+                    if proposal is not None and meta is not None:
+                        return proposal, meta
                 safe = self._safe_no_action(fallback_proposal, f"intent_sketch_error:{exc}")
                 return safe, raw_meta | {
                     "validation": "safe_fallback",
@@ -841,18 +731,19 @@ class LLMClient:
                     "error": str(exc),
                 }
             except Exception:
-                proposal, meta = self._try_openai_fallback(
-                    prompt=prompt,
-                    fallback_proposal=fallback_proposal,
-                    prior_error=f"schema_validation_error:{exc}",
-                    prior_meta=raw_meta | {
-                        "validation": "repair_failed",
-                        "parse_mode": parse_mode,
-                        "error": str(exc),
-                    },
-                )
-                if proposal is not None and meta is not None:
-                    return proposal, meta
+                if self.raw_generator is None:
+                    proposal, meta = self._try_openai_fallback(
+                        prompt=prompt,
+                        fallback_proposal=fallback_proposal,
+                        prior_error=f"schema_validation_error:{exc}",
+                        prior_meta=raw_meta | {
+                            "validation": "repair_failed",
+                            "parse_mode": parse_mode,
+                            "error": str(exc),
+                        },
+                    )
+                    if proposal is not None and meta is not None:
+                        return proposal, meta
                 safe = self._safe_no_action(fallback_proposal, f"schema_validation_error:{exc}")
                 return safe, raw_meta | {
                     "validation": "safe_fallback",

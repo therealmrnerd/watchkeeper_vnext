@@ -32,6 +32,7 @@ from queries import (
     query_log_tail,
     query_obs_status,
     query_current_system_provider,
+    query_current_station_detail,
     query_current_system_stations,
     query_inara_credentials,
     query_llm_status,
@@ -277,6 +278,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/providers/current-system/stations":
                 self._send_json(200, query_current_system_stations(query))
+                return
+
+            if parsed.path == "/providers/current-station":
+                self._send_json(200, query_current_station_detail(query))
                 return
 
             if parsed.path == "/logs/files":

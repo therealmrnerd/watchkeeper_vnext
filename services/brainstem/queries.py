@@ -135,6 +135,49 @@ def _state_value_with_fallback(state: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _ed_running_from_state(state: dict[str, Any]) -> bool:
+    value = _state_value_with_fallback(
+        state,
+        "ed.status.running",
+        "ed.running",
+        "ed.telemetry.running",
+    )
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _provider_unavailable_payload(
+    *,
+    operation: str,
+    reason: str,
+    error: str,
+    system_name: str | None = None,
+    system_address: int | str | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    state_block = {
+        "system_name": system_name,
+        "system_address": system_address,
+    }
+    return {
+        "ok": False,
+        "provider": None,
+        "operation": operation,
+        "fetched_at": _utc_now_iso(),
+        "cache": {"hit": False, "age_s": None, "ttl_s": None, "stale_served": False},
+        "provenance": {"endpoint": None, "http_code": None},
+        "data": data or {},
+        "error": error,
+        "deny_reason": reason,
+        "current_system_state": state_block,
+    }
+
+
 def _query_capabilities() -> list[dict[str, Any]]:
     with connect_db() as con:
         rows = con.execute(
@@ -398,9 +441,7 @@ def query_obs_status(query: dict[str, list[str]]) -> dict[str, Any]:
 def query_ed_control_profile(query: dict[str, list[str]]) -> dict[str, Any]:
     del query
     state = _state_map()
-    ed_running = bool(
-        _state_value_with_fallback(state, "ed.status.running", "ed.running", "ed.telemetry.running")
-    )
+    ed_running = _ed_running_from_state(state)
     semantic = {
         "player_platform": state.get("ed.semantic.context.player_platform"),
         "on_foot_area": state.get("ed.semantic.context.on_foot_area"),
@@ -419,6 +460,7 @@ def query_ed_control_profile(query: dict[str, list[str]]) -> dict[str, Any]:
 
 def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]:
     state = _state_map()
+    ed_running = _ed_running_from_state(state)
     system_name = _first_present(
         state.get("ed.telemetry.system_name"),
         state.get("ed.system.name"),
@@ -429,8 +471,22 @@ def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]
         state.get("ed.system.address"),
         state.get("ed.current_system.address"),
     )
+    if not ed_running:
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.SYSTEM_LOOKUP.value,
+            reason="ed_not_running",
+            error="Elite Dangerous is not running",
+            system_name=system_name,
+            system_address=system_address,
+        )
     if not system_name and system_address is None:
-        raise ValueError("current system is unavailable in state")
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.SYSTEM_LOOKUP.value,
+            reason="current_system_unavailable",
+            error="current system is unavailable in state",
+            system_name=system_name,
+            system_address=system_address,
+        )
 
     provider_hint = str((query.get("provider", ["auto"])[0] or "auto")).strip().lower()
     allow_stale_raw = str((query.get("allow_stale_if_error", ["true"])[0] or "true")).strip().lower()
@@ -482,8 +538,8 @@ def query_current_system_provider(query: dict[str, list[str]]) -> dict[str, Any]
     }
 
 
-def _current_system_identity() -> tuple[str | None, int | None]:
-    state = _state_map()
+def _current_system_identity(state: dict[str, Any] | None = None) -> tuple[str | None, int | None]:
+    state = state if state is not None else _state_map()
     system_name = _first_present(
         state.get("ed.telemetry.system_name"),
         state.get("ed.system.name"),
@@ -592,6 +648,167 @@ def _query_live_current_system_children(
     return result.to_dict()
 
 
+def _current_station_identity(state: dict[str, Any] | None = None) -> tuple[str | None, str | None, int | None]:
+    state = state if state is not None else _state_map()
+    docked = bool(_state_value_with_fallback(state, "ed.telemetry.dock_state", "ed.status.docked"))
+    station_services_available = bool(state.get("ed.semantic.opportunity.station_services_available"))
+    can_request_docking = bool(state.get("ed.semantic.opportunity.can_request_docking"))
+    target_type = state.get("ed.semantic.target.target_type")
+
+    station_name = None
+    raw_station_name = state.get("ed.telemetry.station_name")
+    if docked or station_services_available:
+        station_name = raw_station_name
+    elif target_type in {"station", "outpost", "fleet_carrier"} or can_request_docking:
+        station_name = state.get("ed.telemetry.destination_name")
+
+    system_name, system_address = _current_system_identity(state)
+    if isinstance(station_name, str):
+        station_name = station_name.strip() or None
+    else:
+        station_name = None
+    return station_name, system_name, system_address
+
+
+def query_current_station_detail(query: dict[str, list[str]]) -> dict[str, Any]:
+    refresh_raw = str((query.get("refresh", ["false"])[0] or "false")).strip().lower()
+    refresh = refresh_raw in {"1", "true", "yes", "on"}
+
+    state = _state_map()
+    ed_running = _ed_running_from_state(state)
+    station_name, system_name, system_address = _current_station_identity(state)
+    if not ed_running:
+        return {
+            "ok": False,
+            "current_station_state": {
+                "station_name": station_name,
+                "system_name": system_name,
+                "system_address": system_address,
+                "docked": False,
+            },
+            "semantic": {
+                "station_services_available": False,
+                "market_access_available": False,
+            },
+            "data": {
+                "market_id": None,
+                "station_id64": None,
+                "name": station_name,
+                "station_type": None,
+                "distance_to_arrival_ls": None,
+                "has_docking": False,
+                "services": [],
+                "provider": None,
+                "updated_at_utc": None,
+                "market_data": {
+                    "available": False,
+                    "source": None,
+                    "reason": "Elite Dangerous is not running",
+                },
+            },
+            "error": "Elite Dangerous is not running",
+            "deny_reason": "ed_not_running",
+        }
+    if not station_name:
+        return {
+            "ok": False,
+            "current_station_state": {
+                "station_name": None,
+                "system_name": system_name,
+                "system_address": system_address,
+                "docked": False,
+            },
+            "semantic": {
+                "station_services_available": False,
+                "market_access_available": False,
+            },
+            "data": {
+                "market_id": None,
+                "station_id64": None,
+                "name": None,
+                "station_type": None,
+                "distance_to_arrival_ls": None,
+                "has_docking": False,
+                "services": [],
+                "provider": None,
+                "updated_at_utc": None,
+                "market_data": {
+                    "available": False,
+                    "source": None,
+                    "reason": "current station is unavailable in state",
+                },
+            },
+            "error": "current station is unavailable in state",
+            "deny_reason": "current_station_unavailable",
+        }
+
+    station_row = None
+    if not refresh:
+        with connect_db() as con:
+            con.row_factory = sqlite3.Row
+            if system_address is not None:
+                station_row = con.execute(
+                    """
+                    SELECT *
+                    FROM ed_stations
+                    WHERE system_address=? AND name=?
+                    ORDER BY updated_at_utc DESC
+                    LIMIT 1
+                    """,
+                    (system_address, station_name),
+                ).fetchone()
+            else:
+                station_row = con.execute(
+                    """
+                    SELECT *
+                    FROM ed_stations
+                    WHERE name=?
+                    ORDER BY updated_at_utc DESC
+                    LIMIT 1
+                    """,
+                    (station_name,),
+                ).fetchone()
+
+    services = _as_json(station_row["services_json"], []) if station_row else []
+    if not isinstance(services, list):
+        services = []
+
+    station_services_available = bool(state.get("ed.semantic.opportunity.station_services_available"))
+    market_access_available = bool(state.get("ed.semantic.opportunity.market_access_available"))
+    docked = bool(_state_value_with_fallback(state, "ed.telemetry.dock_state", "ed.status.docked"))
+
+    return {
+        "ok": True,
+        "current_station_state": {
+            "station_name": station_name,
+            "system_name": system_name,
+            "system_address": system_address,
+            "docked": docked,
+        },
+        "semantic": {
+            "station_services_available": station_services_available,
+            "market_access_available": market_access_available,
+        },
+        "data": {
+            "market_id": station_row["market_id"] if station_row else None,
+            "station_id64": station_row["station_id64"] if station_row else None,
+            "name": station_name,
+            "station_type": station_row["station_type"] if station_row else None,
+            "distance_to_arrival_ls": station_row["distance_to_arrival_ls"] if station_row else None,
+            "has_docking": bool(station_row["has_docking"]) if station_row else docked,
+            "services": services,
+            "provider": station_row["source"] if station_row else None,
+            "updated_at_utc": station_row["updated_at_utc"] if station_row else None,
+            "market_data": {
+                "available": False,
+                "source": None,
+                "reason": "live commodity market board ingestion is not implemented",
+            },
+        },
+        "error": None,
+    }
+
+
 def query_current_system_bodies(query: dict[str, list[str]]) -> dict[str, Any]:
     limit_raw = (query.get("limit", ["20"])[0] or "20").strip()
     max_age_raw = (query.get("max_age_s", ["86400"])[0] or "86400").strip()
@@ -605,9 +822,27 @@ def query_current_system_bodies(query: dict[str, list[str]]) -> dict[str, Any]:
     allow_stale = allow_stale_raw in {"1", "true", "yes", "on"}
     refresh = refresh_raw in {"1", "true", "yes", "on"}
 
-    system_name, system_address = _current_system_identity()
+    state = _state_map()
+    ed_running = _ed_running_from_state(state)
+    system_name, system_address = _current_system_identity(state)
+    if not ed_running:
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.BODIES_LOOKUP.value,
+            reason="ed_not_running",
+            error="Elite Dangerous is not running",
+            system_name=system_name,
+            system_address=system_address,
+            data={"system_name": system_name, "system_address": system_address, "body_count": 0, "items": []},
+        )
     if not system_name and system_address is None:
-        raise ValueError("current system is unavailable in state")
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.BODIES_LOOKUP.value,
+            reason="current_system_unavailable",
+            error="current system is unavailable in state",
+            system_name=system_name,
+            system_address=system_address,
+            data={"system_name": system_name, "system_address": system_address, "body_count": 0, "items": []},
+        )
 
     cached = None if refresh else _query_cached_system_children(
         table="ed_bodies",
@@ -671,9 +906,27 @@ def query_current_system_stations(query: dict[str, list[str]]) -> dict[str, Any]
     allow_stale = allow_stale_raw in {"1", "true", "yes", "on"}
     refresh = refresh_raw in {"1", "true", "yes", "on"}
 
-    system_name, system_address = _current_system_identity()
+    state = _state_map()
+    ed_running = _ed_running_from_state(state)
+    system_name, system_address = _current_system_identity(state)
+    if not ed_running:
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.STATIONS_LOOKUP.value,
+            reason="ed_not_running",
+            error="Elite Dangerous is not running",
+            system_name=system_name,
+            system_address=system_address,
+            data={"system_name": system_name, "system_address": system_address, "station_count": 0, "items": []},
+        )
     if not system_name and system_address is None:
-        raise ValueError("current system is unavailable in state")
+        return _provider_unavailable_payload(
+            operation=ProviderOperationId.STATIONS_LOOKUP.value,
+            reason="current_system_unavailable",
+            error="current system is unavailable in state",
+            system_name=system_name,
+            system_address=system_address,
+            data={"system_name": system_name, "system_address": system_address, "station_count": 0, "items": []},
+        )
 
     cached = None if refresh else _query_cached_system_children(
         table="ed_stations",
@@ -721,15 +974,17 @@ def query_current_system_stations(query: dict[str, list[str]]) -> dict[str, Any]
 
 
 def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
+    fast_raw = str((query.get("fast", ["false"])[0] or "false")).strip().lower()
+    fast = fast_raw in {"1", "true", "yes", "on"}
     events_limit_raw = (query.get("events_limit", ["50"])[0] or "50").strip()
     try:
-        events_limit = max(10, min(300, int(events_limit_raw)))
+        events_limit = max(0 if fast else 10, min(300, int(events_limit_raw)))
     except ValueError:
         raise ValueError("events_limit must be an integer")
 
-    events = DB_SERVICE.list_events(limit=events_limit)
+    events = DB_SERVICE.list_events(limit=events_limit) if events_limit > 0 else []
     state = _state_map()
-    capabilities = _query_capabilities()
+    capabilities = [] if fast else _query_capabilities()
     now_ts = time.time()
     alarms = [e for e in events if str(e.get("severity") or "").lower() in {"warn", "error"}]
     music_now_playing = state.get("music.now_playing")
@@ -764,8 +1019,10 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         or state.get("ed.status.running")
         or state.get("ed.process.running")
     )
+    current_station_name, _, _ = _current_station_identity(state)
     ed_system_name = _state_value_with_fallback(state, "ed.status.system_name", "ed.telemetry.system_name")
     ed_system_address = _state_value_with_fallback(state, "ed.status.system_address", "ed.telemetry.system_address")
+    ed_destination_name = _state_value_with_fallback(state, "ed.telemetry.destination_name", "ed.telemetry.station_name")
     ed_ship_name = _state_value_with_fallback(state, "ed.status.ship_name", "ed.telemetry.ship_name")
     ed_ship_model = _state_value_with_fallback(state, "ed.status.ship_model", "ed.telemetry.ship_model")
     ed_ship_ident = _state_value_with_fallback(state, "ed.status.ship_ident", "ed.telemetry.ship_ident")
@@ -813,6 +1070,11 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     )
     jinx_running = bool(state.get("app.jinx.running"))
     sammi_running = bool(state.get("app.sammi.running"))
+    sammi_api_last_push_at = state.get("app.sammi.api.last_push_at")
+    sammi_api_last_push_count = state.get("app.sammi.api.last_push_count")
+    sammi_api_last_cycle_ms = state.get("app.sammi.api.last_cycle_ms")
+    sammi_api_deferred_count = state.get("app.sammi.api.deferred_count")
+    sammi_api_suppressed_count = state.get("app.sammi.api.suppressed_count")
     ytmd_running = bool(state.get("music.app_running"))
     queue_depth = (
         state.get("queue.depth")
@@ -821,31 +1083,6 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         or 0
     )
 
-    advisory_status = _probe_service("advisory", ADVISORY_HEALTH_URL)
-    knowledge_status = _probe_service("knowledge", KNOWLEDGE_HEALTH_URL)
-    knowledge_detail = knowledge_status.get("detail")
-    if not isinstance(knowledge_detail, dict):
-        knowledge_detail = {}
-    vector_backend = str(knowledge_detail.get("vector_backend") or "").strip().lower()
-
-    if vector_backend == "qdrant":
-        qdrant_status = _probe_service("qdrant", QDRANT_HEALTH_URL)
-    else:
-        qdrant_status = {
-            "name": "qdrant",
-            "ok": True,
-            "status": "disabled",
-            "url": QDRANT_HEALTH_URL,
-            "detail": {
-                "reason": (
-                    "vector backend is not qdrant"
-                    if vector_backend
-                    else "knowledge backend unavailable; qdrant probe skipped"
-                ),
-                "vector_backend": vector_backend or None,
-            },
-        }
-
     services = {
         "brainstem": {
             "name": "brainstem",
@@ -853,15 +1090,46 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
             "status": "up",
             "url": f"http://127.0.0.1:{PORT}/health",
             "detail": {"version": VERSION, "commit": COMMIT},
-        },
-        "advisory": advisory_status,
-        "knowledge": knowledge_status,
-        "qdrant": qdrant_status,
+        }
     }
-    try:
-        providers = list_provider_health(Path(DB_PATH))
-    except sqlite3.Error:
-        providers = {}
+    providers: dict[str, Any] = {}
+    if not fast:
+        advisory_status = _probe_service("advisory", ADVISORY_HEALTH_URL)
+        knowledge_status = _probe_service("knowledge", KNOWLEDGE_HEALTH_URL)
+        knowledge_detail = knowledge_status.get("detail")
+        if not isinstance(knowledge_detail, dict):
+            knowledge_detail = {}
+        vector_backend = str(knowledge_detail.get("vector_backend") or "").strip().lower()
+
+        if vector_backend == "qdrant":
+            qdrant_status = _probe_service("qdrant", QDRANT_HEALTH_URL)
+        else:
+            qdrant_status = {
+                "name": "qdrant",
+                "ok": True,
+                "status": "disabled",
+                "url": QDRANT_HEALTH_URL,
+                "detail": {
+                    "reason": (
+                        "vector backend is not qdrant"
+                        if vector_backend
+                        else "knowledge backend unavailable; qdrant probe skipped"
+                    ),
+                    "vector_backend": vector_backend or None,
+                },
+            }
+
+        services.update(
+            {
+                "advisory": advisory_status,
+                "knowledge": knowledge_status,
+                "qdrant": qdrant_status,
+            }
+        )
+        try:
+            providers = list_provider_health(Path(DB_PATH))
+        except sqlite3.Error:
+            providers = {}
 
     return {
         "ok": True,
@@ -887,6 +1155,8 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ship_ident": ed_ship_ident,
                 "system_name": ed_system_name,
                 "system_address": ed_system_address,
+                "destination_name": ed_destination_name,
+                "station_name": current_station_name,
                 "docked": ed_dock_state,
                 "supercruise": ed_supercruise,
                 "landed": ed_landed,
@@ -923,6 +1193,13 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "jinx_running": jinx_running,
                 "sammi_running": sammi_running,
                 "ytmd_running": ytmd_running,
+                "sammi_api": {
+                    "last_push_at": sammi_api_last_push_at,
+                    "last_push_count": sammi_api_last_push_count,
+                    "last_cycle_ms": sammi_api_last_cycle_ms,
+                    "deferred_count": sammi_api_deferred_count,
+                    "suppressed_count": sammi_api_suppressed_count,
+                },
             },
             "music_state": {
                 "playing": music_playing,
@@ -939,6 +1216,16 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         "state_highlights": {
             key: state[key]
             for key in (
+                "system.time.utc_iso",
+                "system.time.local_iso",
+                "system.time.local_date",
+                "system.time.local_time",
+                "system.time.timezone",
+                "system.time.utc_offset",
+                "system.time.unix_ts",
+                "ed.game_time.utc_iso",
+                "ed.game_time.date",
+                "ed.game_time.time",
                 "policy.watch_condition",
                 "ed.status.running",
                 "ed.status.landed",
@@ -983,6 +1270,14 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "music.now_playing",
                 "hw.cpu.temp_c",
                 "hw.gpu.temp_c",
+                "hw.memory",
+                "hw.uptime_sec",
+                "hardware.cpu_percent",
+                "hardware.cpu_temp_c",
+                "hardware.gpu_percent",
+                "hardware.gpu_temp_c",
+                "hardware.memory_used_percent",
+                "hardware.uptime_sec",
                 "ai.status.mode",
                 "ai.status.provider",
             )
@@ -1041,8 +1336,7 @@ def query_log_tail(query: dict[str, list[str]]) -> dict[str, Any]:
         raise ValueError("lines must be an integer")
     path = _resolve_log_path(file_value)
 
-    text = path.read_text(encoding="utf-8", errors="replace")
-    selected = text.splitlines()[-lines:]
+    selected = _tail_text_lines(path, lines)
     return {
         "ok": True,
         "file": path.name,
@@ -1051,6 +1345,27 @@ def query_log_tail(query: dict[str, list[str]]) -> dict[str, Any]:
         "line_count": len(selected),
         "lines": selected,
     }
+
+
+def _tail_text_lines(path: Path, lines: int, *, chunk_size: int = 8192) -> list[str]:
+    """Read the end of a log file without loading the full file into memory."""
+    if lines <= 0:
+        return []
+    with path.open("rb") as fh:
+        fh.seek(0, 2)
+        end = fh.tell()
+        chunks: list[bytes] = []
+        pos = end
+        newline_count = 0
+        while pos > 0 and newline_count <= lines:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            fh.seek(pos)
+            block = fh.read(read_size)
+            chunks.append(block)
+            newline_count += block.count(b"\n")
+        data = b"".join(reversed(chunks))
+    return data.decode("utf-8", errors="replace").splitlines()[-lines:]
 
 
 def build_diag_bundle() -> dict[str, Any]:

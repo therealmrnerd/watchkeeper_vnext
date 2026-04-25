@@ -10,7 +10,7 @@ from ctypes import windll
 from pathlib import Path
 from typing import Any
 from urllib import error, request
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from runtime import (
     ADVISORY_ENABLED,
@@ -176,6 +176,18 @@ def _execute_set_lights(parameters: dict[str, Any], request_id: str, action_id: 
 
 
 def _execute_music(tool_name: str) -> dict[str, Any]:
+    music_running_row = DB_SERVICE.get_state("music.app_running")
+    raw_music_running = music_running_row.get("state_value") if music_running_row else None
+    if isinstance(raw_music_running, bool):
+        music_running = raw_music_running
+    elif isinstance(raw_music_running, (int, float)):
+        music_running = raw_music_running != 0
+    elif isinstance(raw_music_running, str):
+        music_running = raw_music_running.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        music_running = False
+    if not music_running:
+        raise ValueError("music control denied: YouTube Music Desktop is not running")
     if tool_name == "music_next":
         vk_code = VK_MEDIA_NEXT_TRACK
         vk_name = "VK_MEDIA_NEXT_TRACK"
@@ -608,12 +620,89 @@ def _state_value_text(key: str) -> str:
     return str(value or "").strip()
 
 
+def _state_value_bool(key: str) -> bool:
+    row = DB_SERVICE.get_state(str(key or "").strip())
+    if not row:
+        return False
+    value = row.get("state_value")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _looks_like_url(text: str) -> bool:
+    clean = str(text or "").strip()
+    parsed = urlparse(clean)
+    if len(parsed.scheme) == 1 and len(clean) >= 3 and clean[1:3] in {":\\", ":/"}:
+        return False
+    return bool(parsed.scheme and (parsed.netloc or parsed.path))
+
+
+def _looks_like_executable_target(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if normalized.lower().startswith("ytmd_api://"):
+        return False
+    if _looks_like_url(normalized):
+        return False
+    return any(
+        normalized.lower().endswith(suffix)
+        for suffix in (".exe", ".cmd", ".bat", ".lnk", ".ahk", ".ps1")
+    ) or os.path.exists(normalized)
+
+
+def _is_launchable_target(app_id: str, target: str) -> bool:
+    text = str(target or "").strip()
+    if not text:
+        return False
+    if app_id == "ytmd":
+        return _looks_like_executable_target(text)
+    if app_id == "elite":
+        return _looks_like_url(text) or _looks_like_executable_target(text)
+    return _looks_like_executable_target(text)
+
+
+def _discover_process_executable(process_names: list[str]) -> str:
+    if not process_names or os.name != "nt":
+        return ""
+    names = [name.strip() for name in process_names if name.strip()]
+    if not names:
+        return ""
+    filter_names = ",".join(f"'{name}'" for name in names)
+    command = (
+        "Get-CimInstance Win32_Process | "
+        f"Where-Object {{ $_.Name -in @({filter_names}) -and $_.ExecutablePath }} | "
+        "Select-Object -First 1 -ExpandProperty ExecutablePath"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=NO_WINDOW_FLAGS,
+            timeout=10,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
 def _normalize_app_open_target(app_id: str, target: str) -> str:
     text = str(target or "").strip()
     if not text:
         return ""
     if app_id == "ytmd" and text.lower().startswith("ytmd_api://"):
-        return "http://" + text.split("://", 1)[1]
+        return ""
+    if app_id == "ytmd" and _looks_like_url(text):
+        return ""
     return text
 
 
@@ -625,11 +714,23 @@ def open_external_app(payload: dict[str, Any], source: str) -> dict[str, Any]:
     if app_id not in {"elite", "jinx", "sammi", "ytmd"}:
         raise ValueError("app_id must be one of: elite, jinx, sammi, ytmd")
 
+    process_name_map: dict[str, list[str]] = {
+        "elite": ["EliteDangerous64.exe", "EliteDangerous.exe"],
+        "jinx": ["Hi-Jinx.exe", "Hi-Jinx 2.exe"],
+        "sammi": ["SAMMI Core.exe"],
+        "ytmd": [
+            "youtube-music-desktop-app.exe",
+            "YouTube Music Desktop App.exe",
+            "YouTubeMusicDesktopApp.exe",
+            "YouTube Music.exe",
+            "ytmdesktop.exe",
+        ],
+    }
     target_map: dict[str, list[str]] = {
         "elite": ["app.ed.path", "app.elite.path", "app.ed_ahk.path"],
         "jinx": ["app.jinx.path"],
         "sammi": ["app.sammi.path"],
-        "ytmd": ["app.ytmd.path", "music.app.path", "music.source_path"],
+        "ytmd": ["app.ytmd.path", "music.app.path"],
     }
     target = ""
     for key in target_map.get(app_id, []):
@@ -637,12 +738,39 @@ def open_external_app(payload: dict[str, Any], source: str) -> dict[str, Any]:
         if not raw:
             continue
         normalized = _normalize_app_open_target(app_id, raw)
-        if normalized:
+        if normalized and _is_launchable_target(app_id, normalized):
             target = normalized
             break
 
-    if not target and app_id == "ytmd":
-        target = "http://127.0.0.1:9863"
+    if not target:
+        discovered = _discover_process_executable(process_name_map.get(app_id, []))
+        if discovered and _is_launchable_target(app_id, discovered):
+            target = discovered
+            if app_id == "ytmd":
+                _set_state_quick("app.ytmd.path", discovered)
+
+    if not target and app_id == "ytmd" and _state_value_bool("music.app_running"):
+        emit_event(
+            con=None,
+            event_type="APP_OPEN_REQUESTED",
+            source=source,
+            payload={
+                "app_id": app_id,
+                "target": None,
+                "launched": False,
+                "already_running": True,
+                "note": "YTMD is already running; no executable path configured.",
+            },
+            severity="info",
+            tags=["ui", "app_open", app_id],
+        )
+        return {
+            "app_id": app_id,
+            "target": None,
+            "launched": False,
+            "already_running": True,
+            "note": "YTMD is already running; no executable path configured.",
+        }
 
     if not target:
         raise ValueError(f"no launch target configured for app_id={app_id}")

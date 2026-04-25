@@ -12,6 +12,15 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = Path(os.getenv("WKV_DB_PATH", ROOT_DIR / "data" / "watchkeeper_vnext.db"))
 
 DEFAULT_SITREP_KEYS = (
+    "system.time.utc_iso",
+    "system.time.local_iso",
+    "system.time.local_date",
+    "system.time.local_time",
+    "system.time.timezone",
+    "system.time.utc_offset",
+    "ed.game_time.utc_iso",
+    "ed.game_time.date",
+    "ed.game_time.time",
     "policy.watch_condition",
     "ed.status.running",
     "ed.status.landed",
@@ -42,6 +51,14 @@ DEFAULT_SITREP_KEYS = (
     "music.now_playing.artist",
     "hw.cpu.temp_c",
     "hw.gpu.temp_c",
+    "hw.memory",
+    "hw.uptime_sec",
+    "hardware.cpu_percent",
+    "hardware.cpu_temp_c",
+    "hardware.gpu_percent",
+    "hardware.gpu_temp_c",
+    "hardware.memory_used_percent",
+    "hardware.uptime_sec",
     "ai.status.mode",
 )
 
