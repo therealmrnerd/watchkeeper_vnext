@@ -10,6 +10,7 @@
     latestEdProviderCurrent: null,
     latestProviderHealth: null,
     latestObsStatus: null,
+    latestCockpitState: null,
     latestLlmStatus: null,
     inaraCredentials: null,
     runtimeSettings: null,
@@ -119,6 +120,14 @@
     handoverInfo: document.getElementById("handoverInfo"),
     quickTwitchChats: document.getElementById("quickTwitchChats"),
     quickTwitchEvents: document.getElementById("quickTwitchEvents"),
+    cockpitMeta: document.getElementById("cockpitMeta"),
+    cockpitTelemetry: document.getElementById("cockpitTelemetry"),
+    cockpitSafety: document.getElementById("cockpitSafety"),
+    cockpitRefreshBtn: document.getElementById("cockpitRefreshBtn"),
+    cockpitToggleAdvice: document.getElementById("cockpitToggleAdvice"),
+    cockpitToggleInput: document.getElementById("cockpitToggleInput"),
+    cockpitToggleObs: document.getElementById("cockpitToggleObs"),
+    cockpitSettingsMeta: document.getElementById("cockpitSettingsMeta"),
     refreshLogsBtn: document.getElementById("refreshLogsBtn"),
     diagBundleBtn: document.getElementById("diagBundleBtn"),
     diagBundleLink: document.getElementById("diagBundleLink"),
@@ -3220,6 +3229,106 @@
     }
   }
 
+  function cockpitValueLabel(value) {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+    if (typeof value === "object") {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  function appendCockpitMetric(root, label, value) {
+    const item = document.createElement("div");
+    item.className = "ed-summary-item";
+    const key = document.createElement("span");
+    key.className = "ed-summary-label";
+    key.textContent = label;
+    const val = document.createElement("strong");
+    val.textContent = cockpitValueLabel(value);
+    item.appendChild(key);
+    item.appendChild(val);
+    root.appendChild(item);
+  }
+
+  async function confirmCockpitSuggestion(item, button) {
+    const intent = item && item.cockpit_action_intent ? item.cockpit_action_intent : {};
+    const action = intent.recommended_action || {};
+    const tool = String(action.tool || "").trim();
+    if (!tool) {
+      return;
+    }
+    const incident = `cockpit-${String(item.id || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    button.disabled = true;
+    button.textContent = "Confirming...";
+    try {
+      const result = await apiPost("/confirm", {
+        incident_id: incident,
+        tool_name: tool,
+        request_id: requestId(),
+        session_id: "ui-cockpit",
+        mode: getEffectiveAssistMode(),
+      });
+      button.textContent = "Confirmed";
+      if (el.cockpitMeta) {
+        el.cockpitMeta.textContent = `confirmation recorded for ${result.tool_name || tool}`;
+      }
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = "Confirm";
+      if (el.cockpitMeta) {
+        el.cockpitMeta.textContent = `confirm error: ${String(err.message || err)}`;
+      }
+    }
+  }
+
+  function renderCockpitState(data) {
+    state.latestCockpitState = data;
+    if (el.cockpitMeta) {
+      el.cockpitMeta.textContent = data.updated_at_utc || "updated";
+    }
+    if (el.cockpitTelemetry) {
+      el.cockpitTelemetry.innerHTML = "";
+      const telemetry = data.telemetry || {};
+      const keys = [
+        "running",
+        "status_available",
+        "system",
+        "station",
+        "body",
+        "last_event",
+        "fuel_main",
+        "cargo",
+        "legal_state",
+        "docked",
+        "landed",
+        "supercruise",
+        "in_danger",
+        "being_interdicted",
+        "overheating",
+        "low_fuel",
+      ];
+      for (const key of keys) {
+        appendCockpitMetric(el.cockpitTelemetry, key.replaceAll("_", " "), telemetry[key]);
+      }
+    }
+    if (el.cockpitSafety) {
+      el.cockpitSafety.textContent = JSON.stringify(data.safety || {}, null, 2);
+    }
+  }
+
+  async function loadCockpitState() {
+    try {
+      const data = await apiGet("/cockpit/state");
+      renderCockpitState(data);
+    } catch (err) {
+      if (el.cockpitMeta) {
+        el.cockpitMeta.textContent = `cockpit error: ${String(err.message || err)}`;
+      }
+    }
+  }
+
   function updateBridgePanel(data) {
     const watchCondition = toUpperOrDash(data.watch_condition || "STANDBY");
     const watchTier = deriveWatchTier(watchCondition);
@@ -3565,6 +3674,22 @@
         await loadObsStatus();
       });
     }
+    if (el.cockpitRefreshBtn) {
+      el.cockpitRefreshBtn.addEventListener("click", loadCockpitState);
+    }
+    for (const toggle of [el.cockpitToggleAdvice, el.cockpitToggleInput, el.cockpitToggleObs]) {
+      if (toggle) {
+        const key = `watchkeeper.${toggle.id}`;
+        const stored = localStorage.getItem(key);
+        toggle.checked = stored === null ? toggle.id !== "cockpitToggleInput" : stored === "1";
+        toggle.addEventListener("change", () => {
+          localStorage.setItem(key, toggle.checked ? "1" : "0");
+          if (el.cockpitSettingsMeta) {
+            el.cockpitSettingsMeta.textContent = "Saved locally for this browser.";
+          }
+        });
+      }
+    }
     if (el.llmToggleBtn) {
       el.llmToggleBtn.addEventListener("click", async () => {
         await toggleLlmAdvisory(el.llmToggleBtn);
@@ -3630,6 +3755,7 @@
     await loadRuntimeSettings();
     await loadLlmStatus();
     await loadObsStatus();
+    await loadCockpitState();
     await loadEdStatus();
     await loadTwitchRecent();
     await loadLogFiles();
@@ -3641,6 +3767,7 @@
     scheduleVisiblePoll(loadProviderHealth, 60000);
     scheduleVisiblePoll(loadLlmStatus, 15000);
     scheduleVisiblePoll(loadObsStatus, 15000);
+    scheduleVisiblePoll(loadCockpitState, 2000);
     scheduleVisiblePoll(loadEdStatus, 15000);
     scheduleVisiblePoll(loadTwitchRecent, 6000);
     setInterval(updateConfirmExpiryLabels, 500);

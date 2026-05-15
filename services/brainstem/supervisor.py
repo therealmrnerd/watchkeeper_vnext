@@ -198,7 +198,7 @@ JINX_SYNC_ENABLED = os.getenv("WKV_SUP_JINX_SYNC_ENABLED", "1").strip().lower() 
     "true",
     "yes",
 }
-JINX_SYNC_VAR_NAME = os.getenv("WKV_SUP_JINX_SYNC_VAR", "sync").strip() or "sync"
+JINX_SYNC_VAR_NAME = os.getenv("WKV_SUP_JINX_SYNC_VAR", "mfd_light_sync").strip() or "mfd_light_sync"
 JINX_PYTHON = os.getenv("WKV_SUP_JINX_PYTHON", "python").strip() or "python"
 JINX_SENDER_PATH = Path(
     os.getenv(
@@ -213,7 +213,7 @@ JINX_ENV_MAP_PATH = Path(
     )
 )
 JINX_ARTNET_IP = os.getenv("WKV_SUP_JINX_ARTNET_IP", "127.0.0.1").strip() or "127.0.0.1"
-JINX_ARTNET_UNIVERSE = int(os.getenv("WKV_SUP_JINX_ARTNET_UNIVERSE", "7"))
+JINX_ARTNET_UNIVERSE = int(os.getenv("WKV_SUP_JINX_ARTNET_UNIVERSE", "1"))
 JINX_BRIGHTNESS = int(os.getenv("WKV_SUP_JINX_BRIGHTNESS", "200"))
 JINX_OFF_EFFECT = os.getenv("WKV_SUP_JINX_OFF_EFFECT", "S1").strip() or "S1"
 
@@ -239,7 +239,7 @@ AHK_PROTECTED_SCRIPT_MARKERS = [
     if marker.strip()
 ]
 
-SAMMI_API_ENABLED = os.getenv("WKV_SAMMI_API_ENABLED", "1").strip().lower() in {
+SAMMI_API_ENABLED = os.getenv("WKV_SAMMI_API_ENABLED", "0").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -250,9 +250,9 @@ SAMMI_API_PASSWORD = os.getenv("WKV_SAMMI_API_PASSWORD", "").strip()
 SAMMI_API_TIMEOUT_SEC = float(os.getenv("WKV_SAMMI_API_TIMEOUT_SEC", "0.6"))
 SAMMI_API_BACKOFF_SEC = float(os.getenv("WKV_SAMMI_API_BACKOFF_SEC", "5"))
 SAMMI_API_ERROR_LOG_SEC = float(os.getenv("WKV_SAMMI_API_ERROR_LOG_SEC", "5"))
-SAMMI_API_MAX_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE", "20"))
-SAMMI_API_MIN_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE", "6"))
-SAMMI_API_CYCLE_BUDGET_MS = float(os.getenv("WKV_SAMMI_API_CYCLE_BUDGET_MS", "550"))
+SAMMI_API_MAX_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE", "0"))
+SAMMI_API_MIN_UPDATES_PER_CYCLE = int(os.getenv("WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE", "0"))
+SAMMI_API_CYCLE_BUDGET_MS = float(os.getenv("WKV_SAMMI_API_CYCLE_BUDGET_MS", "0"))
 SAMMI_API_ONLY_WHEN_ED = os.getenv("WKV_SAMMI_API_ONLY_WHEN_ED", "1").strip().lower() in {
     "1",
     "true",
@@ -296,6 +296,7 @@ _jinx_last_effect_code: str | None = None
 _jinx_last_manual_request: str | None = None
 _jinx_manual_seeded = False
 _jinx_server_was_running = False
+_jinx_lighting_was_enabled: bool | None = None
 _stats_last_line_write_monotonic = 0.0
 SAMMI_VESSEL_TELEMETRY_PRIORITY_VARS = [
     "flightstatus",
@@ -573,7 +574,7 @@ def _inara_sync_enabled(provider_query_service: ProviderQueryService) -> bool:
 
 def _sammi_bridge_enabled() -> bool:
     settings = load_runtime_settings(DB_PATH)
-    return runtime_setting_enabled(settings, "syncs", "sammi_bridge", True)
+    return runtime_setting_enabled(settings, "syncs", "sammi_bridge", False)
 
 
 def _sync_current_system_to_inara(
@@ -1218,10 +1219,21 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
     global _jinx_last_manual_request
     global _jinx_manual_seeded
     global _jinx_server_was_running
+    global _jinx_lighting_was_enabled
 
     if not JINX_ENABLED:
         return
-    if not _jinx_lighting_enabled():
+    lighting_enabled = _jinx_lighting_enabled()
+    lighting_just_disabled = _jinx_lighting_was_enabled is not False and not lighting_enabled
+    lighting_just_enabled = _jinx_lighting_was_enabled is False and lighting_enabled
+    _jinx_lighting_was_enabled = lighting_enabled
+    if not lighting_enabled:
+        error_text = None
+        if lighting_just_disabled and JINX_OFF_EFFECT and jinx_running:
+            ok, err = _trigger_jinx_effect(JINX_OFF_EFFECT, reason="light_sync=off")
+            if not ok:
+                error_text = err or "trigger_failed"
+        _jinx_last_environment = None
         db.set_state(
             state_key="app.jinx.sync_enabled",
             state_value=False,
@@ -1240,13 +1252,16 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
         )
         db.set_state(
             state_key="app.jinx.sync_error",
-            state_value="disabled_by_settings",
+            state_value=error_text or "disabled_by_settings",
             source="jinx_sync",
             observed_at_utc=utc_now_iso(),
             confidence=1.0,
             emit_event=False,
         )
         return
+    sync_now = "on" if lighting_enabled else "off"
+    sync_is_explicit = True
+
     if not jinx_running:
         _jinx_server_was_running = False
         return
@@ -1254,9 +1269,9 @@ def process_jinx_sync(db: BrainstemDB, *, ed_running: bool, jinx_running: bool) 
         _jinx_server_was_running = True
         return
 
-    sync_raw = _sammi_get_variable(JINX_SYNC_VAR_NAME)
-    sync_now, sync_is_explicit = _parse_jinx_sync_state(sync_raw, _jinx_sync_state)
     just_became_running = not _jinx_server_was_running
+    if lighting_just_enabled:
+        _jinx_last_environment = None
 
     manual_effect = None
     row_effect = db.get_state("jinx.effect")
@@ -1635,47 +1650,110 @@ def _latest_journal_context() -> dict[str, Any]:
     return values
 
 
-def _read_nav_route_vars() -> dict[str, str]:
+def _empty_nav_route_vars() -> dict[str, str]:
+    return {
+        "nav_route": "",
+        "nav_route_origin": "",
+        "nav_route_destination": "",
+        "nav_route_next_jump": "",
+        "nav_route_upcoming_jumps": [],
+        "nav_route_remaining_jumps": "",
+        "nav_route_distance_ly": "",
+    }
+
+
+def _route_system_name(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _route_system_address(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nav_route_current_index(
+    route: list[Any],
+    *,
+    current_system: Any = None,
+    current_system_address: Any = None,
+) -> int:
+    current_address = _route_system_address(current_system_address)
+    if current_address is not None:
+        for index, step in enumerate(route):
+            if isinstance(step, dict) and _route_system_address(step.get("SystemAddress")) == current_address:
+                return index
+    current_name = _route_system_name(current_system)
+    if current_name:
+        for index, step in enumerate(route):
+            if isinstance(step, dict) and _route_system_name(step.get("StarSystem")) == current_name:
+                return index
+    return 0
+
+
+def _route_distance_ly(origin: Any, destination: Any) -> float | str:
+    first_pos = origin.get("StarPos") if isinstance(origin, dict) else None
+    last_pos = destination.get("StarPos") if isinstance(destination, dict) else None
+    if (
+        isinstance(first_pos, list)
+        and isinstance(last_pos, list)
+        and len(first_pos) >= 3
+        and len(last_pos) >= 3
+        and all(isinstance(value, (int, float)) for value in first_pos[:3] + last_pos[:3])
+    ):
+        return round(sum((float(last_pos[i]) - float(first_pos[i])) ** 2 for i in range(3)) ** 0.5, 2)
+    return ""
+
+
+def _read_nav_route_vars(*, current_system: Any = None, current_system_address: Any = None) -> dict[str, Any]:
     if not ED_NAVROUTE_PATH.exists():
-        return {
-            "nav_route": "",
-            "nav_route_origin": "",
-            "nav_route_destination": "",
-        }
+        return _empty_nav_route_vars()
     parsed = _read_json_file(ED_NAVROUTE_PATH)
     route = parsed.get("Route")
     if not isinstance(route, list):
-        return {
-            "nav_route": "",
-            "nav_route_origin": "",
-            "nav_route_destination": "",
-        }
+        return _empty_nav_route_vars()
     systems = [
         step.get("StarSystem")
         for step in route
         if isinstance(step, dict) and isinstance(step.get("StarSystem"), str)
     ]
     systems = [s for s in systems if s]
-    text = ""
-    origin = ""
-    dest = ""
-    if len(systems) == 1:
-        origin = systems[0]
-        dest = systems[0]
+    if not systems:
+        return _empty_nav_route_vars()
+    current_index = _nav_route_current_index(
+        route,
+        current_system=current_system,
+        current_system_address=current_system_address,
+    )
+    current_index = max(0, min(current_index, len(systems) - 1))
+    origin = systems[current_index]
+    dest = systems[-1]
+    next_jump = systems[current_index + 1] if current_index + 1 < len(systems) else ""
+    upcoming_jumps = systems[current_index + 1:current_index + 4]
+    remaining_jumps = max(0, len(systems) - current_index - 1)
+    if remaining_jumps <= 0 or not next_jump:
+        return _empty_nav_route_vars()
+    first = route[current_index] if current_index < len(route) and isinstance(route[current_index], dict) else None
+    last = route[-1] if route and isinstance(route[-1], dict) else None
+    distance_ly = _route_distance_ly(first, last)
+    if remaining_jumps == 0:
         text = f"Course set for {dest}"
-    elif len(systems) == 2:
-        origin = systems[0]
-        dest = systems[1]
+    elif remaining_jumps == 1:
         text = f"Course set for {dest} from {origin}"
-    elif len(systems) > 2:
-        origin = systems[0]
-        dest = systems[-1]
-        via = ", ".join(systems[1:-1])
+    else:
+        via = ", ".join(systems[current_index + 1:-1])
         text = f"Course set for {dest} from {origin} via {via}"
     return {
         "nav_route": text,
         "nav_route_origin": origin,
         "nav_route_destination": dest,
+        "nav_route_next_jump": next_jump,
+        "nav_route_upcoming_jumps": upcoming_jumps,
+        "nav_route_remaining_jumps": remaining_jumps,
+        "nav_route_distance_ly": distance_ly,
     }
 
 
@@ -1875,7 +1953,12 @@ def _build_sammi_variable_map(db: BrainstemDB, *, ed_running: bool) -> dict[str,
     if (not var_map.get("destination")) and isinstance(journal_ctx.get("destination"), str):
         var_map["destination"] = journal_ctx.get("destination")
 
-    var_map.update(_read_nav_route_vars())
+    var_map.update(
+        _read_nav_route_vars(
+            current_system=var_map.get("System") or var_map.get("current_system"),
+            current_system_address=var_map.get("SystemAddress") or var_map.get("system_address"),
+        )
+    )
 
     hull_raw = read_state("ed.telemetry.hull_percent")
     if isinstance(hull_raw, (int, float)):
@@ -1900,9 +1983,7 @@ def _build_sammi_variable_map(db: BrainstemDB, *, ed_running: bool) -> dict[str,
 
 
 def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
-    if not SAMMI_API_ENABLED:
-        return
-    if not _sammi_bridge_enabled():
+    if not SAMMI_API_ENABLED or not _sammi_bridge_enabled():
         db.set_state(
             state_key="app.sammi.api.enabled",
             state_value=False,
@@ -1929,7 +2010,7 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         )
         db.set_state(
             state_key="app.sammi.api.last_error",
-            state_value="disabled_by_settings",
+            state_value="disabled",
             source="sammi_bridge",
             observed_at_utc=utc_now_iso(),
             confidence=1.0,
@@ -1948,22 +2029,16 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
     t0 = time.perf_counter()
     error_text: str | None = None
     sent_count = 0
-    max_per_cycle = max(1, int(SAMMI_API_MAX_UPDATES_PER_CYCLE))
-    min_per_cycle = max(1, min(max_per_cycle, int(SAMMI_API_MIN_UPDATES_PER_CYCLE)))
-    cycle_budget_ms = max(0.0, float(SAMMI_API_CYCLE_BUDGET_MS))
     pulse_var_names = [SAMMI_NEW_WRITE_VAR]
     if SAMMI_NEW_WRITE_COMPAT_VAR and SAMMI_NEW_WRITE_COMPAT_VAR not in pulse_var_names:
         pulse_var_names.append(SAMMI_NEW_WRITE_COMPAT_VAR)
 
     def _set_pulse_var(name: str, value: str, *, force_send: bool = False) -> bool:
-        nonlocal changed, deferred, error_text, sent_count
+        nonlocal changed, error_text, sent_count
         if not name:
             return False
         if not force_send and _sammi_last_sent.get(name) == value:
             return True
-        if sent_count >= max_per_cycle:
-            deferred += 1
-            return False
         ok, err = _sammi_post("setVariable", {"name": name, "value": value})
         if not ok:
             if not error_text:
@@ -1980,12 +2055,6 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
         if name in pulse_var_names:
             continue
         if _sammi_last_sent.get(name) != value:
-            min_interval = SAMMI_RATE_LIMIT_SEC.get(name)
-            if min_interval is not None:
-                last_sent_at = _sammi_last_sent_at.get(name, 0.0)
-                if (time.monotonic() - last_sent_at) < max(0.0, float(min_interval)):
-                    suppressed += 1
-                    continue
             changed_items.append((name, value))
     priority_rank = {name: idx for idx, name in enumerate(SAMMI_PRIORITY_VARS)}
     changed_items.sort(key=lambda item: priority_rank.get(item[0], 9999))
@@ -2000,16 +2069,6 @@ def process_sammi_bridge(db: BrainstemDB, *, ed_running: bool) -> None:
             _set_pulse_var(pulse_name, "yes", force_send=True)
 
     for idx, (name, value) in enumerate(changed_items):
-        if sent_count >= max_per_cycle:
-            deferred += 1
-            continue
-        if (
-            cycle_budget_ms > 0.0
-            and sent_count >= min_per_cycle
-            and ((time.perf_counter() - t0) * 1000.0) >= cycle_budget_ms
-        ):
-            deferred += max(0, len(changed_items) - idx)
-            break
         ok, err = _sammi_post("setVariable", {"name": name, "value": value})
         if not ok:
             error_text = err or "sammi_request_failed"
@@ -2210,8 +2269,12 @@ def collect_ed_state() -> dict[str, Any]:
         if isinstance(body, int):
             destination_body = body
     published = journal_harvest.get("published") if isinstance(journal_harvest, dict) else None
+    if not destination_system and isinstance(published, dict):
+        system_address = published.get("j.FSDTarget.SystemAddress")
+        if isinstance(system_address, int):
+            destination_system = system_address
     if not destination_name and isinstance(published, dict):
-        for key in ("j.SupercruiseDestinationDrop.Body", "j.SupercruiseDestinationDrop.BodyName"):
+        for key in ("j.FSDTarget.Name", "j.SupercruiseDestinationDrop.Body", "j.SupercruiseDestinationDrop.BodyName"):
             value = published.get(key)
             if isinstance(value, str) and value.strip():
                 destination_name = value.strip()
@@ -2221,11 +2284,104 @@ def collect_ed_state() -> dict[str, Any]:
         body_type = published.get("j.SupercruiseDestinationDrop.BodyType")
         if isinstance(body_type, str) and body_type.strip():
             destination_body_type = body_type.strip()
-    station_name = None
+        elif isinstance(published.get("j.FSDTarget.Name"), str):
+            destination_body_type = "Hyperspace"
+    destination_star_class = None
+    remaining_jumps = None
     if isinstance(published, dict):
-        value = published.get("j.Docked.StationName")
+        star_class = published.get("j.FSDTarget.StarClass")
+        if isinstance(star_class, str) and star_class.strip():
+            destination_star_class = star_class.strip()
+        jumps = published.get("j.FSDTarget.RemainingJumpsInRoute")
+        if isinstance(jumps, (int, float)):
+            remaining_jumps = int(jumps)
+    station_name = None
+    station_type = None
+    station_market_id = None
+    docking_station_name = None
+    docking_station_type = None
+    docking_market_id = None
+    docking_landing_pad = None
+    docking_landing_pads = None
+    docking_denied_reason = None
+    if isinstance(published, dict):
+        for event_name in ("Docked", "DockingGranted", "DockingRequested", "DockingDenied", "DockingCancelled", "DockingTimeout"):
+            value = published.get(f"j.{event_name}.StationName")
+            if isinstance(value, str) and value.strip():
+                docking_station_name = value.strip()
+                if event_name == "Docked":
+                    station_name = value.strip()
+                break
+        for event_name in ("Docked", "DockingGranted", "DockingRequested", "DockingDenied", "DockingCancelled", "DockingTimeout"):
+            value = published.get(f"j.{event_name}.StationType")
+            if isinstance(value, str) and value.strip():
+                docking_station_type = value.strip()
+                if event_name == "Docked":
+                    station_type = value.strip()
+                break
+        for event_name in ("Docked", "DockingGranted", "DockingRequested", "DockingDenied", "DockingCancelled", "DockingTimeout"):
+            value = published.get(f"j.{event_name}.MarketID")
+            if isinstance(value, (int, float)):
+                docking_market_id = int(value)
+                if event_name == "Docked":
+                    station_market_id = int(value)
+                break
+        value = published.get("j.DockingGranted.LandingPad")
+        if isinstance(value, (int, float)):
+            docking_landing_pad = int(value)
+        value = published.get("j.DockingRequested.LandingPads")
+        if isinstance(value, dict):
+            docking_landing_pads = value
+        value = published.get("j.DockingDenied.Reason")
         if isinstance(value, str) and value.strip():
-            station_name = value.strip()
+            docking_denied_reason = value.strip()
+    current_system_name = (
+        telemetry.get("system_name")
+        or status.get("System")
+        or status.get("StarSystem")
+        or (published.get("j.FSDJump.StarSystem") if isinstance(published, dict) else None)
+        or (published.get("j.Location.StarSystem") if isinstance(published, dict) else None)
+    )
+    current_system_address = (
+        telemetry.get("system_address")
+        or status.get("SystemAddress")
+        or (published.get("j.FSDJump.SystemAddress") if isinstance(published, dict) else None)
+        or (published.get("j.Location.SystemAddress") if isinstance(published, dict) else None)
+    )
+    nav_route_vars = (
+        _read_nav_route_vars(current_system=current_system_name, current_system_address=current_system_address)
+        if running
+        else _empty_nav_route_vars()
+    )
+    status_flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else {}
+    status_flags2 = _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else {}
+    current_star_class = None
+    if isinstance(published, dict):
+        fsd_jump_star_class = published.get("j.FSDJump.StarClass")
+        if isinstance(fsd_jump_star_class, str) and fsd_jump_star_class.strip():
+            current_star_class = fsd_jump_star_class.strip()
+        start_jump_system_address = published.get("j.StartJump.SystemAddress")
+        start_jump_star_class = published.get("j.StartJump.StarClass")
+        if (
+            isinstance(start_jump_star_class, str)
+            and start_jump_star_class.strip()
+            and start_jump_system_address is not None
+            and current_system_address is not None
+            and str(start_jump_system_address) == str(current_system_address)
+        ):
+            current_star_class = start_jump_star_class.strip()
+    route_active = bool(
+        nav_route_vars.get("nav_route")
+        or nav_route_vars.get("nav_route_destination")
+        or nav_route_vars.get("nav_route_next_jump")
+    )
+    if not route_active and str(destination_body_type or "").strip().casefold() == "hyperspace":
+        destination_name = None
+        destination_system = None
+        destination_body = None
+        destination_body_type = None
+        destination_star_class = None
+        remaining_jumps = None
     return {
         "ed.running": running,
         "ed.process_name": ed_running_name if running else None,
@@ -2250,7 +2406,37 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.telemetry.destination_system": destination_system,
         "ed.telemetry.destination_body": destination_body,
         "ed.telemetry.destination_body_type": destination_body_type,
+        "ed.telemetry.destination_star_class": destination_star_class,
+        "ed.telemetry.destination_remaining_jumps": remaining_jumps,
+        "ed.telemetry.star_class": current_star_class,
         "ed.telemetry.station_name": station_name,
+        "ed.telemetry.station_type": station_type,
+        "ed.telemetry.station_market_id": station_market_id,
+        "ed.status.available": bool(status),
+        "ed.status.flags": status.get("Flags") if isinstance(status, dict) else None,
+        "ed.status.flags2": status.get("Flags2") if isinstance(status, dict) else None,
+        "ed.status.fsd_hyperdrive_charging": bool(status_flags2.get("FsdHyperdriveCharging")),
+        "ed.status.gui_focus": status.get("GuiFocus") if isinstance(status, dict) else None,
+        "ed.status.pips": status.get("Pips") if isinstance(status.get("Pips"), list) else None,
+        "ed.status.fuel": status.get("Fuel") if isinstance(status.get("Fuel"), dict) else None,
+        "ed.status.fuel_main": (status.get("Fuel") or {}).get("FuelMain") if isinstance(status.get("Fuel"), dict) else None,
+        "ed.status.fuel_reservoir": (status.get("Fuel") or {}).get("FuelReservoir") if isinstance(status.get("Fuel"), dict) else None,
+        "ed.status.cargo": status.get("Cargo") if isinstance(status, dict) else None,
+        "ed.status.legal_state": status.get("LegalState") if isinstance(status, dict) else None,
+        "ed.status.fire_group": status.get("FireGroup") if isinstance(status, dict) else None,
+        "ed.station.docking_target_name": docking_station_name,
+        "ed.station.docking_target_type": docking_station_type,
+        "ed.station.docking_target_market_id": docking_market_id,
+        "ed.station.docking_granted_pad": docking_landing_pad,
+        "ed.station.docking_landing_pads": docking_landing_pads,
+        "ed.station.docking_denied_reason": docking_denied_reason,
+        "nav_route": nav_route_vars.get("nav_route"),
+        "nav_route_origin": nav_route_vars.get("nav_route_origin"),
+        "nav_route_destination": nav_route_vars.get("nav_route_destination"),
+        "nav_route_next_jump": nav_route_vars.get("nav_route_next_jump"),
+        "nav_route_upcoming_jumps": nav_route_vars.get("nav_route_upcoming_jumps"),
+        "nav_route_remaining_jumps": nav_route_vars.get("nav_route_remaining_jumps"),
+        "nav_route_distance_ly": nav_route_vars.get("nav_route_distance_ly"),
     }
 
 
@@ -2608,7 +2794,15 @@ def process_aux_apps(
             _sammi_restart_suppress_until = time.monotonic() + SAMMI_RESTART_SUPPRESS_SEC
 
     sammi_path = _path_or_none(SAMMI_EXE)
-    jinx_path = _path_or_none(JINX_EXE)
+    saved_jinx_path = ""
+    try:
+        saved_jinx_state = db.get_state("app.jinx.path")
+        if saved_jinx_state:
+            saved_jinx_path = str(saved_jinx_state.get("state_value") or "").strip()
+    except Exception:
+        saved_jinx_path = ""
+    jinx_configured_path = JINX_EXE or saved_jinx_path
+    jinx_path = _path_or_none(jinx_configured_path)
     ed_ahk_path = _path_or_none(ED_AHK_PATH)
 
     sammi_running = _process_running_by_names(process_names, SAMMI_PROCESS_NAMES)
@@ -2617,6 +2811,8 @@ def process_aux_apps(
     if not sammi_running and _sammi_api_alive():
         sammi_running = True
     jinx_running = _process_running_by_names(process_names, JINX_PROCESS_NAMES)
+    if not jinx_running and jinx_path:
+        jinx_running = _process_running_by_path(jinx_path)
 
     if isinstance(managed_ed_ahk_pid, int) and managed_ed_ahk_pid > 0 and not _pid_running(managed_ed_ahk_pid):
         managed_ed_ahk_pid = None
@@ -2689,7 +2885,8 @@ def process_aux_apps(
             else:
                 sammi_error = f"sammi launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
 
-        if JINX_ENABLED and jinx_path and not jinx_running and _jinx_missing_cycles >= 3 and can_restart_jinx:
+        jinx_autorun_allowed = bool(JINX_ENABLED and _jinx_lighting_enabled())
+        if jinx_autorun_allowed and jinx_path and not jinx_running and _jinx_missing_cycles >= 3 and can_restart_jinx:
             _jinx_last_launch_attempt = time.monotonic()
             ok, _pid, err = _launch_executable_via_helper(jinx_path, JINX_LAUNCH_ARGS)
             if ok:
@@ -2698,7 +2895,9 @@ def process_aux_apps(
             else:
                 jinx_error = err or "failed to launch"
         elif JINX_ENABLED and jinx_path and not jinx_running and jinx_error is None:
-            if _jinx_missing_cycles < 3:
+            if not _jinx_lighting_enabled():
+                jinx_error = "light sync disabled"
+            elif _jinx_missing_cycles < 3:
                 jinx_error = f"jinx verification window ({_jinx_missing_cycles}/3)"
             else:
                 jinx_error = f"jinx launch backoff active ({AUX_APPS_LAUNCH_BACKOFF_SEC:.1f}s)"
@@ -2763,7 +2962,7 @@ def process_aux_apps(
         "app.sammi.running": sammi_running,
         "app.sammi.last_error": sammi_error,
         "app.jinx.enabled": JINX_ENABLED,
-        "app.jinx.path": str(jinx_path) if jinx_path else JINX_EXE or None,
+        "app.jinx.path": str(jinx_path) if jinx_path else jinx_configured_path or None,
         "app.jinx.running": jinx_running,
         "app.jinx.last_error": jinx_error,
         "app.ed.path": APP_ED_PATH or None,
@@ -2818,10 +3017,19 @@ def process_aux_apps(
     ]:
         if not error_value:
             continue
+        sammi_error_text = str(error_value or "").lower()
+        expected_sammi_absent = app_key == "sammi" and (
+            sammi_error_text == "sammi never observed in this session"
+            or sammi_error_text.startswith("sammi startup grace active")
+            or sammi_error_text.startswith("sammi missing holdoff active")
+            or sammi_error_text.startswith("sammi restart suppress active")
+            or sammi_error_text.startswith("sammi launch backoff active")
+            or sammi_error_text == "sammi autorun disabled"
+        )
         db.append_event(
             event_id=str(uuid.uuid4()),
             timestamp_utc=now,
-            event_type="AUX_APP_ERROR",
+            event_type="AUX_APP_STATUS" if expected_sammi_absent else "AUX_APP_ERROR",
             source="aux_app_supervisor",
             payload={
                 "app": app_key,
@@ -2833,8 +3041,8 @@ def process_aux_apps(
             session_id=SESSION_ID,
             correlation_id=correlation_id,
             mode="game" if ed_running else "standby",
-            severity="warn",
-            tags=["aux_app", "error"],
+            severity="info" if expected_sammi_absent else "warn",
+            tags=["aux_app"] if expected_sammi_absent else ["aux_app", "error"],
         )
 
     return current, managed_ed_ahk_pid

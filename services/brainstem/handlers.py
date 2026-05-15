@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from actions import (
     assist_with_advisory,
+    cockpit_control_action,
     control_advisory_llm_action,
     execute_provider_query,
     execute_actions,
@@ -20,6 +21,7 @@ from actions import (
     save_inara_credentials,
     save_openai_credentials,
     save_runtime_settings_action,
+    set_mfd_light_sync,
     send_twitch_chat,
     upsert_intent,
 )
@@ -34,6 +36,7 @@ from queries import (
     query_current_system_provider,
     query_current_station_detail,
     query_current_system_stations,
+    query_cockpit_state,
     query_inara_credentials,
     query_llm_status,
     query_openai_credentials,
@@ -106,12 +109,20 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "error": "not_found"})
             return
         content = file_path.read_bytes()
-        mime, _ = mimetypes.guess_type(str(file_path))
+        if file_path.suffix == ".webmanifest":
+            mime = "application/manifest+json"
+        else:
+            mime, _ = mimetypes.guess_type(str(file_path))
         if not mime:
             mime = "application/octet-stream"
         headers = {}
         if download_name:
             headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
+        try:
+            if Path(UI_DIR).resolve() in file_path.resolve().parents:
+                headers["Cache-Control"] = "no-cache"
+        except Exception:
+            pass
         self._send_bytes(200, content, mime, headers)
 
     def _read_json_body(self) -> dict[str, Any]:
@@ -182,6 +193,52 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         except Exception:
             return
 
+    def _stream_mfd(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        last_hash = ""
+        heartbeat_at = 0.0
+        try:
+            hello = {"ok": True, "ts": utc_now_iso(), "service": "brainstem", "surface": "mfd"}
+            self.wfile.write(f"event: hello\ndata: {json.dumps(hello, ensure_ascii=False)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+            while True:
+                payload = query_cockpit_state({})
+                stable_payload = dict(payload)
+                stable_payload.pop("updated_at_utc", None)
+                payload_hash = json.dumps(
+                    stable_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                payload["mfd_sent_at_utc"] = utc_now_iso()
+                encoded_payload = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                now = time.monotonic()
+                if payload_hash != last_hash:
+                    last_hash = payload_hash
+                    self.wfile.write(f"event: cockpit\ndata: {encoded_payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    heartbeat_at = now
+                elif now - heartbeat_at >= 5.0:
+                    self.wfile.write(f"event: ping\ndata: {json.dumps({'ts': utc_now_iso()})}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    heartbeat_at = now
+                time.sleep(0.12)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            return
+
     def log_message(self, fmt: str, *args: Any) -> None:
         return
 
@@ -238,6 +295,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             if parsed.path == "/sitrep":
                 payload = query_sitrep(query)
                 self._send_json(200, payload)
+                return
+
+            if parsed.path == "/cockpit/state":
+                self._send_json(200, query_cockpit_state(query))
+                return
+
+            if parsed.path == "/mfd/state":
+                self._send_json(200, query_cockpit_state(query))
+                return
+
+            if parsed.path == "/mfd/stream":
+                self._stream_mfd()
                 return
 
             if parsed.path == "/providers/health":
@@ -360,6 +429,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 result = execute_actions(body, source=source)
                 self._send_json(200, {"ok": True, **result})
+                return
+
+            if parsed.path == "/cockpit/control":
+                body = self._read_json_body()
+                result = cockpit_control_action(body, source=source)
+                self._send_json(200, result)
+                return
+
+            if parsed.path == "/mfd/light-sync":
+                body = self._read_json_body()
+                result = set_mfd_light_sync(body, source=source)
+                self._send_json(200, result)
                 return
 
             if parsed.path == "/assist":

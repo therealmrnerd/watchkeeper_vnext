@@ -42,7 +42,7 @@ Deterministic core runtime. No LLM dependency for baseline operation.
 
 - Runtime: standard-library Python (`http.server` + `sqlite3`)
 - Entry point: `services/brainstem/app.py`
-- Default bind: `127.0.0.1:8787`
+- Default bind: `0.0.0.0:8787` for LAN/tablet access. Internal service URLs still use `127.0.0.1`.
 - Default DB: `data/watchkeeper_vnext.db`
 - DB service layer: `services/brainstem/db_service.py`
   - `set_state`

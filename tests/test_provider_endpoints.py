@@ -35,9 +35,10 @@ class _FakeProviderService:
         self.requests = []
         self.priority_requests = []
 
-    def execute(self, request_obj: ProviderQuery) -> ProviderResult:
-        self.requests.append(request_obj)
-        if request_obj.operation == ProviderOperationId.BODIES_LOOKUP:
+    @staticmethod
+    def _data_for(operation: ProviderOperationId, params: dict | None = None) -> dict:
+        params = params or {}
+        if operation == ProviderOperationId.BODIES_LOOKUP:
             data = {
                 "system_address": 10477373803,
                 "system_name": "Sol",
@@ -47,7 +48,7 @@ class _FakeProviderService:
                     {"name": "Earth", "body_type": "Planet"},
                 ],
             }
-        elif request_obj.operation == ProviderOperationId.STATIONS_LOOKUP:
+        elif operation == ProviderOperationId.STATIONS_LOOKUP:
             data = {
                 "system_address": 10477373803,
                 "system_name": "Sol",
@@ -59,14 +60,18 @@ class _FakeProviderService:
         else:
             data = {
                 "system_address": 10477373803,
-                "name": "Sol",
+                "name": params.get("system_name") or "Sol",
             }
+        return data
+
+    def execute(self, request_obj: ProviderQuery) -> ProviderResult:
+        self.requests.append(request_obj)
         return ProviderResult(
             ok=True,
             provider=request_obj.provider,
             operation=request_obj.operation,
             fetched_at="2026-02-28T12:34:56.000000Z",
-            data=data,
+            data=self._data_for(request_obj.operation, request_obj.params),
             provenance=ProviderProvenance(
                 endpoint="https://www.spansh.co.uk/api/system/10477373803",
                 http_code=200,
@@ -98,12 +103,9 @@ class _FakeProviderService:
         return ProviderResult(
             ok=True,
             provider=ProviderId.SPANSH,
-            operation=ProviderOperationId.SYSTEM_LOOKUP,
+            operation=operation,
             fetched_at="2026-02-28T12:35:56.000000Z",
-            data={
-                "system_address": 10477373803,
-                "name": params.get("system_name") or "Sol",
-            },
+            data=self._data_for(operation, params),
             provenance=ProviderProvenance(
                 endpoint="https://www.spansh.co.uk/api/system/10477373803",
                 http_code=200,
@@ -592,13 +594,14 @@ class ProviderEndpointsTests(unittest.TestCase):
         self.assertEqual(body.get("operation"), "commander_location_push")
 
     def test_get_current_system_routes_through_priority_service(self) -> None:
+        before = len(self.fake_provider_service.priority_requests)
         status, body = self._request("GET", "/providers/current-system")
         self.assertEqual(status, 200)
         self.assertTrue(body.get("ok"))
         self.assertEqual(body.get("provider"), "spansh")
         self.assertEqual(body.get("data", {}).get("name"), "Sol")
         self.assertEqual(body.get("current_system_state", {}).get("system_name"), "Sol")
-        self.assertEqual(len(self.fake_provider_service.priority_requests), 1)
+        self.assertEqual(len(self.fake_provider_service.priority_requests), before + 1)
 
     def test_get_current_system_bodies_returns_read_shape(self) -> None:
         status, body = self._request("GET", "/providers/current-system/bodies?limit=10")

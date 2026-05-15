@@ -240,6 +240,7 @@ class SemanticMvpTest(unittest.TestCase):
         )
         raw.set_raw("ed.telemetry.destination_name", "Kregel Hub")
         raw.set_raw("ed.telemetry.destination_body_type", "Station")
+        raw.set_raw("ed.station.no_fire_zone", True)
 
         engine.update(
             [
@@ -248,6 +249,7 @@ class SemanticMvpTest(unittest.TestCase):
                 "Status.Destination",
                 "ed.telemetry.destination_name",
                 "ed.telemetry.destination_body_type",
+                "ed.station.no_fire_zone",
                 "Status.Heat",
                 "Status.FuelMain",
                 "Status.Hull",
@@ -256,7 +258,101 @@ class SemanticMvpTest(unittest.TestCase):
         )
 
         self.assertEqual(sem.get("ed.semantic.target.target_type").value, "station")
+        self.assertTrue(sem.get("ed.semantic.station.no_fire_zone").value)
         self.assertEqual(sem.get("ed.semantic.flight.flight_status").value, "normal_space")
+        self.assertTrue(sem.get("ed.semantic.opportunity.can_request_docking").value)
+
+    def test_station_destination_cannot_request_docking_outside_no_fire_zone(self) -> None:
+        raw = FakeRaw()
+        sem = MemSemStore()
+        engine = create_semantic_engine(raw, sem)
+
+        t0 = 4_100_000
+        raw.set_status(
+            {
+                "Flags": {
+                    "Docked": False,
+                    "Landed": False,
+                    "Supercruise": False,
+                    "InHyperspace": False,
+                    "HardpointsDeployed": False,
+                    "IsInDanger": False,
+                    "BeingInterdicted": False,
+                    "Firing": False,
+                },
+                "Destination": {
+                    "Name": "Kregel Hub",
+                    "System": 9468121261481,
+                    "Body": 31,
+                },
+                "Heat": 25,
+                "FuelMain": 8,
+                "Hull": 0.95,
+            },
+            t0,
+        )
+        raw.set_raw("ed.telemetry.destination_name", "Kregel Hub")
+        raw.set_raw("ed.telemetry.destination_body_type", "Station")
+        raw.set_raw("ed.station.no_fire_zone", False)
+
+        engine.update(
+            [
+                "Status.$fresh",
+                "Status.Flags",
+                "Status.Destination",
+                "ed.telemetry.destination_name",
+                "ed.telemetry.destination_body_type",
+                "ed.station.no_fire_zone",
+                "Status.Heat",
+                "Status.FuelMain",
+                "Status.Hull",
+            ],
+            t0,
+        )
+
+        self.assertEqual(sem.get("ed.semantic.target.target_type").value, "station")
+        self.assertFalse(sem.get("ed.semantic.station.no_fire_zone").value)
+        self.assertFalse(sem.get("ed.semantic.opportunity.can_request_docking").value)
+
+    def test_no_fire_zone_can_request_docking_without_station_target(self) -> None:
+        raw = FakeRaw()
+        sem = MemSemStore()
+        engine = create_semantic_engine(raw, sem)
+
+        t0 = 4_200_000
+        raw.set_status(
+            {
+                "Flags": {
+                    "Docked": False,
+                    "Landed": False,
+                    "Supercruise": False,
+                    "InHyperspace": False,
+                    "HardpointsDeployed": False,
+                    "IsInDanger": False,
+                    "BeingInterdicted": False,
+                    "Firing": False,
+                },
+                "Heat": 25,
+                "FuelMain": 8,
+                "Hull": 0.95,
+            },
+            t0,
+        )
+        raw.set_raw("ed.station.no_fire_zone", True)
+
+        engine.update(
+            [
+                "Status.$fresh",
+                "Status.Flags",
+                "ed.station.no_fire_zone",
+                "Status.Heat",
+                "Status.FuelMain",
+                "Status.Hull",
+            ],
+            t0,
+        )
+
+        self.assertTrue(sem.get("ed.semantic.station.no_fire_zone").value)
         self.assertTrue(sem.get("ed.semantic.opportunity.can_request_docking").value)
 
     def test_target_type_uses_destination_when_target_missing(self) -> None:

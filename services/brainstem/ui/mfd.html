@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070b0f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Watchkeeper MFD">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Watchkeeper MFD</title>
+  <link rel="icon" type="image/x-icon" href="icons/favicon.ico">
+  <link rel="manifest" href="mfd.webmanifest?v=54">
+  <link rel="apple-touch-icon" href="icons/watchkeeper_logo.png">
+  <link rel="stylesheet" href="mfd.css?v=128">
+</head>
+<body>
+  <div id="mfdFullscreenGate" class="mfd-fullscreen-gate">
+    <button id="mfdFullscreenButton" class="mfd-fullscreen-button" type="button">
+      Enter MFD Fullscreen
+    </button>
+    <span id="mfdInstallHint">Install this page as an app for browserless launch.</span>
+  </div>
+  <main class="mfd-shell">
+    <section class="mfd-stage">
+      <aside class="mfd-rail mfd-rail-left" aria-label="Ship controls">
+        <button class="mfd-control" data-action="hardpoints" data-tile-id="control-hardpoints">
+          <img src="icons/hardpoints.png" alt="">
+          <span>Hardpoints</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="flight_assist" data-tile-id="control-flight-assist">
+          <img src="icons/Flight-assist.png" alt="">
+          <span>FA</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button id="mfdLightSyncToggle" class="mfd-control mfd-setting-toggle" data-sync-id="jinx_lighting" data-tile-id="control-light-sync" aria-pressed="false" title="Light Sync">
+          <img src="icons/lights.png" alt="">
+          <span>Sync</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control mfd-control-blank" type="button" aria-hidden="true" tabindex="-1"></button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control mfd-control-blank" type="button" aria-hidden="true" tabindex="-1"></button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control mfd-control-blank" type="button" aria-hidden="true" tabindex="-1"></button>
+      </aside>
+
+      <section class="mfd-core" aria-label="Live flight display">
+        <nav class="mfd-command-bar" aria-label="MFD controls">
+          <div class="mfd-top-separator mfd-edge-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="system_map" data-tile-id="control-system-map">
+            <img src="icons/system-map.png" alt="">
+            <span>System</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="galaxy_map" data-tile-id="control-galaxy-map">
+            <img src="icons/galaxy-map.png" alt="">
+            <span>Galaxy</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="fss" data-tile-id="control-fss">
+            <img src="icons/fss.png" alt="">
+            <span>FSS</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button mfd-text-button" data-action="flight_control" data-tile-id="control-flight-control">
+            <b class="mfd-button-glyph">FLT</b>
+            <span>Flight</span>
+          </button>
+          <div class="mfd-top-separator mfd-command-divider" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="nav_panel" data-tile-id="control-nav-panel">
+            <img src="icons/nav-panel.png" alt="">
+            <span>Nav</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="comms_panel" data-tile-id="control-comms-panel">
+            <img src="icons/comms.png" alt="">
+            <span>Comms</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="role_panel" data-tile-id="control-role-panel">
+            <img src="icons/role-panel.png" alt="">
+            <span>Role</span>
+          </button>
+          <div class="mfd-top-separator" aria-hidden="true"></div>
+          <button class="mfd-control mfd-panel-button" data-action="management_panel" data-tile-id="control-management-panel">
+            <img src="icons/management-panel.png" alt="">
+            <span>Mgmt</span>
+          </button>
+          <div class="mfd-top-separator mfd-edge-separator" aria-hidden="true"></div>
+        </nav>
+
+        <article class="mfd-display mfd-system-display" data-panel-id="system">
+          <div class="mfd-system-pane" id="mfdSystemPane">
+            <div class="mfd-system-hero">
+              <div class="mfd-wire-planet" aria-hidden="true">
+                <span></span>
+              </div>
+              <div class="mfd-system-title">
+                <span class="mfd-label">Current System</span>
+                <strong id="mfdSystem">-</strong>
+                <small id="mfdSystemAddress">-</small>
+              </div>
+              <button id="mfdAutoDockButton" class="mfd-system-autodock mfd-control" type="button" data-action="auto_dock" data-tile-id="control-auto-dock" title="Request docking" aria-label="Request docking">
+                <span class="mfd-action-label">Dock</span>
+              </button>
+              <button id="mfdAutoLaunchButton" class="mfd-system-autolaunch mfd-control" type="button" data-action="auto_launch" data-tile-id="control-auto-launch" title="Auto launch" aria-label="Auto launch">
+                <span class="mfd-action-label">Launch</span>
+              </button>
+            </div>
+            <div class="mfd-system-strip">
+              <div>
+                <span class="mfd-label">Station</span>
+                <strong id="mfdStation">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Body</span>
+                <strong id="mfdBody">-</strong>
+              </div>
+            </div>
+            <div class="mfd-politics-grid">
+              <div>
+                <span class="mfd-label">Allegiance</span>
+                <strong id="mfdSystemAllegiance">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Control</span>
+                <strong id="mfdSystemFaction">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Power</span>
+                <strong id="mfdSystemPower">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">State</span>
+                <strong id="mfdSystemPowerState">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Government</span>
+                <strong id="mfdSystemGovernment">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Economy</span>
+                <strong id="mfdSystemEconomy">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Security</span>
+                <strong id="mfdSystemSecurity">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Population</span>
+                <strong id="mfdSystemPopulation">-</strong>
+              </div>
+            </div>
+            <div class="mfd-refuel-box" id="mfdRefuelBox">
+              <span class="mfd-label">Fuel Star</span>
+              <strong id="mfdCurrentRefuel">-</strong>
+              <small id="mfdCurrentStarClass">-</small>
+            </div>
+          </div>
+          <div class="mfd-vehicle-pane mfd-slf-pane" id="mfdSlfPane" hidden>
+            <div class="mfd-vehicle-hero">
+              <div class="mfd-vehicle-reticle" aria-hidden="true">
+                <img id="mfdSlfSchematic" class="mfd-vehicle-schematic" src="Schematics/edsa/topdown/slf-taipan.svg?v=3" alt="">
+              </div>
+              <div class="mfd-vehicle-title">
+                <span class="mfd-label">Ship-Launched Fighter</span>
+                <strong id="mfdSlfName">Taipan</strong>
+                <small id="mfdSlfStatus">SLF deployed</small>
+              </div>
+            </div>
+            <div class="mfd-vehicle-grid">
+              <div><span class="mfd-label">Mothership</span><strong id="mfdSlfMothership">-</strong></div>
+              <div><span class="mfd-label">System</span><strong id="mfdSlfSystem">-</strong></div>
+              <div><span class="mfd-label">Loadout</span><strong id="mfdSlfLoadout">-</strong></div>
+              <div><span class="mfd-label">Control</span><strong id="mfdSlfControl">-</strong></div>
+              <div><span class="mfd-label">Shield</span><strong id="mfdSlfShield">-</strong></div>
+              <div><span class="mfd-label">Hull</span><strong id="mfdSlfHull">-</strong></div>
+              <div><span class="mfd-label">Mode</span><strong id="mfdSlfMode">-</strong></div>
+              <div><span class="mfd-label">Fire Group</span><strong id="mfdSlfFireGroup">-</strong></div>
+              <div><span class="mfd-label">Pips</span><strong id="mfdSlfPips">-</strong></div>
+              <div><span class="mfd-label">Status</span><strong id="mfdSlfHardpoints">-</strong></div>
+            </div>
+          </div>
+          <div class="mfd-vehicle-pane mfd-planet-pane" id="mfdPlanetPane" hidden>
+            <div class="mfd-vehicle-hero">
+              <div class="mfd-planet-orb" aria-hidden="true">
+                <span class="mfd-planet-core"></span>
+                <span class="mfd-planet-badge mfd-planet-badge-landable"></span>
+                <span class="mfd-planet-badge mfd-planet-badge-outpost"></span>
+                <span class="mfd-planet-badge mfd-planet-badge-base"></span>
+              </div>
+              <div class="mfd-vehicle-title">
+                <span class="mfd-label">Planetary Approach</span>
+                <strong id="mfdPlanetBody">-</strong>
+                <small id="mfdPlanetStatus">-</small>
+              </div>
+            </div>
+            <div class="mfd-vehicle-grid">
+              <div><span class="mfd-label">System</span><strong id="mfdPlanetSystem">-</strong></div>
+              <div><span class="mfd-label">Status</span><strong id="mfdPlanetFlightStatus">-</strong></div>
+              <div><span class="mfd-label">Position</span><strong id="mfdPlanetPosition">-</strong></div>
+              <div><span class="mfd-label">Altitude</span><strong id="mfdPlanetAltitude">-</strong></div>
+              <div><span class="mfd-label">Heading</span><strong id="mfdPlanetHeading">-</strong></div>
+              <div><span class="mfd-label">Temp</span><strong id="mfdPlanetTemp">-</strong></div>
+              <div><span class="mfd-label">Mode</span><strong id="mfdPlanetMode">-</strong></div>
+              <div><span class="mfd-label">Legal</span><strong id="mfdPlanetLegal">-</strong></div>
+            </div>
+          </div>
+          <div class="mfd-vehicle-pane mfd-foot-pane mfd-foot-planet-pane" id="mfdOnFootPlanetPane" hidden>
+            <div class="mfd-vehicle-hero">
+              <div class="mfd-suit-glyph" aria-hidden="true"><span></span></div>
+              <div class="mfd-vehicle-title">
+                <span class="mfd-label">On Foot Planet</span>
+                <strong id="mfdFootPlanetSuit">-</strong>
+                <small id="mfdFootPlanetStatus">-</small>
+              </div>
+            </div>
+            <div class="mfd-vehicle-grid">
+              <div><span class="mfd-label">Body</span><strong id="mfdFootPlanetBody">-</strong></div>
+              <div><span class="mfd-label">Position</span><strong id="mfdFootPlanetPosition">-</strong></div>
+              <div><span class="mfd-label">Heading</span><strong id="mfdFootPlanetHeading">-</strong></div>
+              <div><span class="mfd-label">Weapon</span><strong id="mfdFootPlanetWeapon">-</strong></div>
+              <div><span class="mfd-label">Loadout</span><strong id="mfdFootPlanetLoadout">-</strong></div>
+              <div><span class="mfd-label">Oxygen</span><strong id="mfdFootPlanetOxygen">-</strong></div>
+              <div><span class="mfd-label">Health</span><strong id="mfdFootPlanetHealth">-</strong></div>
+              <div><span class="mfd-label">Environment</span><strong id="mfdFootPlanetEnvironment">-</strong></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="mfd-display mfd-ship-display" data-panel-id="ship">
+          <div id="mfdShipCanvas" class="mfd-ship-canvas" data-shield-bands="3">
+            <img id="mfdShipSchematic" class="mfd-ship-schematic" src="Schematics/edsa/topdown/sidewinder.svg?v=3" alt="">
+            <img id="mfdShieldImage" class="mfd-shield-image" alt="" aria-hidden="true">
+            <svg id="mfdShieldEnvelope" class="mfd-shield-rings" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+              <polygon id="mfdShieldBand1" class="mfd-shield-band band-1"></polygon>
+              <polygon id="mfdShieldBand2" class="mfd-shield-band band-2"></polygon>
+              <polygon id="mfdShieldBand3" class="mfd-shield-band band-3"></polygon>
+            </svg>
+            <div class="mfd-ship-overlay">
+              <strong id="mfdShipName">-</strong>
+              <div class="mfd-ship-top-status" aria-label="Ship status strip">
+                <div class="mfd-fuel-strip">
+                  <span class="mfd-label">Fuel</span>
+                  <span id="mfdFuelSegments" class="mfd-fuel-segments"></span>
+                </div>
+                <div class="mfd-mini-separator" aria-hidden="true"></div>
+                <div id="mfdStatusIcons" class="mfd-status-icons"></div>
+              </div>
+              <div id="mfdShipReadouts" class="mfd-ship-readouts"></div>
+            </div>
+            <div class="mfd-ship-view-controls" aria-label="Ship information view">
+              <button id="mfdShipViewPrev" type="button" aria-label="Previous ship information view">&lt;</button>
+              <button id="mfdShipViewNext" type="button" aria-label="Next ship information view">&gt;</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="mfd-display mfd-conditional-display" data-panel-id="conditional">
+          <div id="mfdAdviceList" class="mfd-advice-list"></div>
+          <footer>
+            <span id="mfdClock">-</span>
+            <span id="mfdSafety">Safety: -</span>
+            <span id="mfdUpdated">Updated: -</span>
+          </footer>
+        </article>
+
+        <article class="mfd-display mfd-target-display" data-panel-id="target">
+          <div class="mfd-route-pane" id="mfdRoutePane" hidden>
+            <div class="mfd-route-header">
+              <img class="mfd-route-icon" src="icons/waypoint-destination.svg" alt="" aria-hidden="true">
+              <div>
+                <span class="mfd-label">Hyperspace Target</span>
+                <strong id="mfdRouteTargetSystem">-</strong>
+                <small id="mfdRouteTargetAddress">-</small>
+              </div>
+            </div>
+            <div class="mfd-route-grid">
+              <div>
+                <span class="mfd-label">Distance</span>
+                <strong id="mfdRouteDistance">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Jumps</span>
+                <strong id="mfdRouteJumps">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Next Jump</span>
+                <strong id="mfdRouteNextJump">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Star Class</span>
+                <strong id="mfdRouteStarClass">-</strong>
+              </div>
+              <div class="mfd-route-next-list">
+                <span class="mfd-label">Route</span>
+                <strong id="mfdRouteUpcoming">-</strong>
+              </div>
+            </div>
+          </div>
+          <div class="mfd-target-pane" id="mfdTargetPane" data-legal="unknown">
+            <div class="mfd-target-header">
+              <div>
+                <span class="mfd-label">Target</span>
+                <strong id="mfdTargetName">No target</strong>
+                <small id="mfdTargetPilot">-</small>
+              </div>
+              <div class="mfd-target-legal" id="mfdTargetLegal">Clear</div>
+            </div>
+            <div class="mfd-target-layout">
+              <div class="mfd-target-reticle" aria-hidden="true">
+                <img id="mfdTargetSchematic" class="mfd-target-schematic" alt="">
+                <span></span>
+              </div>
+              <div class="mfd-target-readouts">
+                <div>
+                  <span class="mfd-label">Scan</span>
+                  <strong id="mfdTargetScan">-</strong>
+                </div>
+                <div>
+                  <span class="mfd-label">Rank</span>
+                  <strong id="mfdTargetRank">-</strong>
+                </div>
+                <div>
+                  <span class="mfd-label">Faction</span>
+                  <strong id="mfdTargetFaction">-</strong>
+                </div>
+                <div>
+                  <span class="mfd-label">Power</span>
+                  <strong id="mfdTargetPower">-</strong>
+                </div>
+              </div>
+              <div class="mfd-target-bars">
+                <div>
+                  <span class="mfd-label">Shield</span>
+                  <span class="mfd-h-meter"><span id="mfdTargetShieldBar"></span></span>
+                  <strong id="mfdTargetShield">-</strong>
+                </div>
+                <div>
+                  <span class="mfd-label">Hull</span>
+                  <span class="mfd-h-meter"><span id="mfdTargetHullBar"></span></span>
+                  <strong id="mfdTargetHull">-</strong>
+                </div>
+              </div>
+            </div>
+            <div class="mfd-target-footer">
+              <span id="mfdTargetStatus">-</span>
+              <span>FG <b id="mfdFireGroup">-</b></span>
+              <span id="mfdAnalysisMode">-</span>
+            </div>
+          </div>
+          <div class="mfd-vehicle-pane mfd-srv-pane" id="mfdSrvPane" hidden>
+            <div class="mfd-vehicle-hero">
+              <div class="mfd-vehicle-reticle" aria-hidden="true">
+                <img id="mfdSrvSchematic" class="mfd-vehicle-schematic" src="Schematics/topdown/scarab-srv.png" alt="">
+              </div>
+              <div class="mfd-vehicle-title">
+                <span class="mfd-label">Surface Recon Vehicle</span>
+                <strong id="mfdSrvName">Scarab SRV</strong>
+                <small id="mfdSrvStatus">SRV active</small>
+              </div>
+            </div>
+            <div class="mfd-vehicle-grid">
+              <div><span class="mfd-label">Mothership</span><strong id="mfdSrvMothership">-</strong></div>
+              <div><span class="mfd-label">Body</span><strong id="mfdSrvBody">-</strong></div>
+              <div><span class="mfd-label">System</span><strong id="mfdSrvSystem">-</strong></div>
+              <div><span class="mfd-label">Position</span><strong id="mfdSrvPosition">-</strong></div>
+              <div><span class="mfd-label">Heading</span><strong id="mfdSrvHeading">-</strong></div>
+              <div><span class="mfd-label">Altitude</span><strong id="mfdSrvAltitude">-</strong></div>
+              <div><span class="mfd-label">Mode</span><strong id="mfdSrvMode">-</strong></div>
+              <div><span class="mfd-label">Fire Group</span><strong id="mfdSrvFireGroup">-</strong></div>
+              <div><span class="mfd-label">Pips</span><strong id="mfdSrvPips">-</strong></div>
+              <div><span class="mfd-label">Cargo</span><strong id="mfdSrvCargo">-</strong></div>
+              <div><span class="mfd-label">Legal</span><strong id="mfdSrvLegal">-</strong></div>
+              <div><span class="mfd-label">Hull</span><strong id="mfdSrvHull">-</strong></div>
+            </div>
+          </div>
+          <div class="mfd-vehicle-pane mfd-foot-pane mfd-foot-station-pane" id="mfdOnFootStationPane" hidden>
+            <div class="mfd-vehicle-hero">
+              <div class="mfd-suit-glyph" aria-hidden="true"><span></span></div>
+              <div class="mfd-vehicle-title">
+                <span class="mfd-label">On Foot Station</span>
+                <strong id="mfdFootStationSuit">-</strong>
+                <small id="mfdFootStationStatus">-</small>
+              </div>
+            </div>
+            <div class="mfd-vehicle-grid">
+              <div><span class="mfd-label">Station</span><strong id="mfdFootStationName">-</strong></div>
+              <div><span class="mfd-label">Services</span><strong id="mfdFootStationServices">-</strong></div>
+              <div><span class="mfd-label">Loadout</span><strong id="mfdFootStationLoadout">-</strong></div>
+              <div><span class="mfd-label">Weapon</span><strong id="mfdFootStationWeapon">-</strong></div>
+              <div><span class="mfd-label">Area</span><strong id="mfdFootStationArea">-</strong></div>
+              <div><span class="mfd-label">System</span><strong id="mfdFootStationSystem">-</strong></div>
+              <div><span class="mfd-label">Allegiance</span><strong id="mfdFootStationAllegiance">-</strong></div>
+              <div><span class="mfd-label">Government</span><strong id="mfdFootStationGovernment">-</strong></div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <aside class="mfd-rail mfd-rail-right" aria-label="Action surface">
+        <button class="mfd-control" data-action="supercruise" data-tile-id="control-supercruise">
+          <img src="icons/supercruise.png" alt="">
+          <span>Super</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="hyperspace" data-tile-id="control-hyperspace">
+          <img src="icons/hyperspace.png" alt="">
+          <span>Hyper</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="lights" data-tile-id="control-lights">
+          <img src="icons/lights.png" alt="">
+          <span>Lights</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="night_vision" data-tile-id="control-night-vision">
+          <img src="icons/night-vision.png" alt="">
+          <span>NV</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="landing_gear" data-tile-id="control-landing-gear">
+          <img src="icons/landing-gear.png" alt="">
+          <span>Gear</span>
+        </button>
+        <div class="mfd-rail-separator" aria-hidden="true"></div>
+        <button class="mfd-control" data-action="cargo_scoop" data-tile-id="control-cargo-scoop">
+          <img src="icons/cargo-scoop.png" alt="">
+          <span>Scoop</span>
+        </button>
+      </aside>
+    </section>
+  </main>
+  <script src="mfd.js?v=148"></script>
+</body>
+</html>
+

@@ -55,6 +55,7 @@
   <nav class="tabs">
     <div class="tabs-left">
       <button class="tab-btn active" data-tab="console">Console</button>
+      <button class="tab-btn" data-tab="cockpit">Cockpit PoC</button>
       <button class="tab-btn" data-tab="edstatus">ED Status</button>
       <button class="tab-btn" data-tab="config">Config</button>
       <button class="tab-btn" data-tab="logs">Logs & Diagnostics</button>
@@ -196,6 +197,44 @@
             <h3 class="subhead">Twitch Events (Latest 3)</h3>
             <div id="quickTwitchEvents" class="quick-twitch-events"></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-cockpit" class="tab-panel">
+      <div class="config-grid">
+        <div class="panel config-panel-wide">
+          <div class="row config-head">
+            <h2>Cockpit PoC</h2>
+            <span id="cockpitMeta" class="muted">Loading...</span>
+          </div>
+          <div id="cockpitTelemetry" class="ed-summary-grid"></div>
+          <div class="row cockpit-admin-actions">
+            <a class="button-link" href="/mfd.html" target="_blank" rel="noopener">Open MFD Display</a>
+            <button id="cockpitRefreshBtn" class="secondary">Refresh Status</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Feature Toggles</h2>
+          <div class="settings-grid cockpit-toggle-grid">
+            <label class="settings-item">
+              <input id="cockpitToggleAdvice" type="checkbox" checked>
+              <span>Advice cards</span>
+            </label>
+            <label class="settings-item">
+              <input id="cockpitToggleInput" type="checkbox">
+              <span>Input action buttons</span>
+            </label>
+            <label class="settings-item">
+              <input id="cockpitToggleObs" type="checkbox" checked>
+              <span>OBS warnings</span>
+            </label>
+          </div>
+          <div id="cockpitSettingsMeta" class="muted">Local display preferences for the PoC shell.</div>
+        </div>
+        <div class="panel">
+          <h2>Safety</h2>
+          <pre id="cockpitSafety" class="code cockpit-code"></pre>
         </div>
       </div>
     </section>

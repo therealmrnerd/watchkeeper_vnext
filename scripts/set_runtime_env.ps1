@@ -101,6 +101,9 @@ Set-EnvDefault -Name "WKV_SUP_CLOCK_SEC" -Value "10"
 Set-EnvDefault -Name "WKV_QDRANT_PID_FILE" -Value $qdrantPidPath
 Set-EnvDefault -Name "WKV_SUP_AUX_APPS_AUTORUN" -Value "1"
 Set-EnvDefault -Name "WKV_ADVISORY_ENABLED" -Value "1"
+Set-EnvDefault -Name "WKV_ENABLE_KEYPRESS" -Value "1"
+Set-EnvDefault -Name "WKV_HOST" -Value "0.0.0.0"
+Set-EnvDefault -Name "WKV_PORT" -Value "8787"
 Set-EnvDefault -Name "WKV_ADVISORY_PORT" -Value "8790"
 Set-EnvDefault -Name "WKV_ADVISORY_URL" -Value "http://127.0.0.1:8790/assist"
 Set-EnvDefault -Name "WKV_ADVISORY_HEALTH_URL" -Value "http://127.0.0.1:8790/health"
@@ -157,10 +160,11 @@ Set-EnvDefault -Name "WKV_SUP_SAMMI_EXE" -Value $sammiExe
 Set-EnvDefault -Name "WKV_SUP_SAMMI_AUTORUN" -Value "1"
 Set-EnvDefault -Name "WKV_SUP_SAMMI_RESTART_SUPPRESS_SEC" -Value "45"
 Set-EnvDefault -Name "WKV_SUP_SAMMI_MISSING_FOR_RESTART_SEC" -Value "20"
-Set-EnvDefault -Name "WKV_SUP_JINX_EXE" -Value $jinxExe
+Set-EnvDefault -Name "WKV_SUP_JINX_EXE" -Value ""
+Set-EnvDefault -Name "WKV_SUP_JINX_MANUAL_EXE" -Value $jinxExe
 Set-EnvDefault -Name "WKV_SUP_JINX_ARGS" -Value "-m"
 Set-EnvDefault -Name "WKV_SUP_JINX_SYNC_ENABLED" -Value "1"
-Set-EnvDefault -Name "WKV_SUP_JINX_SYNC_VAR" -Value "sync"
+Set-EnvDefault -Name "WKV_SUP_JINX_SYNC_VAR" -Value "mfd_light_sync"
 Set-EnvDefault -Name "WKV_SUP_JINX_PYTHON" -Value "python"
 Set-EnvDefault -Name "WKV_SUP_JINX_SENDER_PATH" -Value $jinxSenderPath
 Set-EnvDefault -Name "WKV_SUP_JINX_ENV_MAP_PATH" -Value $jinxEnvMapPath
@@ -173,15 +177,13 @@ Set-EnvDefault -Name "WKV_SUP_AHK_EXE" -Value $ahkExe
 Set-EnvDefault -Name "WKV_SUP_ED_AHK_STOP_ON_ED_EXIT" -Value "1"
 Set-EnvDefault -Name "WKV_SUP_ED_AHK_RESTART_BACKOFF_SEC" -Value "3"
 Set-EnvDefault -Name "WKV_SUP_AHK_PROTECTED_SCRIPTS" -Value "stack_tray.ahk"
-Set-EnvDefault -Name "WKV_SAMMI_API_ENABLED" -Value "1"
+Set-EnvDefault -Name "WKV_SAMMI_API_ENABLED" -Value "0"
 Set-EnvDefault -Name "WKV_SAMMI_API_HOST" -Value "127.0.0.1"
 Set-EnvDefault -Name "WKV_SAMMI_API_PORT" -Value "9450"
 Set-EnvDefault -Name "WKV_SAMMI_API_TIMEOUT_SEC" -Value "0.6"
-# Force this runtime cap each startup so stale shell/session env values do not
-# silently pin throughput to older defaults.
-Set-EnvProcess -Name "WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE" -Value "20"
-Set-EnvProcess -Name "WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE" -Value "6"
-Set-EnvProcess -Name "WKV_SAMMI_API_CYCLE_BUDGET_MS" -Value "550"
+Set-EnvDefault -Name "WKV_SAMMI_API_MAX_UPDATES_PER_CYCLE" -Value "0"
+Set-EnvDefault -Name "WKV_SAMMI_API_MIN_UPDATES_PER_CYCLE" -Value "0"
+Set-EnvDefault -Name "WKV_SAMMI_API_CYCLE_BUDGET_MS" -Value "0"
 Set-EnvDefault -Name "WKV_SAMMI_API_ONLY_WHEN_ED" -Value "1"
 Set-EnvDefault -Name "WKV_SAMMI_NEW_WRITE_VAR" -Value "ID116.new_write"
 Set-EnvDefault -Name "WKV_SAMMI_NEW_WRITE_COMPAT_VAR" -Value "ID116.new_write"

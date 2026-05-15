@@ -45,7 +45,7 @@ def _runtime_sync_enabled(sync_id: str, default: bool = True) -> bool:
 def _twitch_udp_gate() -> bool:
     if not _sammi_running_gate():
         return False
-    if not _runtime_sync_enabled("sammi_bridge", True):
+    if not _runtime_sync_enabled("sammi_bridge", False):
         return False
     if not _runtime_sync_enabled("twitch_ingest", True):
         return False

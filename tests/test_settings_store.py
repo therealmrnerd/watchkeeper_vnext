@@ -35,6 +35,7 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
         self.assertIsNone(settings["providers"]["spansh"]["enabled"])
         self.assertTrue(settings["providers"]["openai"]["live_applied"])
         self.assertTrue(settings["syncs"]["ed_provider_autocache"]["enabled"])
+        self.assertEqual(settings["syncs"]["jinx_lighting"]["label"], "Light Sync")
         self.assertTrue(settings["syncs"]["jinx_lighting"]["live_applied"])
         self.assertTrue(settings["syncs"]["ytmd_ingest"]["live_applied"])
         self.assertTrue(settings["syncs"]["sammi_bridge"]["live_applied"])

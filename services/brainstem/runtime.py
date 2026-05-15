@@ -32,7 +32,7 @@ DB_PATH = Path(os.getenv("WKV_DB_PATH", ROOT_DIR / "data" / "watchkeeper_vnext.d
 SCHEMA_PATH = Path(
     os.getenv("WKV_SCHEMA_PATH", ROOT_DIR / "schemas" / "sqlite" / "001_brainstem_core.sql")
 )
-HOST = os.getenv("WKV_HOST", "127.0.0.1")
+HOST = os.getenv("WKV_HOST", "0.0.0.0")
 PORT = int(os.getenv("WKV_PORT", "8787"))
 START_TS = time.time()
 VERSION = os.getenv("WKV_VERSION", "vnext-dev").strip() or "vnext-dev"
@@ -171,7 +171,7 @@ ADVISORY_LLM_STATUS_URL = os.getenv("WKV_ADVISORY_LLM_STATUS_URL", "http://127.0
 ADVISORY_LLM_CONTROL_URL = os.getenv("WKV_ADVISORY_LLM_CONTROL_URL", "http://127.0.0.1:8790/llm/control").strip()
 KNOWLEDGE_HEALTH_URL = os.getenv("WKV_KNOWLEDGE_HEALTH_URL", "http://127.0.0.1:8791/health").strip()
 QDRANT_HEALTH_URL = os.getenv("WKV_QDRANT_HEALTH_URL", "http://127.0.0.1:6333/healthz").strip()
-SAMMI_API_ENABLED = os.getenv("WKV_SAMMI_API_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+SAMMI_API_ENABLED = os.getenv("WKV_SAMMI_API_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
 SAMMI_API_HOST = os.getenv("WKV_SAMMI_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
 SAMMI_API_PORT = int(os.getenv("WKV_SAMMI_API_PORT", "9450"))
 SAMMI_API_PASSWORD = os.getenv("WKV_SAMMI_API_PASSWORD", "").strip()

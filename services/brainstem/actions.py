@@ -2,8 +2,11 @@ import ctypes
 import json
 import os
 import runtime
+import shlex
 import sqlite3
 import subprocess
+import tempfile
+import threading
 import time
 import uuid
 from ctypes import windll
@@ -57,6 +60,69 @@ from settings_store import load_runtime_settings, runtime_setting_enabled, save_
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 ADVISORY_LLM_CONTROL_TIMEOUT_SEC = float(os.getenv("WKV_ADVISORY_LLM_CONTROL_TIMEOUT_SEC", "180"))
+KEYPRESS_BACKEND = os.getenv("WKV_KEYPRESS_BACKEND", "win32").strip().lower() or "win32"
+COCKPIT_CONTROL_BACKEND = os.getenv("WKV_COCKPIT_CONTROL_BACKEND", "ahk").strip().lower() or "ahk"
+COCKPIT_MODE_KEY = os.getenv("WKV_COCKPIT_MODE_KEY", "m").strip() or "m"
+FLIGHT_ASSIST_KEY = os.getenv("WKV_FLIGHT_ASSIST_KEY", "z").strip() or "z"
+SUPERCRUISE_KEY = os.getenv("WKV_SUPERCRUISE_KEY", "j").strip() or "j"
+HYPERSPACE_KEY = os.getenv("WKV_HYPERSPACE_KEY", "j").strip() or "j"
+NIGHT_VISION_KEY = os.getenv("WKV_NIGHT_VISION_KEY", "alt+n").strip() or "alt+n"
+AUTO_DOCK_TIMEOUT_SEC = float(os.getenv("WKV_AUTO_DOCK_TIMEOUT_SEC", "180"))
+JINX_SYNC_VAR_NAME = os.getenv("WKV_SUP_JINX_SYNC_VAR", "sync").strip() or "sync"
+JINX_PYTHON = os.getenv("WKV_SUP_JINX_PYTHON", "python").strip() or "python"
+JINX_SENDER_PATH = Path(
+    os.getenv("WKV_SUP_JINX_SENDER_PATH", str(runtime.ROOT_DIR / "tools" / "jinxsender.py"))
+)
+JINX_ARTNET_IP = os.getenv("WKV_SUP_JINX_ARTNET_IP", "127.0.0.1").strip() or "127.0.0.1"
+JINX_ARTNET_UNIVERSE = int(os.getenv("WKV_SUP_JINX_ARTNET_UNIVERSE", "1"))
+JINX_BRIGHTNESS = int(os.getenv("WKV_SUP_JINX_BRIGHTNESS", "200"))
+JINX_LIGHT_SYNC_ON_EFFECT = os.getenv("WKV_MFD_LIGHT_SYNC_ON_EFFECT", "C7").strip() or "C7"
+JINX_LIGHT_SYNC_OFF_EFFECT = os.getenv("WKV_SUP_JINX_OFF_EFFECT", "S1").strip() or "S1"
+JINX_EXE = os.getenv("WKV_SUP_JINX_EXE", "").strip()
+JINX_ARGS_RAW = os.getenv("WKV_SUP_JINX_ARGS", "-m").strip()
+try:
+    JINX_LAUNCH_ARGS = shlex.split(JINX_ARGS_RAW, posix=False) if JINX_ARGS_RAW else []
+except Exception:
+    JINX_LAUNCH_ARGS = []
+JINX_PROCESS_NAMES = [
+    name.strip()
+    for name in os.getenv("WKV_SUP_JINX_PROCESS_NAMES", "Hi-Jinx.exe,Hi-Jinx 2.exe").split(",")
+    if name.strip()
+]
+AHK_EXE_CANDIDATES = [
+    os.getenv("WKV_SUP_AHK_EXE", "").strip(),
+    r"C:\Program Files\AutoHotkey\AutoHotkey.exe",
+    r"C:\Program Files\AutoHotkey\AutoHotkey64.exe",
+    r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
+    r"C:\Program Files\AutoHotkey\v2\AutoHotkey.exe",
+]
+REQUEST_DOCKING_SEQUENCE = [
+    {"key": "1", "at_ms": 0, "hold_ms": 100},
+    {"key": "e", "at_ms": 350, "hold_ms": 250},
+    {"key": "e", "at_ms": 850, "hold_ms": 250},
+    {"key": "a", "at_ms": 1350, "hold_ms": 200},
+    {"key": "d", "at_ms": 1800, "hold_ms": 200},
+    {"key": "space", "at_ms": 2250, "hold_ms": 200},
+    {"key": "a", "at_ms": 2700, "hold_ms": 200},
+    {"key": "q", "at_ms": 3150, "hold_ms": 200},
+    {"key": "q", "at_ms": 3600, "hold_ms": 200},
+    {"key": "1", "at_ms": 4050, "hold_ms": 100},
+]
+REPAIR_REFUEL_SEQUENCE = [
+    {"key": "w", "at_ms": 2500, "hold_ms": 150},
+    {"key": "space", "at_ms": 2800, "hold_ms": 150},
+    {"key": "d", "at_ms": 3100, "hold_ms": 150},
+    {"key": "space", "at_ms": 3400, "hold_ms": 150},
+    {"key": "d", "at_ms": 3700, "hold_ms": 150},
+    {"key": "space", "at_ms": 4000, "hold_ms": 150},
+]
+AUTO_LAUNCH_SEQUENCE = [
+    {"key": "w", "at_ms": 0, "hold_ms": 150},
+    {"key": "w", "at_ms": 200, "hold_ms": 150},
+    {"key": "s", "at_ms": 400, "hold_ms": 150},
+    {"key": "s", "at_ms": 600, "hold_ms": 150},
+    {"key": "space", "at_ms": 800, "hold_ms": 150},
+]
 
 
 def _list_process_names() -> set[str]:
@@ -86,7 +152,7 @@ def _any_process_running(process_names: list[str]) -> bool:
     if not process_names:
         return True
     running = _list_process_names()
-    return any(name in running for name in process_names)
+    return any(str(name or "").strip().lower() in running for name in process_names)
 
 
 def _get_foreground_process_name() -> str | None:
@@ -132,6 +198,208 @@ def _key_to_vk(key_name: str) -> int:
 def _send_virtual_key(vk_code: int) -> None:
     windll.user32.keybd_event(vk_code, 0, 0, 0)
     windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+
+
+MODIFIER_VK_MAP = {
+    "alt": 0x12,
+    "ctrl": 0x11,
+    "control": 0x11,
+    "shift": 0x10,
+}
+
+
+def _send_key_combo(key_name: str) -> dict[str, Any]:
+    parts = [part.strip().lower() for part in str(key_name or "").split("+") if part.strip()]
+    if not parts:
+        raise ValueError("keypress key parameter is required")
+    main_key = parts[-1]
+    modifiers = parts[:-1]
+    modifier_vks: list[int] = []
+    for modifier in modifiers:
+        if modifier not in MODIFIER_VK_MAP:
+            raise ValueError(f"Unsupported keypress modifier: {modifier}")
+        modifier_vks.append(MODIFIER_VK_MAP[modifier])
+    main_vk = _key_to_vk(main_key)
+    for vk_code in modifier_vks:
+        windll.user32.keybd_event(vk_code, 0, 0, 0)
+    try:
+        _send_virtual_key(main_vk)
+    finally:
+        for vk_code in reversed(modifier_vks):
+            windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+    return {"key": key_name, "vk_code": main_vk, "modifier_vk_codes": modifier_vks}
+
+
+def _resolve_ahk_exe() -> str:
+    for raw in AHK_EXE_CANDIDATES:
+        candidate = str(raw or "").strip()
+        if candidate and os.path.exists(candidate):
+            return candidate
+    raise ValueError("AutoHotkey executable not found")
+
+
+def _key_to_ahk_send(key_name: str) -> str:
+    parts = [part.strip().lower() for part in str(key_name or "").split("+") if part.strip()]
+    if not parts:
+        raise ValueError("keypress key parameter is required")
+    prefix = ""
+    for modifier in parts[:-1]:
+        if modifier == "alt":
+            prefix += "!"
+        elif modifier in {"ctrl", "control"}:
+            prefix += "^"
+        elif modifier == "shift":
+            prefix += "+"
+        else:
+            raise ValueError(f"Unsupported keypress modifier: {modifier}")
+    main = parts[-1]
+    special = {
+        "space": "{Space}",
+        "enter": "{Enter}",
+        "tab": "{Tab}",
+        "esc": "{Esc}",
+        "escape": "{Esc}",
+        "up": "{Up}",
+        "down": "{Down}",
+        "left": "{Left}",
+        "right": "{Right}",
+    }
+    if main in special:
+        body = special[main]
+    elif main.startswith("f") and main[1:].isdigit():
+        body = "{" + main.upper() + "}"
+    elif len(main) == 1 and (main.isalnum() or main in {"=", "-", "\\", "/", "."}):
+        body = main
+    else:
+        raise ValueError(f"Unsupported AutoHotkey key: {main}")
+    return prefix + body
+
+
+def _send_key_combo_ahk(key_name: str) -> dict[str, Any]:
+    ahk_exe = _resolve_ahk_exe()
+    send_expr = _key_to_ahk_send(key_name)
+    script = "\n".join(
+        [
+            "#NoEnv",
+            "#NoTrayIcon",
+            "SetTitleMatchMode, 2",
+            "SetKeyDelay, 50, 50",
+            "WinActivate, Elite - Dangerous (CLIENT)",
+            "WinWaitActive, Elite - Dangerous (CLIENT),, 1",
+            "if ErrorLevel",
+            "  ExitApp, 2",
+            f"Send, {send_expr}",
+            "ExitApp, 0",
+            "",
+        ]
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".ahk", delete=False, encoding="utf-8") as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [ahk_exe, script_path],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+            creationflags=NO_WINDOW_FLAGS,
+        )
+    finally:
+        try:
+            os.unlink(script_path)
+        except Exception:
+            pass
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"AutoHotkey send failed with code {result.returncode}: {detail}")
+    return {
+        "key": key_name,
+        "backend": "ahk",
+        "ahk_exe": ahk_exe,
+        "send": send_expr,
+    }
+
+
+def _send_key_sequence_ahk(sequence: list[dict[str, Any]]) -> dict[str, Any]:
+    if not sequence:
+        raise ValueError("keypress sequence must contain at least one step")
+    ahk_exe = _resolve_ahk_exe()
+    lines = [
+        "#NoEnv",
+        "#NoTrayIcon",
+        "SetTitleMatchMode, 2",
+        "SetKeyDelay, 50, 50",
+        "WinActivate, Elite - Dangerous (CLIENT)",
+        "WinWaitActive, Elite - Dangerous (CLIENT),, 1",
+        "if ErrorLevel",
+        "  ExitApp, 2",
+    ]
+    last_at_ms = 0
+    normalized: list[dict[str, Any]] = []
+    for index, step in enumerate(sequence):
+        if not isinstance(step, dict):
+            raise ValueError(f"sequence[{index}] must be an object")
+        key_name = str(step.get("key") or "").strip()
+        send_expr = _key_to_ahk_send(key_name)
+        at_ms = int(step.get("at_ms", last_at_ms))
+        hold_ms = int(step.get("hold_ms", 100))
+        if at_ms < last_at_ms:
+            raise ValueError("keypress sequence at_ms values must be non-decreasing")
+        if hold_ms < 0 or hold_ms > 5000:
+            raise ValueError("keypress sequence hold_ms must be 0..5000")
+        delay_ms = at_ms - last_at_ms
+        if delay_ms:
+            lines.append(f"Sleep, {delay_ms}")
+        lines.append(f"Send, {send_expr}")
+        normalized.append({"key": key_name, "send": send_expr, "at_ms": at_ms, "hold_ms": hold_ms})
+        last_at_ms = at_ms + hold_ms
+    lines.extend(["ExitApp, 0", ""])
+    script = "\n".join(lines)
+    with tempfile.NamedTemporaryFile("w", suffix=".ahk", delete=False, encoding="utf-8") as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        timeout_sec = max(3.0, (last_at_ms / 1000.0) + 3.0)
+        result = subprocess.run(
+            [ahk_exe, script_path],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_sec,
+            creationflags=NO_WINDOW_FLAGS,
+        )
+    finally:
+        try:
+            os.unlink(script_path)
+        except Exception:
+            pass
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"AutoHotkey sequence failed with code {result.returncode}: {detail}")
+    return {
+        "backend": "ahk",
+        "ahk_exe": ahk_exe,
+        "steps": normalized,
+        "duration_ms": last_at_ms,
+    }
+
+
+def _send_key_combo_backend(key_name: str, backend: str | None = None) -> dict[str, Any]:
+    selected = str(backend or KEYPRESS_BACKEND or "win32").strip().lower()
+    if selected == "ahk":
+        return _send_key_combo_ahk(key_name)
+    if selected == "auto":
+        try:
+            return _send_key_combo_ahk(key_name) | {"backend": "ahk"}
+        except Exception as exc:
+            output = _send_key_combo(key_name)
+            output["backend"] = "win32"
+            output["fallback_reason"] = str(exc)
+            return output
+    output = _send_key_combo(key_name)
+    output["backend"] = "win32"
+    return output
 
 
 def _build_lights_url(scene: str) -> str:
@@ -205,10 +473,347 @@ def _execute_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("keypress actuator is disabled (set WKV_ENABLE_KEYPRESS=1)")
     if not _any_process_running(KEYPRESS_ALLOWED_PROCESSES):
         raise ValueError("keypress denied: no allowed process is currently running")
+    sequence = parameters.get("sequence")
+    if isinstance(sequence, list):
+        backend = str(parameters.get("backend") or KEYPRESS_BACKEND).strip().lower()
+        if backend not in {"ahk", "auto"}:
+            raise ValueError("keypress sequence requires AutoHotkey backend")
+        return _send_key_sequence_ahk(sequence)
     key_name = str(parameters.get("key", "")).strip()
-    vk_code = _key_to_vk(key_name)
-    _send_virtual_key(vk_code)
-    return {"key": key_name, "vk_code": vk_code}
+    backend = str(parameters.get("backend") or KEYPRESS_BACKEND).strip().lower()
+    return _send_key_combo_backend(key_name, backend=backend)
+
+
+def _state_bool(state_key: str) -> bool:
+    row = DB_SERVICE.get_state(state_key)
+    value = row.get("state_value") if row else None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "docked"}
+    return False
+
+
+def _state_int(state_key: str) -> int:
+    row = DB_SERVICE.get_state(state_key)
+    value = row.get("state_value") if row else None
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _state_list(state_key: str) -> list[Any]:
+    row = DB_SERVICE.get_state(state_key)
+    value = row.get("state_value") if row else None
+    return value if isinstance(value, list) else []
+
+
+def _has_module_item(fragment: str) -> bool:
+    needle = fragment.lower()
+    for item in _state_list("ed.modules.items"):
+        if isinstance(item, dict) and needle in str(item.get("item") or "").lower():
+            return True
+    return False
+
+
+def _auto_launch_limpet_check() -> dict[str, Any]:
+    has_limpet_controller = _has_module_item("dronecontrol")
+    has_cargo_rack = _has_module_item("cargorack")
+    limpet_count = _state_int("ed.cargo.limpet_count")
+    needs_limpets = has_limpet_controller and has_cargo_rack and limpet_count <= 0
+    return {
+        "has_limpet_controller": has_limpet_controller,
+        "has_cargo_rack": has_cargo_rack,
+        "limpet_count": limpet_count,
+        "needs_limpet_warning": needs_limpets,
+    }
+
+
+def _execute_cockpit_sequence(
+    sequence: list[dict[str, Any]],
+    *,
+    dry_run: bool,
+    label: str,
+) -> dict[str, Any]:
+    if dry_run:
+        return {"status": "dry_run", "label": label, "steps": sequence}
+    return _execute_keypress({"sequence": sequence, "backend": COCKPIT_CONTROL_BACKEND}) | {
+        "label": label,
+    }
+
+
+def _auto_dock_worker(session_id: str, request_id: str) -> None:
+    deadline = time.time() + max(1.0, AUTO_DOCK_TIMEOUT_SEC)
+    _set_state_quick("ed.autodock.status", "waiting_for_docked")
+    _set_state_quick("ed.autodock.request_id", request_id)
+    while time.time() < deadline:
+        if _state_bool("ed.status.docked") or _state_bool("ed.telemetry.dock_state"):
+            try:
+                result = _execute_cockpit_sequence(
+                    REPAIR_REFUEL_SEQUENCE,
+                    dry_run=False,
+                    label="Post-dock Repair/Refuel",
+                )
+                _set_state_quick("ed.autodock.status", "serviced")
+                _set_state_quick("ed.autodock.last_result", result)
+                emit_event(
+                    con=None,
+                    event_type="AUTO_DOCK_SERVICE_EXECUTED",
+                    source="cockpit_control",
+                    payload={"request_id": request_id, "session_id": session_id, "result": result},
+                    mode="game",
+                    tags=["mfd", "auto_dock"],
+                )
+            except Exception as exc:
+                _set_state_quick("ed.autodock.status", "service_failed")
+                _set_state_quick("ed.autodock.last_error", str(exc))
+            return
+        time.sleep(1.0)
+    _set_state_quick("ed.autodock.status", "timeout")
+
+
+COCKPIT_CONTROL_ACTIONS: dict[str, dict[str, Any]] = {
+    "landing_gear": {"label": "Landing Gear", "key": "l"},
+    "cargo_scoop": {"label": "Cargo Scoop", "key": "f10"},
+    "lights": {"label": "Lights", "key": "alt+t"},
+    "night_vision": {"label": "Night Vision", "key": NIGHT_VISION_KEY},
+    "hardpoints": {"label": "Hardpoints", "key": "u"},
+    "flight_assist": {"label": "Flight Assist", "key": FLIGHT_ASSIST_KEY},
+    "heatsink": {"label": "Heatsink", "key": "v"},
+    "target_next": {"label": "Target Next", "key": "g"},
+    "fsd": {"label": "FSD", "key": "j"},
+    "supercruise": {"label": "Supercruise", "key": SUPERCRUISE_KEY},
+    "hyperspace": {"label": "Hyperspace", "key": HYPERSPACE_KEY},
+    "pips_sys": {"label": "Pips SYS", "key": "left"},
+    "pips_eng": {"label": "Pips ENG", "key": "up"},
+    "pips_wep": {"label": "Pips WEP", "key": "right"},
+    "nav_panel": {"label": "Nav Panel", "key": "1"},
+    "comms_panel": {"label": "Comms Panel", "key": "2"},
+    "role_panel": {"label": "Role Panel", "key": "3"},
+    "management_panel": {"label": "Management Panel", "key": "4"},
+    "galaxy_map": {"label": "Galaxy Map", "key": "ctrl+g"},
+    "system_map": {"label": "System Map", "key": "alt+s"},
+    "fss": {"label": "FSS", "key": "f5"},
+    "flight_control": {"label": "Flight Control", "key": "esc"},
+    "cockpit_mode": {"label": "Combat/Analysis Mode", "key": COCKPIT_MODE_KEY},
+    "request_docking": {"label": "Request Docking", "sequence": REQUEST_DOCKING_SEQUENCE},
+    "repair_refuel": {"label": "Repair/Refuel", "sequence": REPAIR_REFUEL_SEQUENCE},
+    "auto_dock": {"label": "Auto Dock", "sequence": REQUEST_DOCKING_SEQUENCE},
+    "auto_launch": {"label": "Auto Launch", "sequence": AUTO_LAUNCH_SEQUENCE},
+}
+
+
+def cockpit_control_action(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    action_name = str(payload.get("action") or "").strip().lower()
+    if action_name not in COCKPIT_CONTROL_ACTIONS:
+        raise ValueError(
+            "action must be one of: " + ", ".join(sorted(COCKPIT_CONTROL_ACTIONS.keys()))
+        )
+    dry_run = payload.get("dry_run", False)
+    if not isinstance(dry_run, bool):
+        raise ValueError("dry_run must be boolean")
+
+    action_def = COCKPIT_CONTROL_ACTIONS[action_name]
+    sequence = action_def.get("sequence")
+    key_name = str(action_def.get("key") or "")
+    request_id = f"req-mfd-{uuid.uuid4().hex[:12]}"
+    action_id = f"mfd-{action_name}"
+    incident_id = f"mfd-{action_name}-{uuid.uuid4().hex[:8]}"
+    confirmed_at_utc = utc_now_iso()
+    confirm_token = TOOL_ROUTER.build_confirmation_token(incident_id, "input.keypress")
+
+    docked = _state_bool("ed.status.docked") or _state_bool("ed.telemetry.dock_state")
+    no_fire_zone = _state_bool("ed.semantic.station.no_fire_zone") or _state_bool("ed.station.no_fire_zone")
+    if action_name in {"request_docking", "auto_dock"} and not dry_run:
+        if docked:
+            raise ValueError("auto dock unavailable: already docked")
+        if not no_fire_zone:
+            raise ValueError("auto dock unavailable: not inside station no-fire zone")
+    if action_name == "repair_refuel" and not dry_run and not docked:
+        raise ValueError("repair/refuel unavailable: not docked")
+    limpet_check = _auto_launch_limpet_check()
+    if action_name == "auto_launch" and not dry_run:
+        if not docked:
+            raise ValueError("auto launch unavailable: not docked")
+        warning_active = _state_bool("ed.autolaunch.limpet_warning_active")
+        if limpet_check["needs_limpet_warning"] and not warning_active:
+            _set_state_quick("ed.autolaunch.limpet_warning_active", True)
+            _set_state_quick("ed.autolaunch.limpet_warning_at", utc_now_iso())
+            message = "No limpets detected. Press Auto Launch again to launch anyway."
+            return {
+                "ok": True,
+                "action": action_name,
+                "label": action_def["label"],
+                "dry_run": dry_run,
+                "warning": {
+                    "code": "missing_limpets",
+                    "message": message,
+                    **limpet_check,
+                },
+                "request_id": request_id,
+                "incident_id": incident_id,
+                "execute": {
+                    "ok": True,
+                    "results": [
+                        {
+                            "action_id": action_id,
+                            "tool_name": "keypress",
+                            "status": "warning",
+                            "output": {"message": message, **limpet_check},
+                        }
+                    ],
+                },
+            }
+        _set_state_quick("ed.autolaunch.limpet_warning_active", False)
+
+    if isinstance(sequence, list):
+        execute_result = _execute_cockpit_sequence(
+            sequence,
+            dry_run=dry_run,
+            label=str(action_def["label"]),
+        )
+        background = None
+        if action_name == "auto_dock" and not dry_run:
+            worker = threading.Thread(
+                target=_auto_dock_worker,
+                args=(str(payload.get("session_id") or "mfd-display"), request_id),
+                daemon=True,
+            )
+            worker.start()
+            background = {
+                "status": "waiting_for_docked",
+                "timeout_sec": AUTO_DOCK_TIMEOUT_SEC,
+            }
+        return {
+            "ok": True,
+            "action": action_name,
+            "label": action_def["label"],
+            "sequence": execute_result,
+            "dry_run": dry_run,
+            "request_id": request_id,
+            "incident_id": incident_id,
+            "eligibility": {"docked": docked, "no_fire_zone": no_fire_zone},
+            "background": background,
+            "execute": {
+                "ok": True,
+                "results": [
+                    {
+                        "action_id": action_id,
+                        "tool_name": "keypress",
+                        "status": execute_result.get("status", "executed"),
+                        "output": execute_result,
+                    }
+                ],
+            },
+        }
+
+    key_sequence = [{"key": key_name, "at_ms": 0, "hold_ms": 100}]
+    execute_result = _execute_cockpit_sequence(
+        key_sequence,
+        dry_run=dry_run,
+        label=str(action_def["label"]),
+    )
+    return {
+        "ok": True,
+        "action": action_name,
+        "label": action_def["label"],
+        "key": key_name,
+        "dry_run": dry_run,
+        "request_id": request_id,
+        "incident_id": incident_id,
+        "execute": {
+            "ok": True,
+            "results": [
+                {
+                    "action_id": action_id,
+                    "tool_name": "keypress",
+                    "status": execute_result.get("status", "executed"),
+                    "output": execute_result,
+                }
+            ],
+        },
+    }
+
+    intent = {
+        "schema_version": "1.0",
+        "request_id": request_id,
+        "timestamp_utc": confirmed_at_utc,
+        "session_id": str(payload.get("session_id") or "mfd-display"),
+        "mode": "game",
+        "domain": "gameplay",
+        "urgency": "normal",
+        "user_text": f"MFD control: {action_def['label']}",
+        "needs_tools": True,
+        "needs_clarification": False,
+        "clarification_questions": [],
+        "retrieval": {},
+        "proposed_actions": [
+            {
+                "action_id": action_id,
+                "tool_name": "keypress",
+                "parameters": {
+                    "key": key_name,
+                    "cockpit_action": action_name,
+                    "backend": COCKPIT_CONTROL_BACKEND,
+                },
+                "safety_level": "high_risk",
+                "mode_constraints": ["game"],
+                "requires_confirmation": True,
+                "timeout_ms": 1000,
+                "reason": f"MFD control surface: {action_def['label']}",
+                "confidence": 1.0,
+            }
+        ],
+        "response_text": f"Queued MFD control: {action_def['label']}",
+    }
+
+    with connect_db() as con:
+        upsert_intent(con, intent, source=source)
+        con.commit()
+
+    record_confirmation(
+        {
+            "incident_id": incident_id,
+            "tool_name": "input.keypress",
+            "confirm_token": confirm_token,
+            "confirmed_at_utc": confirmed_at_utc,
+            "request_id": request_id,
+            "session_id": intent["session_id"],
+            "mode": "game",
+        },
+        source=source,
+    )
+
+    executed = execute_actions(
+        {
+            "request_id": request_id,
+            "action_ids": [action_id],
+            "dry_run": dry_run,
+            "allow_high_risk": True,
+            "user_confirmed": True,
+            "user_confirm_token": confirm_token,
+            "confirmed_at_utc": confirmed_at_utc,
+            "incident_id": incident_id,
+            "watch_condition": "GAME",
+            "stt_confidence": 1.0,
+        },
+        source=source,
+    )
+    return {
+        "ok": True,
+        "action": action_name,
+        "label": action_def["label"],
+        "key": key_name,
+        "dry_run": dry_run,
+        "request_id": request_id,
+        "incident_id": incident_id,
+        "execute": executed,
+    }
 
 
 def _execute_edparser(tool_name: str, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -1025,6 +1630,208 @@ def save_runtime_settings_action(payload: dict[str, Any], source: str) -> dict[s
         tags=["settings", "runtime"],
     )
     return {"ok": True, "settings": settings}
+
+
+def _normalize_jinx_mode_arg(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        raise ValueError("jinx mode is required")
+    if text[0] in {"S", "C"} and text[1:].isdigit():
+        return f"{text[0]}{int(text[1:])}"
+    if text.isdigit():
+        return f"S{int(text)}"
+    raise ValueError(f"invalid jinx mode: {value}")
+
+
+def _send_jinx_burst(effect: str) -> dict[str, Any]:
+    mode = _normalize_jinx_mode_arg(effect)
+    if not JINX_SENDER_PATH.exists():
+        return {"ok": False, "error": f"missing_sender:{JINX_SENDER_PATH}", "effect": mode}
+    cmd = [
+        JINX_PYTHON,
+        str(JINX_SENDER_PATH),
+        JINX_ARTNET_IP,
+        mode,
+        str(int(JINX_BRIGHTNESS)),
+        str(int(JINX_ARTNET_UNIVERSE)),
+    ]
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=NO_WINDOW_FLAGS,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "effect": mode}
+    return {
+        "ok": True,
+        "effect": mode,
+        "ip": JINX_ARTNET_IP,
+        "brightness": int(JINX_BRIGHTNESS),
+        "universe": int(JINX_ARTNET_UNIVERSE),
+    }
+
+
+def _jinx_launch_target() -> tuple[str, list[str]]:
+    candidates = [
+        _state_value_text("app.jinx.path"),
+        JINX_EXE,
+        _discover_process_executable(JINX_PROCESS_NAMES),
+    ]
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text and Path(text).exists():
+            return text, [c for c in candidates if c]
+    return "", [c for c in candidates if c]
+
+
+def _process_running_by_path(target: str) -> bool:
+    text = str(target or "").strip()
+    if not text or os.name != "nt":
+        return False
+    escaped = text.lower().replace("'", "''")
+    command = (
+        f"$target = '{escaped}'; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant() -eq $target } | "
+        "Select-Object -First 1 -ExpandProperty ProcessId"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=NO_WINDOW_FLAGS,
+            timeout=10,
+        )
+    except Exception:
+        return False
+    return (result.stdout or "").strip().isdigit()
+
+
+def _launch_jinx(target: str) -> dict[str, Any]:
+    target_path = Path(target)
+    escaped = str(target_path).replace("'", "''")
+    arg_literal = ", ".join("'" + str(arg).replace("'", "''") + "'" for arg in JINX_LAUNCH_ARGS)
+    command = (
+        f"$exe = '{escaped}'; "
+        f"$args = @({arg_literal}); "
+        "Start-Process -FilePath $exe -ArgumentList $args | Out-Null"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=NO_WINDOW_FLAGS,
+            timeout=10,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "target": target, "args": JINX_LAUNCH_ARGS}
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or f"exit_{result.returncode}"
+        return {"ok": False, "error": detail, "target": target, "args": JINX_LAUNCH_ARGS}
+    _set_state_quick("app.jinx.path", target)
+    return {"ok": True, "launched": True, "target": target, "args": JINX_LAUNCH_ARGS}
+
+
+def _ensure_jinx_started() -> dict[str, Any]:
+    if _any_process_running(JINX_PROCESS_NAMES):
+        return {"ok": True, "already_running": True}
+    target, checked = _jinx_launch_target()
+    if target and _process_running_by_path(target):
+        return {"ok": True, "already_running": True, "target": target}
+    if not target:
+        return {"ok": False, "error": "no_jinx_path", "checked": checked}
+    return _launch_jinx(target)
+
+
+def _force_close_jinx() -> dict[str, Any]:
+    target, _checked = _jinx_launch_target()
+    names = [name for name in JINX_PROCESS_NAMES if name]
+    if not target and not names:
+        return {"ok": False, "error": "no_jinx_process_target"}
+    name_literal = ", ".join("'" + str(name).replace("'", "''") + "'" for name in names)
+    target_filter = ""
+    if target:
+        escaped_target = str(Path(target)).lower().replace("'", "''")
+        target_filter = f" -or ($_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant() -eq '{escaped_target}')"
+    command = (
+        f"$names = @({name_literal}); "
+        "$targets = Get-CimInstance Win32_Process | "
+        f"Where-Object {{ ($names -contains $_.Name){target_filter} }}; "
+        "$ids = @($targets | ForEach-Object { $_.ProcessId }); "
+        "foreach($id in $ids){ Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }; "
+        "$ids -join ','"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=NO_WINDOW_FLAGS,
+            timeout=10,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "target": target}
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or f"exit_{result.returncode}"
+        return {"ok": False, "error": detail, "target": target}
+    killed = [pid for pid in (result.stdout or "").strip().split(",") if pid.strip()]
+    _set_state_quick("app.jinx.running", False)
+    return {"ok": True, "closed": bool(killed), "pids": killed, "target": target}
+
+
+def set_mfd_light_sync(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be boolean")
+
+    settings = save_runtime_settings(
+        Path(DB_PATH),
+        {"schema_version": "1.0", "syncs": {"jinx_lighting": {"enabled": enabled}}},
+    )
+    sync_value = "on" if enabled else "off"
+    effect = str(
+        payload.get("effect")
+        or (JINX_LIGHT_SYNC_ON_EFFECT if enabled else JINX_LIGHT_SYNC_OFF_EFFECT)
+    )
+    launch_result = _ensure_jinx_started() if enabled else {"ok": True, "skipped": True}
+    if enabled and launch_result.get("launched"):
+        time.sleep(0.8)
+    jinx_result = _send_jinx_burst(effect)
+    close_result = {"ok": True, "skipped": True}
+    if not enabled:
+        time.sleep(0.15)
+        close_result = _force_close_jinx()
+    emit_event(
+        con=None,
+        event_type="MFD_LIGHT_SYNC_UPDATED",
+        source=source,
+        payload={
+            "enabled": enabled,
+            "sync_var": JINX_SYNC_VAR_NAME,
+            "sync_value": sync_value,
+            "jinx_launch": launch_result,
+            "jinx": jinx_result,
+            "jinx_close": close_result,
+        },
+        tags=["mfd", "jinx", "settings"],
+    )
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "settings": settings,
+        "sync_var": JINX_SYNC_VAR_NAME,
+        "sync_value": sync_value,
+        "jinx_launch": launch_result,
+        "jinx": jinx_result,
+        "jinx_close": close_result,
+    }
 
 
 def control_advisory_llm_action(payload: dict[str, Any], source: str) -> dict[str, Any]:

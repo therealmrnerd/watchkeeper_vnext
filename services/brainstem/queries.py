@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import sqlite3
 import urllib.error
@@ -14,6 +15,7 @@ from runtime import (
     COMMIT,
     DB_PATH,
     DB_SERVICE,
+    ENABLE_KEYPRESS,
     ED_PROVIDER_QUERY_SERVICE,
     KNOWLEDGE_HEALTH_URL,
     LOG_DIR,
@@ -133,6 +135,107 @@ def _state_value_with_fallback(state: dict[str, Any], *keys: str) -> Any:
         if key in state:
             return state.get(key)
     return None
+
+
+def _empty_nav_route() -> dict[str, Any]:
+    return {}
+
+
+def _route_system_name(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _route_system_address(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nav_route_current_index(
+    route: list[Any],
+    *,
+    current_system: Any = None,
+    current_system_address: Any = None,
+) -> int:
+    current_address = _route_system_address(current_system_address)
+    if current_address is not None:
+        for index, step in enumerate(route):
+            if isinstance(step, dict) and _route_system_address(step.get("SystemAddress")) == current_address:
+                return index
+    current_name = _route_system_name(current_system)
+    if current_name:
+        for index, step in enumerate(route):
+            if isinstance(step, dict) and _route_system_name(step.get("StarSystem")) == current_name:
+                return index
+    return 0
+
+
+def _route_distance_ly(origin: Any, destination: Any) -> float | str:
+    first_pos = origin.get("StarPos") if isinstance(origin, dict) else None
+    last_pos = destination.get("StarPos") if isinstance(destination, dict) else None
+    if (
+        isinstance(first_pos, list)
+        and isinstance(last_pos, list)
+        and len(first_pos) >= 3
+        and len(last_pos) >= 3
+        and all(isinstance(value, (int, float)) for value in first_pos[:3] + last_pos[:3])
+    ):
+        return round(sum((float(last_pos[i]) - float(first_pos[i])) ** 2 for i in range(3)) ** 0.5, 2)
+    return ""
+
+
+def _read_nav_route_fallback(*, current_system: Any = None, current_system_address: Any = None) -> dict[str, Any]:
+    path = Path.home() / "Saved Games" / "Frontier Developments" / "Elite Dangerous" / "NavRoute.json"
+    if not path.exists():
+        return _empty_nav_route()
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _empty_nav_route()
+    route = parsed.get("Route")
+    if not isinstance(route, list):
+        return _empty_nav_route()
+    systems = [
+        step.get("StarSystem")
+        for step in route
+        if isinstance(step, dict) and isinstance(step.get("StarSystem"), str) and step.get("StarSystem").strip()
+    ]
+    if not systems:
+        return _empty_nav_route()
+    current_index = _nav_route_current_index(
+        route,
+        current_system=current_system,
+        current_system_address=current_system_address,
+    )
+    current_index = max(0, min(current_index, len(systems) - 1))
+    first = route[current_index] if current_index < len(route) and isinstance(route[current_index], dict) else {}
+    last = route[-1] if isinstance(route[-1], dict) else {}
+    distance_ly = _route_distance_ly(first, last)
+    origin = systems[current_index]
+    destination = systems[-1]
+    next_jump = systems[current_index + 1] if current_index + 1 < len(systems) else ""
+    upcoming_jumps = systems[current_index + 1:current_index + 4]
+    remaining_jumps = max(0, len(systems) - current_index - 1)
+    if remaining_jumps <= 0 or not next_jump:
+        return _empty_nav_route()
+    if remaining_jumps == 0:
+        text = f"Course set for {destination}"
+    elif remaining_jumps == 1:
+        text = f"Course set for {destination} from {origin}"
+    else:
+        text = f"Course set for {destination} from {origin} via {', '.join(systems[current_index + 1:-1])}"
+    return {
+        "nav_route": text,
+        "nav_route_origin": origin,
+        "nav_route_destination": destination,
+        "nav_route_next_jump": next_jump,
+        "nav_route_upcoming_jumps": upcoming_jumps,
+        "nav_route_remaining_jumps": remaining_jumps,
+        "nav_route_distance_ly": distance_ly,
+    }
 
 
 def _ed_running_from_state(state: dict[str, Any]) -> bool:
@@ -446,6 +549,7 @@ def query_ed_control_profile(query: dict[str, list[str]]) -> dict[str, Any]:
         "player_platform": state.get("ed.semantic.context.player_platform"),
         "on_foot_area": state.get("ed.semantic.context.on_foot_area"),
         "control_profile": state.get("ed.semantic.interface.control_profile"),
+        "no_fire_zone": state.get("ed.semantic.station.no_fire_zone"),
         "station_services_available": state.get("ed.semantic.opportunity.station_services_available"),
         "market_access_available": state.get("ed.semantic.opportunity.market_access_available"),
     }
@@ -455,6 +559,562 @@ def query_ed_control_profile(query: dict[str, list[str]]) -> dict[str, Any]:
         "recommended_profile": semantic["control_profile"] or "unknown",
         "semantic": semantic,
         "note": "Read-only recommendation endpoint for future SAMMI deck switching.",
+    }
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _cockpit_action_intent(
+    *,
+    tool: str,
+    action: str,
+    parameters: dict[str, Any] | None = None,
+    requires_confirmation: bool = True,
+) -> dict[str, Any]:
+    return {
+        "recommended_action": {
+            "tool": tool,
+            "action": action,
+            "parameters": parameters or {},
+            "requires_confirmation": bool(requires_confirmation),
+        }
+    }
+
+
+def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
+    del query
+    state = _state_map()
+    ed_running = _ed_running_from_state(state)
+    semantic_safe_for_keypress = _as_bool(
+        _state_value_with_fallback(
+            state,
+            "ed.semantic.interaction.safe_for_keypress",
+            "ed.running",
+        )
+    )
+    obs_status = query_obs_status({})
+    obs_up = bool(obs_status.get("ok")) and str(obs_status.get("status") or "").lower() == "up"
+
+    module_items = state.get("ed.modules.items") if isinstance(state.get("ed.modules.items"), list) else []
+    hardpoints = [
+        item
+        for item in module_items
+        if isinstance(item, dict)
+        and (
+            re.search(r"(small|medium|large|huge)hardpoint\d+", str(item.get("slot") or ""), re.IGNORECASE)
+            or (
+                str(item.get("item") or "").lower().startswith("hpt_")
+                and not re.search(
+                    r"shieldbooster|chaff|heatsink|pointdefen[cs]e|ecm|killwarrant|wake|xenoscanner|manifest|shutdownfield|causticsink|pulsewave|dockingcomputer|supercruiseassist",
+                    str(item.get("item") or ""),
+                    re.IGNORECASE,
+                )
+            )
+        )
+        and str(item.get("item") or "").strip()
+    ]
+    has_limpet_controller = any(
+        isinstance(item, dict) and "dronecontrol" in str(item.get("item") or "").lower()
+        for item in module_items
+    )
+    has_cargo_rack = any(
+        isinstance(item, dict) and "cargorack" in str(item.get("item") or "").lower()
+        for item in module_items
+    )
+
+    journal_fighter_active = _as_bool(state.get("ed.fighter.active"))
+    journal_srv_active = _as_bool(state.get("ed.srv.active"))
+    on_foot = bool(ed_running and _as_bool(state.get("ed.status.on_foot")))
+    on_foot_in_station = bool(ed_running and _as_bool(state.get("ed.status.on_foot_in_station")))
+    on_foot_on_planet = bool(ed_running and _as_bool(state.get("ed.status.on_foot_on_planet")))
+    on_foot_in_hangar = bool(ed_running and _as_bool(state.get("ed.status.on_foot_in_hangar")))
+    on_foot_social_space = bool(ed_running and _as_bool(state.get("ed.status.on_foot_social_space")))
+    on_foot_exterior = bool(ed_running and _as_bool(state.get("ed.status.on_foot_exterior")))
+    in_fighter = bool(ed_running and not on_foot and (_as_bool(state.get("ed.status.in_fighter")) or journal_fighter_active))
+    in_srv = bool(ed_running and not on_foot and (_as_bool(state.get("ed.status.in_srv")) or journal_srv_active))
+    in_main_ship = _as_bool(state.get("ed.status.in_main_ship"))
+    has_lat_long = bool(ed_running and _as_bool(state.get("ed.status.has_lat_long")))
+    supercruise = bool(ed_running and _as_bool(state.get("ed.status.supercruise")))
+    glide_mode = bool(ed_running and _as_bool(state.get("ed.status.glide_mode")) and not supercruise)
+    landed = bool(ed_running and _as_bool(state.get("ed.status.landed")))
+    if on_foot_on_planet:
+        planetary_status = "On Foot"
+    elif landed:
+        planetary_status = "Landed"
+    elif glide_mode:
+        planetary_status = "Glide"
+    elif supercruise and has_lat_long:
+        planetary_status = "OC"
+    elif has_lat_long:
+        planetary_status = "Normal Flight"
+    else:
+        planetary_status = None
+    fighter_model = _first_present(state.get("ed.fighter.model"), "taipan" if in_fighter else None)
+    fighter_name = _first_present(
+        state.get("ed.fighter.model_localised"),
+        "Taipan" if in_fighter else None,
+    )
+    srv_model = _first_present(state.get("ed.srv.model"), "scarab-srv" if in_srv else None)
+    srv_name = _first_present(state.get("ed.srv.model_localised"), "Scarab SRV" if in_srv else None)
+    active_vehicle = "foot" if on_foot else ("fighter" if in_fighter else ("srv" if in_srv else "ship"))
+    mothership_model = _first_present(
+        state.get("ed.status.ship_model"),
+        state.get("ed.telemetry.ship_model"),
+        state.get("ed.modules.ship"),
+    )
+    mothership_name = _first_present(
+        state.get("ed.status.ship_name"),
+        state.get("ed.telemetry.ship_name"),
+        state.get("ed.modules.ship_name"),
+    )
+    current_system_name = _state_value_with_fallback(
+        state,
+        "ed.location.system",
+        "ed.status.system_name",
+        "ed.telemetry.system_name",
+    )
+    current_system_address = _state_value_with_fallback(
+        state,
+        "ed.location.system_address",
+        "ed.status.system_address",
+        "ed.telemetry.system_address",
+    )
+    raw_docking_state_for_station = str(state.get("ed.station.docking_state") or "").strip().lower()
+    station_context_active = bool(
+        _as_bool(state.get("ed.status.docked"))
+        or on_foot_in_station
+        or on_foot_in_hangar
+        or on_foot_social_space
+        or _as_bool(state.get("ed.semantic.opportunity.station_services_available"))
+        or _as_bool(state.get("ed.semantic.station.no_fire_zone"))
+        or raw_docking_state_for_station in {"requested", "granted", "approaching", "docking", "docked"}
+    )
+    station_value = (
+        _state_value_with_fallback(state, "ed.location.station", "ed.telemetry.station_name")
+        if station_context_active
+        else None
+    )
+    nav_route_fallback = (
+        _read_nav_route_fallback(
+            current_system=current_system_name,
+            current_system_address=current_system_address,
+        )
+        if ed_running
+        else {}
+    )
+
+    telemetry = {
+        "running": ed_running,
+        "process_name": state.get("ed.process_name"),
+        "status_available": _as_bool(state.get("ed.status.available")),
+        "ship_name": mothership_name,
+        "ship_model": mothership_model,
+        "mothership_name": mothership_name,
+        "mothership_model": mothership_model,
+        "active_vehicle": active_vehicle,
+        "in_main_ship": in_main_ship,
+        "in_fighter": in_fighter,
+        "in_srv": in_srv,
+        "on_foot": on_foot,
+        "on_foot_in_station": on_foot_in_station,
+        "on_foot_on_planet": on_foot_on_planet,
+        "on_foot_in_hangar": on_foot_in_hangar,
+        "on_foot_social_space": on_foot_social_space,
+        "on_foot_exterior": on_foot_exterior,
+        "suit": {
+            "id": state.get("ed.suit.id"),
+            "name": state.get("ed.suit.name"),
+            "name_localised": state.get("ed.suit.name_localised"),
+            "loadout_id": state.get("ed.suit.loadout_id"),
+            "loadout_name": state.get("ed.suit.loadout_name"),
+            "modules": state.get("ed.suit.modules") if isinstance(state.get("ed.suit.modules"), list) else [],
+            "updated_at": state.get("ed.suit.updated_at"),
+            "selected_weapon": state.get("ed.status.selected_weapon"),
+            "selected_weapon_localised": state.get("ed.status.selected_weapon_localised"),
+            "aim_down_sight": _as_bool(state.get("ed.status.aim_down_sight")),
+            "low_oxygen": _as_bool(state.get("ed.status.low_oxygen")),
+            "low_health": _as_bool(state.get("ed.status.low_health")),
+            "cold": _as_bool(state.get("ed.status.cold")),
+            "hot": _as_bool(state.get("ed.status.hot")),
+            "very_cold": _as_bool(state.get("ed.status.very_cold")),
+            "very_hot": _as_bool(state.get("ed.status.very_hot")),
+            "breathable_atmosphere": _as_bool(state.get("ed.status.breathable_atmosphere")),
+        },
+        "fighter": {
+            "active": _as_bool(state.get("ed.fighter.active")) or in_fighter,
+            "last_event": state.get("ed.fighter.last_event"),
+            "updated_at": state.get("ed.fighter.updated_at"),
+            "loadout": state.get("ed.fighter.loadout"),
+            "id": state.get("ed.fighter.id"),
+            "model": fighter_model if in_fighter else state.get("ed.fighter.model"),
+            "model_localised": state.get("ed.fighter.model_localised"),
+            "player_controlled": state.get("ed.fighter.player_controlled"),
+            "shield_health_percent": _first_present(
+                state.get("ed.fighter.shield_health_percent"),
+                state.get("ed.fighter.shield_percent"),
+                state.get("ed.fighter.shield"),
+            ),
+            "hull_health_percent": _first_present(
+                state.get("ed.fighter.hull_health_percent"),
+                state.get("ed.fighter.hull_percent"),
+                state.get("ed.fighter.hull"),
+            ),
+        },
+        "srv": {
+            "active": in_srv,
+            "model": srv_model,
+            "model_localised": srv_name,
+            "last_event": state.get("ed.srv.last_event"),
+            "updated_at": state.get("ed.srv.updated_at"),
+            "id": state.get("ed.srv.id"),
+            "mothership_name": mothership_name,
+            "mothership_model": mothership_model,
+        },
+        "ship_ident": _first_present(
+            state.get("ed.status.ship_ident"),
+            state.get("ed.telemetry.ship_ident"),
+            state.get("ed.modules.ship_ident"),
+        ),
+        "system": current_system_name,
+        "system_address": current_system_address,
+        "station": station_value,
+        "body": _state_value_with_fallback(state, "ed.location.body", "ed.status.body_name"),
+        "destination_name": state.get("ed.telemetry.destination_name"),
+        "destination_system": state.get("ed.telemetry.destination_system"),
+        "destination_body": state.get("ed.telemetry.destination_body"),
+        "destination_body_type": state.get("ed.telemetry.destination_body_type"),
+        "destination_star_class": state.get("ed.telemetry.destination_star_class"),
+        "destination_remaining_jumps": state.get("ed.telemetry.destination_remaining_jumps"),
+        "star_class": _state_value_with_fallback(
+            state,
+            "ed.system.star_class",
+            "ed.telemetry.star_class",
+        ),
+        "nav_route": state.get("nav_route") or nav_route_fallback.get("nav_route"),
+        "nav_route_origin": state.get("nav_route_origin") or nav_route_fallback.get("nav_route_origin"),
+        "nav_route_destination": state.get("nav_route_destination") or nav_route_fallback.get("nav_route_destination"),
+        "nav_route_next_jump": state.get("nav_route_next_jump") or nav_route_fallback.get("nav_route_next_jump"),
+        "nav_route_upcoming_jumps": (
+            state.get("nav_route_upcoming_jumps")
+            if isinstance(state.get("nav_route_upcoming_jumps"), list)
+            else nav_route_fallback.get("nav_route_upcoming_jumps")
+        ),
+        "nav_route_remaining_jumps": state.get("nav_route_remaining_jumps") or nav_route_fallback.get("nav_route_remaining_jumps"),
+        "nav_route_distance_ly": state.get("nav_route_distance_ly") or nav_route_fallback.get("nav_route_distance_ly"),
+        "on_foot_location": state.get("ed.telemetry.on_foot_location"),
+        "planetary_status": planetary_status,
+        "has_lat_long": has_lat_long,
+        "glide_mode": glide_mode,
+        "altitude_from_average_radius": _as_bool(state.get("ed.status.altitude_from_average_radius")),
+        "last_event": state.get("ed.journal.last_event"),
+        "flags": state.get("ed.status.flags"),
+        "flags2": state.get("ed.status.flags2"),
+        "gui_focus": state.get("ed.status.gui_focus"),
+        "pips": state.get("ed.status.pips"),
+        "fuel": state.get("ed.status.fuel"),
+        "fuel_main": state.get("ed.status.fuel_main"),
+        "fuel_reservoir": state.get("ed.status.fuel_reservoir"),
+        "cargo": state.get("ed.status.cargo"),
+        "legal_state": state.get("ed.status.legal_state"),
+        "fire_group": state.get("ed.status.fire_group"),
+        "temperature": state.get("ed.status.temperature"),
+        "latitude": state.get("ed.status.latitude"),
+        "longitude": state.get("ed.status.longitude"),
+        "altitude": state.get("ed.status.altitude"),
+        "heading": state.get("ed.status.heading"),
+        "hull_percent": _state_value_with_fallback(
+            state,
+            "ed.modules.hull_health_percent",
+            "ed.telemetry.hull_percent",
+        ),
+        "modules_available": _as_bool(state.get("ed.modules.available")),
+        "modules_health_available": _as_bool(state.get("ed.modules.health_available")),
+        "module_power_capacity_mw": state.get("ed.modules.power_capacity_mw"),
+        "module_power_usage_percent": state.get("ed.modules.power_usage_percent"),
+        "module_power_percent_basis": state.get("ed.modules.power_percent_basis"),
+        "module_source": state.get("ed.modules.source"),
+        "module_count": state.get("ed.modules.count"),
+        "modules": module_items,
+        "hardpoints": hardpoints,
+        "has_limpet_controller": has_limpet_controller,
+        "has_cargo_rack": has_cargo_rack,
+        "cargo_inventory": state.get("ed.cargo.items") if isinstance(state.get("ed.cargo.items"), list) else [],
+        "limpet_count": state.get("ed.cargo.limpet_count"),
+        "docked": _as_bool(state.get("ed.status.docked")),
+        "landed": landed,
+        "supercruise": supercruise,
+        "in_hyperspace": _as_bool(state.get("ed.status.in_hyperspace")),
+        "fsd_mass_locked": _as_bool(state.get("ed.status.fsd_mass_locked")),
+        "fsd_charging": _as_bool(state.get("ed.status.fsd_charging")),
+        "fsd_hyperdrive_charging": _as_bool(state.get("ed.status.fsd_hyperdrive_charging")),
+        "fsd_cooldown": _as_bool(state.get("ed.status.fsd_cooldown")),
+        "in_danger": _as_bool(state.get("ed.status.in_danger")),
+        "being_interdicted": _as_bool(state.get("ed.status.being_interdicted")),
+        "overheating": _as_bool(state.get("ed.status.overheating")),
+        "low_fuel": _as_bool(state.get("ed.status.low_fuel")),
+        "hardpoints_deployed": _as_bool(state.get("ed.status.hardpoints_deployed")),
+        "landing_gear_down": _as_bool(state.get("ed.status.landing_gear_down")),
+        "flight_assist_off": _as_bool(state.get("ed.status.flight_assist_off")),
+        "lights_on": _as_bool(state.get("ed.status.lights_on")),
+        "cargo_scoop_deployed": _as_bool(state.get("ed.status.cargo_scoop_deployed")),
+        "night_vision": _as_bool(state.get("ed.status.night_vision")),
+        "analysis_mode": _as_bool(state.get("ed.status.analysis_mode")),
+    }
+    system_detail = {
+        "allegiance": state.get("ed.system.allegiance"),
+        "government": state.get("ed.system.government"),
+        "security": state.get("ed.system.security"),
+        "star_class": _state_value_with_fallback(
+            state,
+            "ed.system.star_class",
+            "ed.telemetry.star_class",
+        ),
+        "economy": state.get("ed.system.economy"),
+        "second_economy": state.get("ed.system.second_economy"),
+        "population": state.get("ed.system.population"),
+        "faction": state.get("ed.system.faction"),
+        "faction_state": state.get("ed.system.faction_state"),
+        "faction_influence": state.get("ed.system.faction_influence"),
+        "faction_happiness": state.get("ed.system.faction_happiness"),
+        "faction_reputation": state.get("ed.system.faction_reputation"),
+        "civil_war": _as_bool(state.get("ed.system.civil_war")),
+        "conflicts": state.get("ed.system.conflicts") if isinstance(state.get("ed.system.conflicts"), list) else [],
+        "squadron_faction": _as_bool(state.get("ed.system.squadron_faction")),
+        "controlling_power": state.get("ed.system.controlling_power"),
+        "powerplay_state": state.get("ed.system.powerplay_state"),
+        "powerplay_control_progress": state.get("ed.system.powerplay_control_progress"),
+        "powerplay_reinforcement": state.get("ed.system.powerplay_reinforcement"),
+        "powerplay_undermining": state.get("ed.system.powerplay_undermining"),
+        "station_faction": state.get("ed.station.faction"),
+        "station_government": state.get("ed.station.government"),
+        "station_economy": state.get("ed.station.economy"),
+        "station_market_id": state.get("ed.station.market_id"),
+        "station_name": state.get("ed.station.name") or state.get("ed.telemetry.station_name"),
+        "station_type": state.get("ed.station.type") or state.get("ed.telemetry.station_type"),
+        "station_is_fleet_carrier": _as_bool(state.get("ed.station.is_fleet_carrier")),
+        "docking_target_name": state.get("ed.station.docking_target_name")
+        or state.get("ed.station.docking_state_station"),
+        "docking_target_type": state.get("ed.station.docking_target_type")
+        or state.get("ed.station.docking_state_station_type"),
+        "docking_target_market_id": state.get("ed.station.docking_target_market_id")
+        or state.get("ed.station.docking_state_market_id"),
+        "docking_granted_pad": state.get("ed.station.docking_granted_pad")
+        or state.get("ed.station.docking_state_landing_pad"),
+        "docking_landing_pads": state.get("ed.station.docking_landing_pads")
+        or state.get("ed.station.docking_state_landing_pads"),
+        "docking_denied_reason": state.get("ed.station.docking_denied_reason")
+        or state.get("ed.station.docking_state_reason"),
+    }
+    target = {
+        "locked": _as_bool(state.get("ed.target.locked")),
+        "updated_at": state.get("ed.target.updated_at"),
+        "scan_stage": state.get("ed.target.scan_stage"),
+        "ship": state.get("ed.target.ship"),
+        "ship_localised": state.get("ed.target.ship_localised"),
+        "pilot_name": state.get("ed.target.pilot_name"),
+        "pilot_rank": state.get("ed.target.pilot_rank"),
+        "faction": state.get("ed.target.faction"),
+        "legal_status": state.get("ed.target.legal_status"),
+        "power": state.get("ed.target.power"),
+        "hostility": state.get("ed.target.hostility"),
+        "commander_power": state.get("ed.commander.power"),
+        "shield_health_percent": state.get("ed.target.shield_health_percent"),
+        "hull_health_percent": state.get("ed.target.hull_health_percent"),
+    }
+    raw_no_fire_zone = _as_bool(state.get("ed.station.no_fire_zone"))
+    semantic_no_fire_zone = _as_bool(state.get("ed.semantic.station.no_fire_zone"))
+    raw_docking_state = str(state.get("ed.station.docking_state") or "").strip().lower()
+    semantic_docking_state = str(state.get("ed.semantic.docking.docking_state") or "").strip().lower()
+    autodock_status = str(state.get("ed.autodock.status") or "").strip().lower()
+    if autodock_status in {"waiting_for_docked", "docking_requested"}:
+        effective_docking_state = "requested"
+        docking_state_source = "autodock"
+    elif raw_docking_state:
+        effective_docking_state = raw_docking_state
+        docking_state_source = "raw"
+    else:
+        effective_docking_state = semantic_docking_state
+        docking_state_source = "semantic" if semantic_docking_state else None
+    semantic = {
+        "no_fire_zone": bool(raw_no_fire_zone or semantic_no_fire_zone),
+        "no_fire_zone_source": "raw" if raw_no_fire_zone else ("semantic" if semantic_no_fire_zone else None),
+        "can_request_docking": _as_bool(state.get("ed.semantic.opportunity.can_request_docking")),
+        "station_services_available": _as_bool(
+            state.get("ed.semantic.opportunity.station_services_available")
+        ),
+        "market_access_available": _as_bool(
+            state.get("ed.semantic.opportunity.market_access_available")
+        ),
+        "target_type": state.get("ed.semantic.target.target_type"),
+        "docking_state": effective_docking_state,
+        "docking_state_source": docking_state_source,
+        "docking_target_name": system_detail.get("docking_target_name"),
+        "docking_target_type": system_detail.get("docking_target_type"),
+        "docking_target_market_id": system_detail.get("docking_target_market_id"),
+        "docking_granted_pad": system_detail.get("docking_granted_pad"),
+        "docking_landing_pads": system_detail.get("docking_landing_pads"),
+        "docking_denied_reason": system_detail.get("docking_denied_reason"),
+        "flight_status": state.get("ed.semantic.flight.flight_status"),
+    }
+
+    safety = {
+        "advice_first": True,
+        "keypress_enabled": bool(ENABLE_KEYPRESS),
+        "safe_for_keypress": bool(ed_running),
+        "semantic_safe_for_keypress": semantic_safe_for_keypress,
+        "input_locked": not (bool(ENABLE_KEYPRESS) and ed_running),
+        "message": None,
+    }
+    if safety["input_locked"]:
+        safety["message"] = "Input actions require Elite running and WKV_ENABLE_KEYPRESS=1. Execution still requires Elite as foreground."
+
+    suggestions: list[dict[str, Any]] = []
+    docking_request_available = bool(
+        not telemetry["docked"]
+        and semantic["no_fire_zone"]
+        and str(semantic["flight_status"] or "").lower() in {"normal_space", "planetary_flight", "unknown", ""}
+        and str(semantic["docking_state"] or "").lower() in {"not_docking", "can_request", "unknown", ""}
+    )
+    if semantic["can_request_docking"]:
+        docking_request_available = True
+    if telemetry["docked"]:
+        suggestions.append(
+            {
+                "id": "single_press_auto_launch",
+                "priority": "medium",
+                "message": "Ready to launch",
+                "detail": safety["message"] if safety["input_locked"] else "Single-press action will launch.",
+                "disabled": bool(safety["input_locked"]),
+                "cockpit_action_intent": _cockpit_action_intent(
+                    tool="input.keypress",
+                    action="auto_launch",
+                    parameters={"mode": "single_press_contextual"},
+                    requires_confirmation=True,
+                ),
+            }
+        )
+    elif docking_request_available:
+        suggestions.append(
+            {
+                "id": "single_press_request_docking",
+                "priority": "high",
+                "message": "Docking request available",
+                "detail": (
+                    safety["message"]
+                    if safety["input_locked"]
+                    else "Inside station no-fire zone; single-press action will request docking."
+                ),
+                "disabled": bool(safety["input_locked"]),
+                "cockpit_action_intent": _cockpit_action_intent(
+                    tool="input.keypress",
+                    action="request_docking",
+                    parameters={"mode": "single_press_contextual"},
+                    requires_confirmation=True,
+                ),
+            }
+        )
+    elif str(semantic["target_type"] or "").lower() in {"station", "outpost", "fleet_carrier"}:
+        suggestions.append(
+            {
+                "id": "approach_no_fire_zone",
+                "priority": "low",
+                "message": "Approach station",
+                "detail": "Docking request will unlock after no-fire-zone entry.",
+                "disabled": True,
+            }
+        )
+
+    if telemetry["docked"] and semantic["station_services_available"]:
+        suggestions.append(
+            {
+                "id": "post_dock_repair_refuel",
+                "priority": "medium",
+                "message": "Station services available",
+                "detail": safety["message"] if safety["input_locked"] else "Post-dock repair/refuel macro can run.",
+                "disabled": bool(safety["input_locked"]),
+                "cockpit_action_intent": _cockpit_action_intent(
+                    tool="input.keypress",
+                    action="repair_refuel",
+                    parameters={"mode": "post_dock_auto_service"},
+                    requires_confirmation=True,
+                ),
+            }
+        )
+
+    if telemetry["overheating"]:
+        suggestions.append(
+            {
+                "id": "heat_high_heatsink",
+                "priority": "critical",
+                "message": "Heat critical",
+                "detail": safety["message"] if safety["input_locked"] else "Deploy a heatsink.",
+                "disabled": bool(safety["input_locked"]),
+                "cockpit_action_intent": _cockpit_action_intent(
+                    tool="input.keypress",
+                    action="deploy_heatsink",
+                    parameters={},
+                    requires_confirmation=True,
+                ),
+            }
+        )
+    if telemetry["being_interdicted"] or telemetry["in_danger"]:
+        suggestions.append(
+            {
+                "id": "danger_defensive",
+                "priority": "critical" if telemetry["being_interdicted"] else "high",
+                "message": "Danger state detected",
+                "detail": safety["message"] if safety["input_locked"] else "Prepare evasive/defensive controls.",
+                "disabled": bool(safety["input_locked"]),
+                "cockpit_action_intent": _cockpit_action_intent(
+                    tool="input.keypress",
+                    action="defensive_manoeuvre",
+                    parameters={},
+                    requires_confirmation=True,
+                ),
+            }
+        )
+    if telemetry["low_fuel"]:
+        suggestions.append(
+            {
+                "id": "low_fuel_warning",
+                "priority": "high",
+                "message": "Fuel low",
+                "detail": "Check route, scoop target, or divert before the next jump.",
+            }
+        )
+    if not obs_up:
+        suggestions.append(
+            {
+                "id": "obs_unavailable",
+                "priority": "medium",
+                "message": "OBS unavailable",
+                "detail": str(obs_status.get("message") or obs_status.get("error") or "OBS status is not up."),
+            }
+        )
+    return {
+        "ok": True,
+        "updated_at_utc": _utc_now_iso(),
+        "telemetry": telemetry,
+        "system_detail": system_detail,
+        "target": target,
+        "semantic": semantic,
+        "suggestions": suggestions,
+        "integrations": {
+            "obs": {
+                "ok": obs_up,
+                "status": obs_status.get("status"),
+                "enabled": obs_status.get("enabled"),
+            },
+        },
+        "safety": safety,
     }
 
 
@@ -621,6 +1281,18 @@ def _query_cached_system_children(
     }
 
 
+def _cached_body_rows_need_enrichment(rows: list[sqlite3.Row]) -> bool:
+    for row in rows:
+        if str(row["body_type"] or "").strip().casefold() != "planet":
+            continue
+        if row["gravity"] is None or row["radius"] is None or row["mass"] is None:
+            return True
+        extras = _as_json(row["mapped_fields_json"], {})
+        if not isinstance(extras, dict) or extras.get("surface_temperature") is None:
+            return True
+    return False
+
+
 def _query_live_current_system_children(
     *,
     operation: ProviderOperationId,
@@ -634,16 +1306,13 @@ def _query_live_current_system_children(
         params["system_name"] = system_name
     if system_address is not None:
         params["system_address"] = system_address
-    result = ED_PROVIDER_QUERY_SERVICE.execute(
-        ProviderQuery(
-            provider=ProviderId.SPANSH,
-            operation=operation,
-            params=params,
-            max_age_s=max_age_s,
-            allow_stale_if_error=allow_stale,
-            incident_id=None,
-            reason=f"current_system_{operation.value}",
-        )
+    result = ED_PROVIDER_QUERY_SERVICE.execute_priority(
+        operation=operation,
+        params=params,
+        max_age_s=max_age_s,
+        allow_stale_if_error=allow_stale,
+        incident_id=None,
+        reason=f"current_system_{operation.value}",
     )
     return result.to_dict()
 
@@ -687,6 +1356,7 @@ def query_current_station_detail(query: dict[str, list[str]]) -> dict[str, Any]:
                 "docked": False,
             },
             "semantic": {
+                "no_fire_zone": False,
                 "station_services_available": False,
                 "market_access_available": False,
             },
@@ -719,6 +1389,7 @@ def query_current_station_detail(query: dict[str, list[str]]) -> dict[str, Any]:
                 "docked": False,
             },
             "semantic": {
+                "no_fire_zone": bool(state.get("ed.semantic.station.no_fire_zone")),
                 "station_services_available": False,
                 "market_access_available": False,
             },
@@ -775,6 +1446,7 @@ def query_current_station_detail(query: dict[str, list[str]]) -> dict[str, Any]:
 
     station_services_available = bool(state.get("ed.semantic.opportunity.station_services_available"))
     market_access_available = bool(state.get("ed.semantic.opportunity.market_access_available"))
+    no_fire_zone = bool(state.get("ed.semantic.station.no_fire_zone"))
     docked = bool(_state_value_with_fallback(state, "ed.telemetry.dock_state", "ed.status.docked"))
 
     return {
@@ -786,6 +1458,7 @@ def query_current_station_detail(query: dict[str, list[str]]) -> dict[str, Any]:
             "docked": docked,
         },
         "semantic": {
+            "no_fire_zone": no_fire_zone,
             "station_services_available": station_services_available,
             "market_access_available": market_access_available,
         },
@@ -850,7 +1523,7 @@ def query_current_system_bodies(query: dict[str, list[str]]) -> dict[str, Any]:
         system_address=system_address,
         limit=limit,
     )
-    if cached is not None:
+    if cached is not None and not _cached_body_rows_need_enrichment(cached["rows"]):
         items = []
         for row in cached["rows"]:
             items.append(
@@ -986,7 +1659,30 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     state = _state_map()
     capabilities = [] if fast else _query_capabilities()
     now_ts = time.time()
-    alarms = [e for e in events if str(e.get("severity") or "").lower() in {"warn", "error"}]
+    def is_expected_sammi_absent(event: dict[str, Any]) -> bool:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            return False
+        error = str(payload.get("error") or "").lower()
+        return (
+            str(event.get("event_type") or "") == "AUX_APP_ERROR"
+            and str(payload.get("app") or "").lower() == "sammi"
+            and (
+                error == "sammi never observed in this session"
+                or error.startswith("sammi startup grace active")
+                or error.startswith("sammi missing holdoff active")
+                or error.startswith("sammi restart suppress active")
+                or error.startswith("sammi launch backoff active")
+                or error == "sammi autorun disabled"
+            )
+        )
+
+    alarms = [
+        e
+        for e in events
+        if str(e.get("severity") or "").lower() in {"warn", "error"}
+        and not is_expected_sammi_absent(e)
+    ]
     music_now_playing = state.get("music.now_playing")
     if not isinstance(music_now_playing, dict):
         music_now_playing = {}
@@ -1004,7 +1700,13 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
         state.get("music.playing"),
         state.get("music.status.playing"),
     )
-    if music_playing is None and any(
+    music_app_running = _as_bool(state.get("music.app_running"))
+    if not music_app_running:
+        music_playing = False
+        music_title = ""
+        music_artist = ""
+        music_now_playing = {}
+    elif music_playing is None and any(
         [music_title, music_artist, music_now_playing.get("now_playing")]
     ):
         music_playing = True
@@ -1055,6 +1757,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     ed_semantic_fuel_state = state.get("ed.semantic.ship.fuel_state")
     ed_semantic_integrity_state = state.get("ed.semantic.ship.integrity_state")
     ed_semantic_target_type = state.get("ed.semantic.target.target_type")
+    ed_semantic_no_fire_zone = state.get("ed.semantic.station.no_fire_zone")
     ed_semantic_risk_level = state.get("ed.semantic.risk.risk_level")
     ed_semantic_primary_risk = state.get("ed.semantic.risk.primary_risk")
     ed_semantic_control_profile = state.get("ed.semantic.interface.control_profile")
@@ -1075,7 +1778,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
     sammi_api_last_cycle_ms = state.get("app.sammi.api.last_cycle_ms")
     sammi_api_deferred_count = state.get("app.sammi.api.deferred_count")
     sammi_api_suppressed_count = state.get("app.sammi.api.suppressed_count")
-    ytmd_running = bool(state.get("music.app_running"))
+    ytmd_running = music_app_running
     queue_depth = (
         state.get("queue.depth")
         or state.get("brainstem.queue.depth")
@@ -1179,6 +1882,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                     "fuel_state": ed_semantic_fuel_state,
                     "integrity_state": ed_semantic_integrity_state,
                     "target_type": ed_semantic_target_type,
+                    "no_fire_zone": ed_semantic_no_fire_zone,
                     "risk_level": ed_semantic_risk_level,
                     "primary_risk": ed_semantic_primary_risk,
                     "control_profile": ed_semantic_control_profile,
@@ -1254,6 +1958,7 @@ def query_sitrep(query: dict[str, list[str]]) -> dict[str, Any]:
                 "ed.semantic.ship.fuel_state",
                 "ed.semantic.ship.integrity_state",
                 "ed.semantic.target.target_type",
+                "ed.semantic.station.no_fire_zone",
                 "ed.semantic.risk.risk_level",
                 "ed.semantic.risk.primary_risk",
                 "ed.semantic.interface.control_profile",

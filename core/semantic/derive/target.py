@@ -27,6 +27,7 @@ def derive_target_type(raw, _sem, _now_ms: int):
         destination_body_type = str(
             destination.get("BodyType")
             or raw.get_raw_value("ed.telemetry.destination_body_type")
+            or raw.get_raw_value("ed.station.docking_target_type")
             or ""
         ).strip()
         if destination_body_type:
@@ -39,6 +40,16 @@ def derive_target_type(raw, _sem, _now_ms: int):
                 return _out("fleet_carrier", ["Status.Destination.Name"])
             if any(token in lower_name for token in STATIONISH_TOKENS):
                 return _out("station", ["Status.Destination.Name"])
+        docking_target_type = str(raw.get_raw_value("ed.station.docking_target_type") or "").strip()
+        if docking_target_type:
+            mapped = _map_explicit(docking_target_type)
+            if mapped:
+                return _out(mapped, ["ed.station.docking_target_type"])
+        docking_target_name = str(raw.get_raw_value("ed.station.docking_target_name") or "").strip()
+        if docking_target_name:
+            if looks_like_fleet_carrier_callsign(docking_target_name):
+                return _out("fleet_carrier", ["ed.station.docking_target_name"])
+            return _out("station", ["ed.station.docking_target_name"])
         return {"type": "enum", "value": "none", "confidence": "best_effort", "derived_from": ["Status.Target", "Status.Destination"]}
 
     explicit_type = target.get("Type") or target.get("TargetType") or target.get("Kind")

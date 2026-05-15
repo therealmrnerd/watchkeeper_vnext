@@ -75,6 +75,7 @@ class UIServedTests(unittest.TestCase):
         self.assertIn("Clear Secure Store", body)
         self.assertIn("Runtime Settings", body)
         self.assertIn("OBS Status", body)
+        self.assertIn("Open MFD Display", body)
 
     def test_ui_asset_served(self) -> None:
         status, body = self._request("/app.js")
@@ -84,6 +85,50 @@ class UIServedTests(unittest.TestCase):
         status, body = self._request("/styles.css")
         self.assertEqual(status, 200)
         self.assertIn(".topbar", body)
+
+    def test_mfd_display_served(self) -> None:
+        status, body = self._request("/mfd.html")
+        self.assertEqual(status, 200)
+        self.assertIn("Watchkeeper MFD", body)
+        self.assertIn("mfd.js", body)
+        self.assertIn("mfd.webmanifest", body)
+        self.assertIn("mfdLightSyncToggle", body)
+        self.assertIn("mfdSrvPane", body)
+        self.assertIn("mfdSlfPane", body)
+        self.assertIn("mfdPlanetPane", body)
+        self.assertIn("mfdOnFootPlanetPane", body)
+        self.assertIn("mfdOnFootStationPane", body)
+        self.assertIn("Enter MFD Fullscreen", body)
+
+        status, body = self._request("/mfd.js")
+        self.assertEqual(status, 200)
+        self.assertIn("/mfd/state", body)
+        self.assertIn("/mfd/stream", body)
+        self.assertIn("/settings", body)
+        self.assertIn("jinx_lighting", body)
+        self.assertIn("renderSrvPane", body)
+        self.assertIn("renderSlfPane", body)
+        self.assertIn("renderPlanetPane", body)
+        self.assertIn("renderOnFootPlanetPane", body)
+        self.assertIn("renderOnFootStationPane", body)
+        self.assertIn("requestFullscreen", body)
+        self.assertIn("serviceWorker", body)
+
+        status, body = self._request("/mfd.css")
+        self.assertEqual(status, 200)
+        self.assertIn(".mfd-shell", body)
+
+        status, body = self._request("/mfd.webmanifest")
+        self.assertEqual(status, 200)
+        self.assertIn('"display": "fullscreen"', body)
+        self.assertIn('"orientation": "landscape"', body)
+
+        status, body = self._request("/mfd-sw.js")
+        self.assertEqual(status, 200)
+        self.assertIn("watchkeeper-mfd", body)
+        self.assertIn("/cockpit/", body)
+        self.assertIn("/mfd/", body)
+        self.assertIn("/settings", body)
 
 
 if __name__ == "__main__":

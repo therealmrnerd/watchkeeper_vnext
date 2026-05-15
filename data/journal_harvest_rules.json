@@ -1,21 +1,143 @@
 {
   "version": "1.0",
-  "notes": "Initial allowlist for schema-aware journal harvesting. Keep intentionally small.",
+  "notes": "Allowlist for schema-aware journal harvesting. Travel events are broad enough for later MFD tidbits while avoiding full journal mirroring.",
   "events": {
+    "Location": {
+      "fields": [
+        "Docked", "Taxi", "Multicrew", "Wanted",
+        "StarSystem", "SystemAddress", "StarPos",
+        "SystemAllegiance", "SystemEconomy", "SystemEconomy_Localised",
+        "SystemSecondEconomy", "SystemSecondEconomy_Localised",
+        "SystemGovernment", "SystemGovernment_Localised",
+        "SystemSecurity", "SystemSecurity_Localised",
+        "Population", "Body", "BodyID", "BodyType", "DistFromStarLS",
+        "SystemFaction", "Powers", "ControllingPower", "PowerplayState",
+        "PowerplayStateControlProgress", "PowerplayStateReinforcement",
+        "PowerplayStateUndermining", "PowerplayConflictProgress",
+        "ThargoidWar", "Factions", "Conflicts", "OnFoot", "InSRV",
+        "StationName", "StationName_Localised", "StationType", "MarketID",
+        "StationFaction", "StationGovernment", "StationGovernment_Localised",
+        "StationServices", "StationEconomy", "StationEconomy_Localised",
+        "StationEconomies", "StationAllegiance",
+        "Latitude", "Longitude"
+      ]
+    },
+    "CarrierJump": {
+      "fields": [
+        "Docked", "OnFoot", "Taxi", "Multicrew", "Wanted",
+        "StarSystem", "SystemAddress", "StarPos",
+        "SystemAllegiance", "SystemEconomy", "SystemEconomy_Localised",
+        "SystemSecondEconomy", "SystemSecondEconomy_Localised",
+        "SystemGovernment", "SystemGovernment_Localised",
+        "SystemSecurity", "SystemSecurity_Localised",
+        "Population", "Body", "BodyID", "BodyType",
+        "SystemFaction", "Powers", "ControllingPower", "PowerplayState",
+        "PowerplayStateControlProgress", "PowerplayStateReinforcement",
+        "PowerplayStateUndermining", "PowerplayConflictProgress",
+        "ThargoidWar", "Factions", "Conflicts", "StationName", "StationType", "MarketID",
+        "StationFaction", "StationGovernment", "StationGovernment_Localised",
+        "StationServices", "StationEconomy", "StationEconomy_Localised",
+        "StationEconomies"
+      ]
+    },
+    "StartJump": {
+      "fields": ["Taxi", "JumpType", "StarSystem", "SystemAddress", "StarClass"]
+    },
+    "FSDJump": {
+      "fields": [
+        "Taxi", "Multicrew", "Wanted",
+        "StarSystem", "SystemAddress", "StarPos", "StarClass",
+        "SystemAllegiance", "SystemEconomy", "SystemEconomy_Localised",
+        "SystemSecondEconomy", "SystemSecondEconomy_Localised",
+        "SystemGovernment", "SystemGovernment_Localised",
+        "SystemSecurity", "SystemSecurity_Localised",
+        "Population", "Body", "BodyID", "BodyType",
+        "JumpDist", "FuelUsed", "FuelLevel", "BoostUsed",
+        "SystemFaction", "Powers", "ControllingPower", "PowerplayState",
+        "PowerplayStateControlProgress", "PowerplayStateReinforcement",
+        "PowerplayStateUndermining", "PowerplayConflictProgress",
+        "ThargoidWar", "Factions", "Conflicts"
+      ]
+    },
     "FSDTarget": {
       "fields": ["Name", "SystemAddress", "StarClass", "RemainingJumpsInRoute"]
     },
-    "ShipTargeted": {
-      "fields": ["TargetLocked", "PilotName", "PilotRank", "Faction", "LegalStatus", "Subsystem"]
+    "NavRoute": {
+      "fields": ["Route"]
     },
     "NavRouteClear": {
       "fields": ["Route"]
     },
+    "SupercruiseEntry": {
+      "fields": ["Taxi", "Multicrew", "StarSystem", "SystemAddress", "Wanted"]
+    },
+    "SupercruiseExit": {
+      "fields": ["Taxi", "Multicrew", "StarSystem", "SystemAddress", "Body", "BodyID", "BodyType"]
+    },
     "SupercruiseDestinationDrop": {
-      "fields": ["Type", "Body", "BodyType", "StarSystem", "SystemAddress"]
+      "fields": ["Type", "Type_Localised", "MarketID", "Threat", "Body", "BodyName", "BodyType", "StarSystem", "SystemAddress"]
+    },
+    "ApproachBody": {
+      "fields": ["StarSystem", "SystemAddress", "Body", "BodyID"]
+    },
+    "LeaveBody": {
+      "fields": ["StarSystem", "SystemAddress", "Body", "BodyID"]
+    },
+    "Touchdown": {
+      "fields": [
+        "PlayerControlled", "Taxi", "Multicrew",
+        "StarSystem", "SystemAddress", "Body", "BodyID",
+        "OnStation", "OnPlanet", "Latitude", "Longitude",
+        "NearestDestination", "NearestDestination_Localised"
+      ]
+    },
+    "Liftoff": {
+      "fields": [
+        "PlayerControlled", "Taxi", "Multicrew",
+        "StarSystem", "SystemAddress", "Body", "BodyID",
+        "OnStation", "OnPlanet", "Latitude", "Longitude",
+        "NearestDestination", "NearestDestination_Localised"
+      ]
+    },
+    "ApproachSettlement": {
+      "fields": [
+        "Name", "Name_Localised", "MarketID", "SystemAddress", "BodyID", "BodyName",
+        "Latitude", "Longitude", "StationFaction", "StationGovernment",
+        "StationGovernment_Localised", "StationAllegiance", "StationServices",
+        "StationEconomy", "StationEconomy_Localised", "StationEconomies"
+      ]
+    },
+    "ShipTargeted": {
+      "fields": ["TargetLocked", "PilotName", "PilotRank", "Faction", "LegalStatus", "Subsystem"]
+    },
+    "DockingRequested": {
+      "fields": ["MarketID", "StationName", "StationName_Localised", "StationType", "LandingPads"]
+    },
+    "DockingGranted": {
+      "fields": ["LandingPad", "MarketID", "StationName", "StationName_Localised", "StationType"]
+    },
+    "DockingDenied": {
+      "fields": ["Reason", "MarketID", "StationName", "StationName_Localised", "StationType"]
+    },
+    "DockingCancelled": {
+      "fields": ["MarketID", "StationName", "StationName_Localised", "StationType"]
+    },
+    "DockingTimeout": {
+      "fields": ["MarketID", "StationName", "StationName_Localised", "StationType"]
     },
     "Docked": {
-      "fields": ["StationName", "StationType", "StationFaction", "StarSystem", "LandingPads"]
+      "fields": [
+        "StationName", "StationName_Localised", "StationType",
+        "Taxi", "Multicrew", "StarSystem", "SystemAddress",
+        "MarketID", "StationFaction", "StationGovernment",
+        "StationGovernment_Localised", "StationServices",
+        "StationEconomy", "StationEconomy_Localised", "StationEconomies",
+        "DistFromStarLS", "LandingPads", "Wanted", "ActiveFine",
+        "StationAllegiance", "CockpitBreach", "StationState"
+      ]
+    },
+    "Undocked": {
+      "fields": ["StationName", "StationName_Localised", "StationType", "MarketID", "Taxi", "Multicrew"]
     }
   }
 }

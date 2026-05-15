@@ -32,6 +32,8 @@ class TelemetryRawStore:
     def get_raw_value(self, path: str) -> Any:
         if path == "NavRoute.NextLegCost":
             return self.values.get("ed.telemetry.navroute_next_leg_cost")
+        if path == "ed.station.no_fire_zone":
+            return self.values.get("ed.station.no_fire_zone")
         return self.values.get(path)
 
     def _build_status(self) -> dict[str, Any]:
@@ -101,6 +103,7 @@ def compute_ed_semantic_records(values: dict[str, Any], now_ms: int | None = Non
         "ed.telemetry.destination_system",
         "ed.telemetry.destination_body",
         "ed.telemetry.destination_body_type",
+        "ed.station.no_fire_zone",
         "NavRoute.NextLegCost",
     ]
     engine.update(dirty, raw.now_ms())
@@ -124,6 +127,7 @@ def explain_ed_semantic(values: dict[str, Any], key: str, now_ms: int | None = N
         "ed.telemetry.destination_system",
         "ed.telemetry.destination_body",
         "ed.telemetry.destination_body_type",
+        "ed.station.no_fire_zone",
         "NavRoute.NextLegCost",
     ]
     engine.update(dirty, raw.now_ms())

@@ -21,9 +21,9 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
     "syncs": {
         "ed_provider_autocache": {"enabled": True, "live_applied": True, "label": "ED Provider Autocache"},
         "inara_location_sync": {"enabled": True, "live_applied": True, "label": "Inara Location Sync"},
-        "jinx_lighting": {"enabled": True, "live_applied": True, "label": "Jinx Lighting Sync"},
+        "jinx_lighting": {"enabled": False, "live_applied": True, "label": "Light Sync"},
         "ytmd_ingest": {"enabled": True, "live_applied": True, "label": "YTMD Ingest"},
-        "sammi_bridge": {"enabled": True, "live_applied": True, "label": "SAMMI Bridge"},
+        "sammi_bridge": {"enabled": False, "live_applied": True, "label": "SAMMI Bridge"},
         "twitch_ingest": {"enabled": True, "live_applied": True, "label": "Twitch Ingest"},
         "obs_status": {"enabled": False, "live_applied": True, "label": "OBS Status Polling"},
         "obs_effect_triggers": {"enabled": False, "live_applied": False, "label": "OBS Effect Triggers"},

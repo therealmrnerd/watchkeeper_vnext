@@ -2222,6 +2222,28 @@ button.secondary {
   box-shadow: inset 0 0 0 1px rgba(207, 225, 242, 0.25);
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid #6f8aa8;
+  border-radius: 4px;
+  background: #263343;
+  color: #f5fbff;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.cockpit-admin-actions {
+  margin-top: 12px;
+}
+
+.cockpit-toggle-grid {
+  margin-bottom: 10px;
+}
+
 .incident-id {
   background: #1f1f1f;
   border: 1px solid #4a4a4a;
@@ -2243,6 +2265,46 @@ button.secondary {
   color: #ff7676;
 }
 
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 14px;
+}
+
+.cockpit-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.cockpit-suggestions {
+  display: grid;
+  gap: 10px;
+}
+
+.cockpit-suggestion {
+  border: 1px solid #3f5268;
+  border-radius: 6px;
+  background: #17202a;
+  padding: 10px;
+}
+
+.cockpit-priority-critical {
+  border-color: #d65f5f;
+  background: #2b171c;
+}
+
+.cockpit-priority-high {
+  border-color: #d6a45f;
+  background: #2b2317;
+}
+
+.cockpit-action-btn {
+  margin-top: 8px;
+}
+
+.cockpit-code {
+  min-height: 110px;
+}
+
 a {
   color: #7ec0ff;
 }
@@ -2258,6 +2320,10 @@ a {
   }
 
   .console-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cockpit-grid {
     grid-template-columns: 1fr;
   }
 

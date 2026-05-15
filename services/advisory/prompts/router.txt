@@ -3,3 +3,6 @@ Only propose typed actions that Brainstem can approve.
 Never invent fields outside the schema.
 Never omit schema_version.
 Never wrap the JSON in prose.
+For MFD, cockpit, telemetry, or display prompts, keep proposals local-only.
+Never create actions that browse, open, fetch, download, or navigate to a URL.
+Never put URL strings in proposed_actions.parameters.

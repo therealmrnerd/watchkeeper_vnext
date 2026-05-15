@@ -22,14 +22,18 @@ def derive_can_request_docking(raw, sem, _now_ms: int):
     combat = _semantic_value(sem, "ed.semantic.combat.combat_state")
     risk = _semantic_value(sem, "ed.semantic.risk.risk_level")
     target = _semantic_value(sem, "ed.semantic.target.target_type")
+    no_fire_zone = _semantic_value(sem, "ed.semantic.station.no_fire_zone")
     destination_name = str(raw.get_raw_value("ed.telemetry.destination_name") or "").strip()
     destination_body_type = str(raw.get_raw_value("ed.telemetry.destination_body_type") or "").strip().lower()
     station_approach = bool(
-        destination_name
-        and (
-            target in {"station", "outpost", "fleet_carrier"}
-            or destination_body_type in {"station", "outpost", "fleetcarrier", "fleet_carrier"}
-            or any(token in destination_name.lower() for token in STATIONISH_TOKENS)
+        no_fire_zone is True
+        or (
+            destination_name
+            and (
+                target in {"station", "outpost", "fleet_carrier"}
+                or destination_body_type in {"station", "outpost", "fleetcarrier", "fleet_carrier"}
+                or any(token in destination_name.lower() for token in STATIONISH_TOKENS)
+            )
         )
     )
 
@@ -39,6 +43,7 @@ def derive_can_request_docking(raw, sem, _now_ms: int):
         and combat == "idle"
         and risk != "red"
         and station_approach
+        and no_fire_zone is True
     )
     return {
         "type": "boolean",
@@ -50,8 +55,25 @@ def derive_can_request_docking(raw, sem, _now_ms: int):
             "ed.semantic.combat.combat_state",
             "ed.semantic.risk.risk_level",
             "ed.semantic.target.target_type",
+            "ed.semantic.station.no_fire_zone",
             "ed.telemetry.destination_name",
             "ed.telemetry.destination_body_type",
+        ],
+    }
+
+
+def derive_station_no_fire_zone(raw, _sem, _now_ms: int):
+    value = raw.get_raw_value("ed.station.no_fire_zone")
+    return {
+        "type": "boolean",
+        "value": bool(value),
+        "confidence": "event_derived" if value is not None else "unknown",
+        "derived_from": [
+            "Journal.ReceiveText.STATION_NoFireZone_entered",
+            "Journal.ReceiveText.STATION_NoFireZone_exited",
+            "Journal.Docked",
+            "Journal.FSDJump",
+            "Journal.SupercruiseEntry",
         ],
     }
 

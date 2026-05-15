@@ -215,12 +215,22 @@
       "mvp": true
     },
     {
+      "key": "ed.semantic.station.no_fire_zone",
+      "domain": "station",
+      "type": "boolean",
+      "allowed_values": [true, false],
+      "meaning": "Commander is currently inside a station no-fire zone based on journal entry/exit messages.",
+      "derive_from": ["ed.station.no_fire_zone", "Journal.ReceiveText.STATION_NoFireZone_entered", "Journal.ReceiveText.STATION_NoFireZone_exited", "Journal.Docked", "Journal.FSDJump", "Journal.SupercruiseEntry"],
+      "priority": 3,
+      "mvp": true
+    },
+    {
       "key": "ed.semantic.opportunity.can_request_docking",
       "domain": "opportunity",
       "type": "boolean",
       "allowed_values": [true, false],
       "meaning": "Suggest/enable docking request now.",
-      "derive_from": ["ed.semantic.flight.flight_status", "ed.semantic.docking.docking_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level", "ed.semantic.target.target_type", "ed.telemetry.destination_name", "ed.telemetry.destination_body_type"],
+      "derive_from": ["ed.semantic.flight.flight_status", "ed.semantic.docking.docking_state", "ed.semantic.combat.combat_state", "ed.semantic.risk.risk_level", "ed.semantic.target.target_type", "ed.semantic.station.no_fire_zone", "ed.telemetry.destination_name", "ed.telemetry.destination_body_type"],
       "priority": 3,
       "mvp": true
     },

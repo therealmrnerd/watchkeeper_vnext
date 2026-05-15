@@ -533,27 +533,98 @@ class EdsmSystemLookupAdapter:
             "fetched_at": fetched_at,
         }
 
+    @staticmethod
+    def _normalize_bodies(record: dict[str, Any], fetched_at: str) -> dict[str, Any]:
+        bodies_raw = record.get("bodies") if isinstance(record.get("bodies"), list) else []
+        items: list[dict[str, Any]] = []
+        system_address = int(record["id64"]) if record.get("id64") is not None else None
+        system_name = str(record.get("name") or "")
+        for raw in bodies_raw:
+            if not isinstance(raw, dict):
+                continue
+            extras = {
+                "body_id": raw.get("bodyId"),
+                "edsm_id": raw.get("id"),
+                "discovery": raw.get("discovery"),
+                "parents": raw.get("parents"),
+                "is_main_star": raw.get("isMainStar"),
+                "is_scoopable": raw.get("isScoopable"),
+                "is_landable": raw.get("isLandable"),
+                "surface_temperature": raw.get("surfaceTemperature"),
+                "surface_pressure": raw.get("surfacePressure"),
+                "volcanism_type": raw.get("volcanismType"),
+                "atmosphere_composition": raw.get("atmosphereComposition"),
+                "solid_composition": raw.get("solidComposition"),
+                "orbital_period": raw.get("orbitalPeriod"),
+                "semi_major_axis": raw.get("semiMajorAxis"),
+                "orbital_eccentricity": raw.get("orbitalEccentricity"),
+                "orbital_inclination": raw.get("orbitalInclination"),
+                "arg_of_periapsis": raw.get("argOfPeriapsis"),
+                "rotational_period": raw.get("rotationalPeriod"),
+                "rotational_period_tidally_locked": raw.get("rotationalPeriodTidallyLocked"),
+                "axial_tilt": raw.get("axialTilt"),
+                "materials": raw.get("materials"),
+                "age": raw.get("age"),
+                "spectral_class": raw.get("spectralClass"),
+                "luminosity": raw.get("luminosity"),
+                "absolute_magnitude": raw.get("absoluteMagnitude"),
+                "provider_updated_at": raw.get("updateTime"),
+            }
+            items.append(
+                {
+                    "body_id64": raw.get("id64"),
+                    "system_address": system_address,
+                    "system_name": system_name,
+                    "name": str(raw.get("name") or ""),
+                    "body_type": raw.get("type"),
+                    "subtype": raw.get("subType"),
+                    "distance_to_arrival_ls": raw.get("distanceToArrival"),
+                    "terraform_state": raw.get("terraformingState"),
+                    "atmosphere": raw.get("atmosphereType"),
+                    "gravity": raw.get("gravity"),
+                    "radius": raw.get("solarRadius") if raw.get("solarRadius") is not None else raw.get("radius"),
+                    "mass": raw.get("solarMasses") if raw.get("solarMasses") is not None else raw.get("earthMasses"),
+                    "extras": extras,
+                }
+            )
+        return {
+            "system_address": system_address,
+            "system_name": system_name,
+            "body_count": int(record.get("bodyCount") or len(items) or 0),
+            "items": items,
+            "fetched_at": fetched_at,
+        }
+
     def lookup(self, request: ProviderQuery) -> tuple[dict[str, Any], dict[str, Any]]:
-        if request.operation != ProviderOperationId.SYSTEM_LOOKUP:
+        if request.operation not in {ProviderOperationId.SYSTEM_LOOKUP, ProviderOperationId.BODIES_LOOKUP}:
             raise ValueError(f"edsm does not implement {request.operation.value}")
         system_name = str(request.params.get("system_name") or "").strip()
         if not system_name:
-            raise ValueError("params.system_name is required for edsm system_lookup")
-        query = urllib.parse.urlencode(
-            {
-                "systemName": system_name,
-                "showCoordinates": 1,
-                "showInformation": 1,
-                "showPermit": 1,
-                "showId": 1,
-            }
-        )
-        endpoint_url = f"{self.base_url}/api-v1/system?{query}"
+            raise ValueError(f"params.system_name is required for edsm {request.operation.value}")
+        if request.operation == ProviderOperationId.SYSTEM_LOOKUP:
+            query = urllib.parse.urlencode(
+                {
+                    "systemName": system_name,
+                    "showCoordinates": 1,
+                    "showInformation": 1,
+                    "showPermit": 1,
+                    "showId": 1,
+                }
+            )
+            endpoint_url = f"{self.base_url}/api-v1/system?{query}"
+        else:
+            query = urllib.parse.urlencode({"systemName": system_name})
+            endpoint_url = f"{self.base_url}/api-system-v1/bodies?{query}"
         payload, status_code = self._get_json(endpoint_url)
         if not isinstance(payload, dict) or not str(payload.get("name") or "").strip():
             raise LookupError(f"edsm system not found: {system_name}")
         fetched_at = _utc_now_iso()
-        return self._normalize_record(payload, fetched_at), {
+        normalized = (
+            self._normalize_record(payload, fetched_at)
+            if request.operation == ProviderOperationId.SYSTEM_LOOKUP
+            else self._normalize_bodies(payload, fetched_at)
+        )
+        return normalized, {
             "endpoint": endpoint_url,
             "http_code": status_code,
             "raw": payload,
@@ -1511,19 +1582,6 @@ class ProviderQueryService:
                 data=None,
                 provenance=ProviderProvenance(endpoint=None, http_code=None),
                 error=f"{request.provider.value} does not support {request.operation.value}",
-                deny_reason=ProviderDenyReason.NO_INTENT,
-            )
-        if request.provider == ProviderId.EDSM and request.operation != ProviderOperationId.SYSTEM_LOOKUP:
-            return ProviderResult(
-                ok=False,
-                provider=request.provider,
-                operation=request.operation,
-                fetched_at=_utc_now_iso(),
-                cache=ProviderCacheMeta(),
-                health_observed=self._get_health(request.provider),
-                data=None,
-                provenance=ProviderProvenance(endpoint=None, http_code=None),
-                error=f"{request.provider.value} adapter does not implement {request.operation.value}",
                 deny_reason=ProviderDenyReason.NO_INTENT,
             )
         if request.provider == ProviderId.INARA and request.operation == ProviderOperationId.COMMANDER_LOCATION_PUSH:

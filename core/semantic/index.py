@@ -12,6 +12,7 @@ from .derive.opportunity import (
     derive_can_request_docking,
     derive_market_access_available,
     derive_safe_for_keypress,
+    derive_station_no_fire_zone,
     derive_station_services_available,
 )
 from .derive.risk import derive_primary_risk, derive_risk_level
@@ -40,6 +41,7 @@ def create_semantic_engine(raw, sem) -> SemanticEngine:
     engine.register("ed.semantic.target.target_type", derive_target_type)
     engine.register("ed.semantic.risk.risk_level", derive_risk_level)
     engine.register("ed.semantic.risk.primary_risk", derive_primary_risk)
+    engine.register("ed.semantic.station.no_fire_zone", derive_station_no_fire_zone)
     engine.register("ed.semantic.opportunity.can_request_docking", derive_can_request_docking)
     engine.register("ed.semantic.opportunity.station_services_available", derive_station_services_available)
     engine.register("ed.semantic.opportunity.market_access_available", derive_market_access_available)

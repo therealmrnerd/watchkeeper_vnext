@@ -149,6 +149,52 @@ class ProviderQueryTests(unittest.TestCase):
                     },
                 }
             )
+        if url == "https://www.edsm.net/api-system-v1/bodies?systemName=Sol":
+            return _FakeResponse(
+                {
+                    "name": "Sol",
+                    "id": 27,
+                    "id64": 10477373803,
+                    "bodyCount": 2,
+                    "bodies": [
+                        {
+                            "id": 100,
+                            "id64": 20477373803,
+                            "bodyId": 0,
+                            "name": "Sol",
+                            "type": "Star",
+                            "subType": "G (White-Yellow) Star",
+                            "distanceToArrival": 0,
+                            "isMainStar": True,
+                            "solarMasses": 1.0,
+                            "solarRadius": 1.0,
+                            "surfaceTemperature": 5778,
+                        },
+                        {
+                            "id": 101,
+                            "id64": 20477373804,
+                            "bodyId": 3,
+                            "name": "Earth",
+                            "type": "Planet",
+                            "subType": "Earth-like world",
+                            "distanceToArrival": 499,
+                            "isLandable": False,
+                            "gravity": 1.0,
+                            "earthMasses": 1.0,
+                            "radius": 6371.0,
+                            "surfaceTemperature": 288,
+                            "surfacePressure": 1.0,
+                            "volcanismType": "No volcanism",
+                            "atmosphereType": "Suitable for water-based life",
+                            "terraformingState": "Terraformable",
+                            "orbitalPeriod": 365.25,
+                            "semiMajorAxis": 1.0,
+                            "orbitalEccentricity": 0.0167,
+                            "materials": {"Iron": 32.1},
+                        },
+                    ],
+                }
+            )
         if url == "https://inara.cz/inapi/v1/":
             body = json.loads(req.data.decode("utf-8"))
             event = body["events"][0]
@@ -249,6 +295,46 @@ class ProviderQueryTests(unittest.TestCase):
             self.assertEqual(body_rows[0][0], "Earth")
             self.assertEqual(body_rows[0][1], "Planet")
             self.assertEqual(body_rows[0][2], "spansh")
+
+    def test_edsm_bodies_lookup_persists_rich_body_rows(self) -> None:
+        service = ProviderQueryService(
+            db_path=self.db_path,
+            config_path=self.config_path,
+            opener=self._opener,
+        )
+        result = service.execute(
+            ProviderQuery(
+                provider=ProviderId.EDSM,
+                operation=ProviderOperationId.BODIES_LOOKUP,
+                params={"system_name": "Sol"},
+                max_age_s=86400,
+                allow_stale_if_error=True,
+                incident_id="inc-test-edsm-bodies",
+                reason="unit_test_edsm_bodies",
+            )
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.operation, ProviderOperationId.BODIES_LOOKUP)
+        self.assertEqual(result.data["system_address"], 10477373803)
+        earth = result.data["items"][1]
+        self.assertEqual(earth["name"], "Earth")
+        self.assertEqual(earth["radius"], 6371.0)
+        self.assertEqual(earth["extras"]["surface_pressure"], 1.0)
+        self.assertEqual(earth["extras"]["materials"], {"Iron": 32.1})
+
+        with sqlite3.connect(self.db_path) as con:
+            body_row = con.execute(
+                "SELECT source, radius, mass, mapped_fields_json FROM ed_bodies WHERE system_address=? AND name=?",
+                (10477373803, "Earth"),
+            ).fetchone()
+            self.assertIsNotNone(body_row)
+            self.assertEqual(body_row[0], "edsm")
+            self.assertEqual(body_row[1], 6371.0)
+            self.assertEqual(body_row[2], 1.0)
+            extras = json.loads(body_row[3])
+            self.assertEqual(extras["surface_temperature"], 288)
+            self.assertEqual(extras["volcanism_type"], "No volcanism")
 
     def test_spansh_stations_lookup_persists_station_rows(self) -> None:
         service = ProviderQueryService(

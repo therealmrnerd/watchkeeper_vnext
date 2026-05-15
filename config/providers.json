@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "provider_priority": {
     "system_lookup": ["spansh", "edsm"],
-    "bodies_lookup": ["spansh", "edsm"],
+    "bodies_lookup": ["edsm", "spansh"],
     "stations_lookup": ["spansh", "edsm"],
     "commander_location_push": ["inara"],
     "ship_build_reference": ["edsy"]
