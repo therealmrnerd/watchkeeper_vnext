@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Dodecahedron station">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="50" cy="50" r="38" stroke-width="4.8"/>
+    <path d="M34 23h32l16 24-6 26-26 15-26-15-6-26Z" stroke-width="4.8"/>
+    <path d="M34 23 26 47 50 88M66 23l8 24-24 41M18 47l26-8h12l26 8M24 73l20-21h12l20 21" stroke-width="4.2"/>
+    <path d="M42 48h16" stroke-width="4.8"/>
+  </g>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Asteroid base">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 50h15v-8h11v8h12v-8h11v8h12v-9h10v22h-10v-8H62v8H51v-8H39v8H28v-8H13Z" stroke-width="4.6"/>
+    <path d="M84 37h10v51H84V70c-8-2-14-9-14-18V37Z" stroke-width="4.6"/>
+    <path d="M86 11h9M90 11v26" stroke-width="4.6"/>
+  </g>
+</svg>

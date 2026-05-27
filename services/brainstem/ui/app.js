@@ -13,6 +13,7 @@
     latestCockpitState: null,
     latestLlmStatus: null,
     inaraCredentials: null,
+    edsmCredentials: null,
     runtimeSettings: null,
     inaraManualAction: null,
     configOpenAiCredentials: null,
@@ -102,6 +103,12 @@
     configInaraClearBtn: document.getElementById("configInaraClearBtn"),
     configInaraState: document.getElementById("configInaraState"),
     configInaraMeta: document.getElementById("configInaraMeta"),
+    configEdsmCommanderInput: document.getElementById("configEdsmCommanderInput"),
+    configEdsmApiKeyInput: document.getElementById("configEdsmApiKeyInput"),
+    configEdsmSaveBtn: document.getElementById("configEdsmSaveBtn"),
+    configEdsmClearBtn: document.getElementById("configEdsmClearBtn"),
+    configEdsmState: document.getElementById("configEdsmState"),
+    configEdsmMeta: document.getElementById("configEdsmMeta"),
     configOpenAiApiKeyInput: document.getElementById("configOpenAiApiKeyInput"),
     configOpenAiSaveBtn: document.getElementById("configOpenAiSaveBtn"),
     configOpenAiClearBtn: document.getElementById("configOpenAiClearBtn"),
@@ -475,6 +482,22 @@
     renderEdProviderCards((state.latestProviderHealth && state.latestProviderHealth.providers) || {});
   }
 
+  async function loadEdsmCredentials() {
+    try {
+      const data = await apiGet("/providers/edsm/credentials");
+      state.edsmCredentials = data && typeof data === "object" ? data : null;
+    } catch (err) {
+      state.edsmCredentials = {
+        ok: false,
+        error: String(err.message || err),
+        credentials: {},
+        auth: {},
+        storage: {},
+      };
+    }
+    renderConfigTab();
+  }
+
   async function loadOpenAiCredentials() {
     try {
       const data = await apiGet("/config/openai/credentials");
@@ -634,6 +657,44 @@
         metaParts.push(state.configInaraAction.text);
       }
       el.configInaraMeta.textContent = metaParts.join(" | ");
+    }
+
+    const edsmPayload = state.edsmCredentials && typeof state.edsmCredentials === "object"
+      ? state.edsmCredentials
+      : {};
+    const edsmCredentials = edsmPayload.credentials && typeof edsmPayload.credentials === "object"
+      ? edsmPayload.credentials
+      : {};
+    const edsmAuth = edsmPayload.auth && typeof edsmPayload.auth === "object" ? edsmPayload.auth : {};
+    const edsmStorage = edsmPayload.storage && typeof edsmPayload.storage === "object" ? edsmPayload.storage : {};
+    if (el.configEdsmCommanderInput) {
+      el.configEdsmCommanderInput.value = String(edsmCredentials.commander_name || "");
+    }
+    if (el.configEdsmApiKeyInput) {
+      el.configEdsmApiKeyInput.value = "";
+      el.configEdsmApiKeyInput.placeholder = edsmCredentials.api_key_present
+        ? "Stored securely. Enter a new key to replace it."
+        : "Enter EDSM API key";
+    }
+    if (el.configEdsmClearBtn) {
+      el.configEdsmClearBtn.disabled = !edsmStorage.secure_store_present;
+    }
+    if (el.configEdsmState) {
+      if (!edsmPayload.ok) {
+        el.configEdsmState.textContent = "Unavailable";
+      } else if (!edsmPayload.enabled) {
+        el.configEdsmState.textContent = "Disabled";
+      } else if (edsmAuth.configured) {
+        el.configEdsmState.textContent = "Configured";
+      } else {
+        el.configEdsmState.textContent = "Public mode";
+      }
+    }
+    if (el.configEdsmMeta) {
+      el.configEdsmMeta.textContent = [
+        edsmStorage.encrypted ? "Stored in encrypted keystore" : "Secure store unavailable",
+        `Last updated: ${formatKeystoreUpdated(edsmStorage.last_updated_at || edsmCredentials.last_updated_at)}`,
+      ].join(" | ");
     }
 
     const openAiPayload = state.configOpenAiCredentials && typeof state.configOpenAiCredentials === "object"
@@ -1114,6 +1175,25 @@
       await loadInaraCredentials();
     } catch (err) {
       setInaraCredentialActionStatus("failed", `Credential save failed: ${String(err.message || err)}`);
+      renderConfigTab();
+    } finally {
+      if (buttonNode) {
+        buttonNode.disabled = false;
+      }
+    }
+  }
+
+  async function saveEdsmCredentials(payload, buttonNode) {
+    if (buttonNode) {
+      buttonNode.disabled = true;
+    }
+    try {
+      const result = await apiPost("/providers/edsm/credentials", payload);
+      state.edsmCredentials = result;
+      await loadProviderHealth();
+      await loadEdsmCredentials();
+    } catch (err) {
+      state.edsmCredentials = { ok: false, error: String(err.message || err), credentials: {}, storage: {} };
       renderConfigTab();
     } finally {
       if (buttonNode) {
@@ -3649,6 +3729,22 @@
         await saveInaraCredentials({ clear: true }, el.configInaraClearBtn);
       });
     }
+    if (el.configEdsmSaveBtn) {
+      el.configEdsmSaveBtn.addEventListener("click", async () => {
+        await saveEdsmCredentials(
+          {
+            commander_name: el.configEdsmCommanderInput ? el.configEdsmCommanderInput.value : "",
+            api_key: el.configEdsmApiKeyInput ? el.configEdsmApiKeyInput.value : "",
+          },
+          el.configEdsmSaveBtn
+        );
+      });
+    }
+    if (el.configEdsmClearBtn) {
+      el.configEdsmClearBtn.addEventListener("click", async () => {
+        await saveEdsmCredentials({ clear: true }, el.configEdsmClearBtn);
+      });
+    }
     if (el.configOpenAiSaveBtn) {
       el.configOpenAiSaveBtn.addEventListener("click", async () => {
         await saveOpenAiCredentials(
@@ -3751,6 +3847,7 @@
     await loadSitrep(true);
     await loadProviderHealth();
     await loadInaraCredentials();
+    await loadEdsmCredentials();
     await loadOpenAiCredentials();
     await loadRuntimeSettings();
     await loadLlmStatus();

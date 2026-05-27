@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b0f">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12,7 +13,7 @@
   <link rel="icon" type="image/x-icon" href="icons/favicon.ico">
   <link rel="manifest" href="mfd.webmanifest?v=54">
   <link rel="apple-touch-icon" href="icons/watchkeeper_logo.png">
-  <link rel="stylesheet" href="mfd.css?v=128">
+  <link rel="stylesheet" href="mfd.css?v=156">
 </head>
 <body>
   <div id="mfdFullscreenGate" class="mfd-fullscreen-gate">
@@ -97,10 +98,15 @@
               <div class="mfd-wire-planet" aria-hidden="true">
                 <span></span>
               </div>
+              <img id="mfdStationHeaderIcon" class="mfd-station-header-icon" src="icons/system-map.png" alt="" aria-hidden="true">
               <div class="mfd-system-title">
                 <span class="mfd-label">Current System</span>
                 <strong id="mfdSystem">-</strong>
                 <small id="mfdSystemAddress">-</small>
+              </div>
+              <div class="mfd-system-header-body">
+                <span class="mfd-label">Body</span>
+                <strong id="mfdBody">-</strong>
               </div>
               <button id="mfdAutoDockButton" class="mfd-system-autodock mfd-control" type="button" data-action="auto_dock" data-tile-id="control-auto-dock" title="Request docking" aria-label="Request docking">
                 <span class="mfd-action-label">Dock</span>
@@ -114,10 +120,6 @@
                 <span class="mfd-label">Station</span>
                 <strong id="mfdStation">-</strong>
               </div>
-              <div>
-                <span class="mfd-label">Body</span>
-                <strong id="mfdBody">-</strong>
-              </div>
             </div>
             <div class="mfd-politics-grid">
               <div>
@@ -128,13 +130,13 @@
                 <span class="mfd-label">Control</span>
                 <strong id="mfdSystemFaction">-</strong>
               </div>
-              <div>
+              <div class="mfd-power-card">
                 <span class="mfd-label">Power</span>
                 <strong id="mfdSystemPower">-</strong>
               </div>
               <div>
-                <span class="mfd-label">State</span>
-                <strong id="mfdSystemPowerState">-</strong>
+                <span class="mfd-label">Powerplay State</span>
+                <strong id="mfdSystemPowerplayState">-</strong>
               </div>
               <div>
                 <span class="mfd-label">Government</span>
@@ -149,6 +151,10 @@
                 <strong id="mfdSystemSecurity">-</strong>
               </div>
               <div>
+                <span class="mfd-label">Security State</span>
+                <strong id="mfdSystemSecurityState">-</strong>
+              </div>
+              <div>
                 <span class="mfd-label">Population</span>
                 <strong id="mfdSystemPopulation">-</strong>
               </div>
@@ -157,6 +163,32 @@
               <span class="mfd-label">Fuel Star</span>
               <strong id="mfdCurrentRefuel">-</strong>
               <small id="mfdCurrentStarClass">-</small>
+            </div>
+            <img id="mfdSystemPowerPortrait" class="mfd-power-portrait" src="" alt="" hidden>
+          </div>
+          <div class="mfd-docking-pane" id="mfdDockingPane" hidden>
+            <div class="mfd-docking-map" id="mfdDockingMap" aria-label="Docking pad map"></div>
+            <div class="mfd-docking-info">
+              <div>
+                <span class="mfd-label">Station</span>
+                <span class="mfd-docking-station-line">
+                  <img id="mfdDockingStationIcon" src="icons/system-map.png" alt="">
+                  <strong id="mfdDockingStation">-</strong>
+                </span>
+              </div>
+              <div>
+                <span class="mfd-label">Assigned Pad</span>
+                <strong id="mfdDockingPad">-</strong>
+              </div>
+              <div>
+                <span class="mfd-label">Station Details</span>
+                <strong id="mfdDockingType">-</strong>
+                <small id="mfdDockingDetails">-</small>
+              </div>
+              <div>
+                <span class="mfd-label">Services</span>
+                <strong id="mfdDockingServices">-</strong>
+              </div>
             </div>
           </div>
           <div class="mfd-vehicle-pane mfd-slf-pane" id="mfdSlfPane" hidden>
@@ -231,14 +263,8 @@
         </article>
 
         <article class="mfd-display mfd-ship-display" data-panel-id="ship">
-          <div id="mfdShipCanvas" class="mfd-ship-canvas" data-shield-bands="3">
+          <div id="mfdShipCanvas" class="mfd-ship-canvas">
             <img id="mfdShipSchematic" class="mfd-ship-schematic" src="Schematics/edsa/topdown/sidewinder.svg?v=3" alt="">
-            <img id="mfdShieldImage" class="mfd-shield-image" alt="" aria-hidden="true">
-            <svg id="mfdShieldEnvelope" class="mfd-shield-rings" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
-              <polygon id="mfdShieldBand1" class="mfd-shield-band band-1"></polygon>
-              <polygon id="mfdShieldBand2" class="mfd-shield-band band-2"></polygon>
-              <polygon id="mfdShieldBand3" class="mfd-shield-band band-3"></polygon>
-            </svg>
             <div class="mfd-ship-overlay">
               <strong id="mfdShipName">-</strong>
               <div class="mfd-ship-top-status" aria-label="Ship status strip">
@@ -433,7 +459,7 @@
       </aside>
     </section>
   </main>
-  <script src="mfd.js?v=148"></script>
+  <script src="mfd.js?v=160"></script>
 </body>
 </html>
 

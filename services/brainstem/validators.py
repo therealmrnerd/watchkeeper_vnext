@@ -19,6 +19,7 @@ from runtime import (
     parse_iso8601_utc,
 )
 from settings_store import validate_runtime_settings_update
+from mfd_layout_store import normalize_layout
 
 STATE_KEY_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_]+)+$")
 STATE_KEY_PREFIXES = ("ed.", "music.", "hw.", "policy.", "ai.")
@@ -220,6 +221,20 @@ def validate_state_ingest(payload: dict[str, Any]) -> None:
         not isinstance(correlation_id, str) or not correlation_id.strip()
     ):
         raise ValueError("correlation_id must be a non-empty string when supplied")
+
+
+def validate_mfd_layout_payload(payload: dict[str, Any]) -> None:
+    normalize_layout(payload)
+
+
+def validate_mfd_outputs_payload(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    if set(payload.keys()) - {"outputs"}:
+        raise ValueError("mfd outputs contains unsupported fields")
+    outputs = payload.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise ValueError("outputs must be a non-empty array")
 
 
 def validate_feedback(payload: dict[str, Any]) -> None:
@@ -445,6 +460,29 @@ def validate_inara_credentials_update(payload: dict[str, Any]) -> None:
     frontier_id = payload.get("frontier_id")
     if frontier_id is not None and not isinstance(frontier_id, (str, int)):
         raise ValueError("frontier_id must be a string or integer when supplied")
+
+    api_key = payload.get("api_key")
+    if api_key is not None and not isinstance(api_key, str):
+        raise ValueError("api_key must be a string when supplied")
+
+
+def validate_edsm_credentials_update(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    allowed = {"commander_name", "api_key", "clear"}
+    _check_extra_keys(payload, allowed, "edsm_credentials")
+    if not payload:
+        raise ValueError("edsm_credentials body must not be empty")
+
+    clear = payload.get("clear")
+    if clear is not None and not isinstance(clear, bool):
+        raise ValueError("clear must be boolean when supplied")
+    if clear is True:
+        return
+
+    commander_name = payload.get("commander_name")
+    if commander_name is not None and not isinstance(commander_name, str):
+        raise ValueError("commander_name must be a string when supplied")
 
     api_key = payload.get("api_key")
     if api_key is not None and not isinstance(api_key, str):

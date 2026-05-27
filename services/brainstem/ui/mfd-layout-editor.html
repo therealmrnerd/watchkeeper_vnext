@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070b0f">
+  <title>Watchkeeper Guided Layout Editor</title>
+  <link rel="icon" type="image/x-icon" href="/icons/favicon.ico">
+  <link rel="stylesheet" href="/mfd-layout-editor.css?v=2">
+</head>
+<body>
+  <main class="layout-editor">
+    <header class="editor-header">
+      <div>
+        <span>Watchkeeper MFD</span>
+        <h1>Guided Layout Editor</h1>
+      </div>
+      <nav>
+        <a href="/mfd/1" target="_blank" rel="noreferrer">Open Output 1</a>
+        <a href="/">Console</a>
+      </nav>
+    </header>
+
+    <section class="editor-grid">
+      <form id="layoutForm" class="editor-panel layout-form">
+        <div class="panel-title">
+          <h2>Layout</h2>
+          <select id="layoutPicker" aria-label="Saved layout"></select>
+        </div>
+        <label>
+          Name
+          <input id="layoutName" maxlength="100" required>
+        </label>
+        <label>
+          ID
+          <input id="layoutId" maxlength="64" required>
+        </label>
+        <div class="choice-grid">
+          <label>
+            Orientation
+            <select id="orientation">
+              <option value="landscape">Landscape</option>
+              <option value="portrait">Portrait</option>
+            </select>
+          </label>
+          <label>
+            Panes
+            <select id="paneMode">
+              <option value="four">Four pane</option>
+              <option value="single">Single pane</option>
+            </select>
+          </label>
+        </div>
+        <label class="toggle-row">
+          <input id="buttonsVisible" type="checkbox" checked>
+          Show button surfaces
+        </label>
+        <div class="form-actions">
+          <button type="button" id="newLayout">New From Guide</button>
+          <button type="submit">Save Layout</button>
+        </div>
+        <p id="layoutStatus" class="status"></p>
+      </form>
+
+      <section class="editor-panel layout-canvas-panel">
+        <div class="panel-title">
+          <h2>Pane Slots</h2>
+          <small>Guided slots only. Drop panes into supported positions.</small>
+        </div>
+        <div id="paneSlots" class="pane-slots"></div>
+      </section>
+
+      <section class="editor-panel control-panel">
+        <div class="panel-title">
+          <h2>Button Surfaces</h2>
+          <small>Drop buttons into numbered fixed slots.</small>
+        </div>
+        <div id="buttonRegions" class="button-regions"></div>
+        <div>
+          <span class="subhead">Button Bank</span>
+          <div id="buttonBank" class="control-palette" data-region="bank"></div>
+        </div>
+        <form id="customButtonForm" class="custom-button-form">
+          <span class="subhead">Button Editor</span>
+          <div class="choice-grid">
+            <label>
+              Name
+              <input id="customButtonName" maxlength="48" placeholder="Heat Sink">
+            </label>
+            <label>
+              Icon
+              <input id="customButtonIcon" maxlength="160" placeholder="icons/heat-sink.png">
+            </label>
+          </div>
+          <div class="choice-grid">
+            <label>
+              Keypress
+              <input id="customButtonKeypress" maxlength="80" placeholder="H">
+            </label>
+            <label>
+              Macro
+              <input id="customButtonMacro" maxlength="500" placeholder="optional macro name or sequence">
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit">Add Button</button>
+          </div>
+          <p id="customButtonStatus" class="status"></p>
+        </form>
+      </section>
+
+      <section class="editor-panel output-panel">
+        <div class="panel-title">
+          <h2>Outputs 1-5</h2>
+          <small>Each display points at its numbered URL.</small>
+        </div>
+        <div id="outputs" class="output-list"></div>
+        <div class="form-actions">
+          <button type="button" id="saveOutputs">Save Outputs</button>
+        </div>
+        <p id="outputStatus" class="status"></p>
+      </section>
+    </section>
+  </main>
+  <script src="/mfd-layout-editor.js?v=2"></script>
+</body>
+</html>

@@ -38,6 +38,9 @@ class MigrationApplyTests(unittest.TestCase):
                 "ed_systems",
                 "ed_bodies",
                 "ed_stations",
+                "ed_powerplay_powers",
+                "mfd_layouts",
+                "mfd_outputs",
             ):
                 row = con.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -53,11 +56,37 @@ class MigrationApplyTests(unittest.TestCase):
             migration_rows = con.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
-            self.assertGreaterEqual(len(migration_rows), 4)
+            self.assertGreaterEqual(len(migration_rows), 6)
             self.assertEqual(migration_rows[0][0], "001")
             self.assertEqual(migration_rows[1][0], "002")
             self.assertEqual(migration_rows[2][0], "003")
             self.assertEqual(migration_rows[3][0], "004")
+            self.assertEqual(migration_rows[4][0], "005")
+            self.assertEqual(migration_rows[5][0], "006")
+
+            power_row = con.execute(
+                """
+                SELECT headquarters,allegiance,symbol_asset_path
+                FROM ed_powerplay_powers
+                WHERE power_key='yuri-grom'
+                """
+            ).fetchone()
+            self.assertEqual(
+                power_row,
+                ("Clayakarma", "Independent", "icons/powers/yuri-grom.png"),
+            )
+
+            memory_row = con.execute(
+                """
+                SELECT subject,predicate,object
+                FROM facts_triples
+                WHERE triple_id='ed.powerplay.yuri-grom.profile'
+                """
+            ).fetchone()
+            self.assertIsNotNone(memory_row)
+            self.assertEqual(memory_row[0], "Yuri Grom")
+            self.assertEqual(memory_row[1], "ed.powerplay.profile")
+            self.assertIn("Clayakarma", memory_row[2])
 
     def test_apply_migrations_supports_world_model_inserts(self) -> None:
         self.db.ensure_schema()

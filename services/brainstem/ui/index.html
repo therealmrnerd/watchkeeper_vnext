@@ -54,7 +54,8 @@
 
   <nav class="tabs">
     <div class="tabs-left">
-      <button class="tab-btn active" data-tab="console">Console</button>
+      <button class="tab-btn active" data-tab="landing">Landing</button>
+      <button class="tab-btn" data-tab="console">Console</button>
       <button class="tab-btn" data-tab="cockpit">Cockpit PoC</button>
       <button class="tab-btn" data-tab="edstatus">ED Status</button>
       <button class="tab-btn" data-tab="config">Config</button>
@@ -69,7 +70,128 @@
   </nav>
 
   <main>
-    <section id="tab-console" class="tab-panel active">
+    <section id="tab-landing" class="tab-panel active">
+      <div class="landing-shell">
+        <section class="landing-hero">
+          <div class="landing-hero-copy">
+            <p class="landing-kicker">Real-time cockpit and immersion platform for Elite Dangerous</p>
+            <h1>WATCHKEEPER vNEXT</h1>
+            <p class="landing-tagline">Your ship already produces the data. Watchkeeper gives it a voice.</p>
+            <p class="landing-lede">
+              Built around live telemetry, adaptive interfaces, automation, lighting integration, streaming systems and multi-display support, Watchkeeper transforms Elite Dangerous from a game on a monitor into a live command environment.
+            </p>
+            <div class="landing-actions">
+              <a class="button-link landing-action-primary" href="/mfd/1" target="_blank" rel="noopener">Open MFD Output</a>
+              <a class="button-link" href="/mfd/layout-editor" target="_blank" rel="noopener">Guided Layout Editor</a>
+            </div>
+          </div>
+          <div class="landing-hero-visual" aria-hidden="true">
+            <img src="icons/watchkeeper_logo.png" alt="">
+          </div>
+        </section>
+
+        <section class="landing-band landing-principle">
+          <h2>This is not about cheating. This is not about automation playing the game for you. This is about immersion.</h2>
+          <p>
+            Elite Dangerous already generates an incredible amount of telemetry and environmental state. Watchkeeper takes that live in-game data and turns it into cockpit displays, contextual HUDs, adaptive interfaces, ambient lighting, stream integrations, operational panels and real-time situational awareness.
+          </p>
+        </section>
+
+        <section class="landing-grid landing-data-grid">
+          <div class="landing-section-title">
+            <span>Your ship already knows</span>
+          </div>
+          <div class="landing-chip-grid">
+            <span>Fuel state</span>
+            <span>Jump status</span>
+            <span>Landing state</span>
+            <span>SRV deployment</span>
+            <span>Heat levels</span>
+            <span>Cargo</span>
+            <span>Missions</span>
+            <span>Navigation</span>
+            <span>System transitions</span>
+            <span>Warnings</span>
+            <span>Alerts</span>
+            <span>Combat state</span>
+            <span>Environment conditions</span>
+          </div>
+        </section>
+
+        <section class="landing-grid landing-two-column">
+          <div>
+            <h2>Built For Commanders</h2>
+            <p>
+              Watchkeeper is designed around the idea that every commander flies differently. Some want clean tactical overlays. Others want full cockpit immersion, dedicated touch displays, ship-state lighting, mission boards, external telemetry panels, Twitch/chat integration, AI-assisted workflows and multi-device bridge stations.
+            </p>
+            <p>Watchkeeper supports both.</p>
+          </div>
+          <div>
+            <h2>Not A Spreadsheet Overlay</h2>
+            <p>
+              Watchkeeper is designed to feel like part of the ship. The goal is not more windows. The goal is presence: a cockpit that reacts, a ship that communicates, and a bridge that feels alive.
+            </p>
+          </div>
+        </section>
+
+        <section class="landing-grid">
+          <div class="landing-section-title">
+            <span>Current Features</span>
+          </div>
+          <div class="landing-feature-grid">
+            <span>Real-time Elite Dangerous telemetry ingestion</span>
+            <span>Adaptive cockpit UI</span>
+            <span>Multi-pane contextual interfaces</span>
+            <span>SRV / SLF / On-foot mode switching</span>
+            <span>OBS integration</span>
+            <span>SAMMI integration</span>
+            <span>Dynamic lighting control</span>
+            <span>Event-driven automation</span>
+            <span>Policy-gated actions</span>
+            <span>Multi-display architecture</span>
+            <span>Drag-and-drop layout designer</span>
+            <span>Modular panel system</span>
+            <span>Live state persistence</span>
+            <span>Streaming support</span>
+            <span>External data integration</span>
+          </div>
+        </section>
+
+        <section class="landing-grid landing-roadmap">
+          <div>
+            <h2>Philosophy</h2>
+            <p>
+              Most tools reduce telemetry into tables and efficiency stats. Watchkeeper goes the other direction and asks: what would an actual shipboard operations system feel like?
+            </p>
+          </div>
+          <div>
+            <h2>Roadmap</h2>
+            <div class="landing-roadmap-list">
+              <span>Full multi-display assignment system</span>
+              <span>Shared layout profiles</span>
+              <span>External telemetry providers</span>
+              <span>AI advisory workflows</span>
+              <span>Advanced mission integration</span>
+              <span>Browser-rendered live panels</span>
+              <span>Virtual display feeds</span>
+              <span>Extended lighting ecosystems</span>
+              <span>Voice/event orchestration</span>
+              <span>Touchscreen-first layouts</span>
+              <span>Streamer/operator split modes</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="landing-band landing-built">
+          <h2>Built By A Commander, For Commanders</h2>
+          <p>
+            Watchkeeper is being built as an active engineering project with real-world infrastructure, networking and operational design principles behind it. No buzzwords. No fake sci-fi fluff. Just building the cockpit we always wanted Elite Dangerous to have.
+          </p>
+        </section>
+      </div>
+    </section>
+
+    <section id="tab-console" class="tab-panel">
       <div class="console-grid">
         <div class="console-main">
           <div class="panel">
@@ -210,7 +332,8 @@
           </div>
           <div id="cockpitTelemetry" class="ed-summary-grid"></div>
           <div class="row cockpit-admin-actions">
-            <a class="button-link" href="/mfd.html" target="_blank" rel="noopener">Open MFD Display</a>
+            <a class="button-link" href="/mfd/1" target="_blank" rel="noopener">Open MFD Output 1</a>
+            <a class="button-link" href="/mfd/layout-editor" target="_blank" rel="noopener">Guided Layout Editor</a>
             <button id="cockpitRefreshBtn" class="secondary">Refresh Status</button>
           </div>
         </div>
@@ -314,6 +437,22 @@
 
         <div class="panel">
           <div class="row config-head">
+            <h2>EDSM Credentials</h2>
+            <span id="configEdsmState" class="muted">Loading...</span>
+          </div>
+          <label for="configEdsmCommanderInput">Commander Name</label>
+          <input id="configEdsmCommanderInput" type="text" placeholder="Commander name">
+          <label for="configEdsmApiKeyInput">API Key</label>
+          <input id="configEdsmApiKeyInput" type="password" placeholder="Enter EDSM API key">
+          <div class="row">
+            <button id="configEdsmSaveBtn">Save Securely</button>
+            <button id="configEdsmClearBtn" class="secondary">Clear Secure Store</button>
+          </div>
+          <div id="configEdsmMeta" class="muted"></div>
+        </div>
+
+        <div class="panel">
+          <div class="row config-head">
             <h2>OpenAI Credentials</h2>
             <span id="configOpenAiState" class="muted">Loading...</span>
           </div>
@@ -347,7 +486,7 @@
             </div>
             <div class="config-note-item">
               <strong>EDSM</strong>
-              <span>Current public read-only system lookup requires no credentials. Commander/private features will get their own secure flow later.</span>
+              <span>Public read-only lookups work without credentials; commander name/API key are stored for private EDSM features.</span>
             </div>
             <div class="config-note-item">
               <strong>Storage</strong>

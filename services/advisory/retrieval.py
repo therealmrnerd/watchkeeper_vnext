@@ -46,6 +46,27 @@ DEFAULT_SITREP_KEYS = (
     "ed.semantic.opportunity.station_services_available",
     "ed.semantic.opportunity.market_access_available",
     "ed.semantic.interaction.safe_for_keypress",
+    "ed.system.allegiance",
+    "ed.system.government",
+    "ed.system.security",
+    "ed.system.economy",
+    "ed.system.second_economy",
+    "ed.system.population",
+    "ed.system.faction",
+    "ed.system.faction_state",
+    "ed.system.civil_war",
+    "ed.system.controlling_power",
+    "ed.system.powerplay_state",
+    "ed.station.name",
+    "ed.station.type",
+    "ed.station.faction",
+    "ed.station.government",
+    "ed.station.economy",
+    "ed.station.market_id",
+    "ed.station.docking_target_name",
+    "ed.station.docking_target_type",
+    "ed.station.docking_granted_pad",
+    "ed.station.docking_landing_pads",
     "music.status.playing",
     "music.now_playing.title",
     "music.now_playing.artist",
@@ -65,6 +86,15 @@ DEFAULT_SITREP_KEYS = (
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _parse_iso_timestamp(raw: Any) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def _parse_json(raw: Any, fallback: Any) -> Any:
@@ -136,26 +166,42 @@ class RetrievalPackBuilder:
         con.row_factory = sqlite3.Row
         return con
 
-    def _load_state_snapshot(self, con: sqlite3.Connection) -> dict[str, Any]:
+    def _load_state_snapshot(self, con: sqlite3.Connection) -> tuple[dict[str, Any], dict[str, Any]]:
         if not self.sitrep_keys:
-            return {}
+            return {}, {}
         placeholders = ",".join("?" for _ in self.sitrep_keys)
         rows = con.execute(
             f"""
-            SELECT state_key,state_value_json
+            SELECT state_key,state_value_json,source,observed_at_utc,updated_at_utc
             FROM state_current
             WHERE state_key IN ({placeholders})
             """,
             list(self.sitrep_keys),
         ).fetchall()
-        by_key: dict[str, Any] = {}
+        now = datetime.now(timezone.utc)
+        by_key: dict[str, tuple[Any, dict[str, Any]]] = {}
         for row in rows:
-            by_key[str(row["state_key"])] = _parse_json(row["state_value_json"], row["state_value_json"])
+            key = str(row["state_key"])
+            observed_at = str(row["observed_at_utc"] or row["updated_at_utc"] or "")
+            observed_dt = _parse_iso_timestamp(observed_at)
+            age_s = None
+            if observed_dt is not None:
+                age_s = max(0.0, (now - observed_dt).total_seconds())
+            by_key[key] = (
+                _parse_json(row["state_value_json"], row["state_value_json"]),
+                {
+                    "source": row["source"],
+                    "observed_at_utc": observed_at,
+                    "updated_at_utc": row["updated_at_utc"],
+                    "age_s": round(age_s, 3) if age_s is not None else None,
+                },
+            )
         out: dict[str, Any] = {}
+        meta: dict[str, Any] = {}
         for key in self.sitrep_keys:
             if key in by_key:
-                out[key] = by_key[key]
-        return out
+                out[key], meta[key] = by_key[key]
+        return out, meta
 
     def _select_domains(self, domain: str, retrieval_domains: list[str] | None) -> list[str]:
         merged: list[str] = []
@@ -296,17 +342,31 @@ class RetrievalPackBuilder:
         )
         return scored
 
-    def _pack_state(self, state_snapshot: dict[str, Any]) -> tuple[dict[str, str], str]:
+    def _pack_state(
+        self,
+        state_snapshot: dict[str, Any],
+        state_meta: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, str], str, list[str]]:
         trimmed: dict[str, str] = {}
+        omitted_stale: list[str] = []
         for key in self.sitrep_keys:
             if key not in state_snapshot:
+                continue
+            meta = (state_meta or {}).get(key)
+            if (
+                isinstance(meta, dict)
+                and meta.get("age_s") is not None
+                and key.startswith(("ed.status.", "hw.", "hardware."))
+                and float(meta["age_s"]) > 30.0
+            ):
+                omitted_stale.append(key)
                 continue
             trimmed[key] = _trim_text(_to_compact_text(state_snapshot[key]), 120)
         summary = _trim_text(
             json.dumps(trimmed, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
             self.max_state_chars,
         )
-        return trimmed, summary
+        return trimmed, summary, omitted_stale
 
     def build(
         self,
@@ -329,6 +389,7 @@ class RetrievalPackBuilder:
             "degraded": False,
         }
         sitrep_state: dict[str, Any] = {}
+        sitrep_state_meta: dict[str, Any] = {}
         state_summary = "{}"
         chunk_candidates: list[dict[str, Any]] = []
         fact_candidates: list[dict[str, Any]] = []
@@ -340,7 +401,7 @@ class RetrievalPackBuilder:
         else:
             try:
                 with self._connect() as con:
-                    sitrep_state = self._load_state_snapshot(con)
+                    sitrep_state, sitrep_state_meta = self._load_state_snapshot(con)
                     try:
                         chunk_candidates = self._fetch_vector_chunks(
                             con,
@@ -372,7 +433,29 @@ class RetrievalPackBuilder:
                 metadata["facts_status"] = "degraded"
                 alerts.append(f"sqlite_error:{exc}")
 
-        sitrep_trimmed, state_summary = self._pack_state(sitrep_state)
+        sitrep_trimmed, state_summary, stale_omitted_keys = self._pack_state(
+            sitrep_state,
+            sitrep_state_meta,
+        )
+        live_state_ages = [
+            float(row["age_s"])
+            for key, row in sitrep_state_meta.items()
+            if isinstance(row, dict)
+            and row.get("age_s") is not None
+            and key.startswith(("ed.", "system.time.", "hw.", "hardware."))
+            and key not in stale_omitted_keys
+        ]
+        stale_state_keys = [
+            key
+            for key, row in sitrep_state_meta.items()
+            if isinstance(row, dict)
+            and row.get("age_s") is not None
+            and key.startswith(("ed.semantic.", "system.time."))
+            and float(row["age_s"]) > 30.0
+        ]
+        for key in stale_state_keys[:5]:
+            age = sitrep_state_meta[key].get("age_s")
+            alerts.append(f"state_stale:{key}:{age}s")
         used_chars = len(state_summary)
         remaining_chars = max(0, hard_char_cap - used_chars)
 
@@ -473,6 +556,13 @@ class RetrievalPackBuilder:
                 "vector_used": len(chunks),
                 "facts_used": len(facts),
                 "state_keys_used": len(sitrep_trimmed),
+                "state_freshness": {
+                    "oldest_age_s": round(max(live_state_ages), 3) if live_state_ages else None,
+                    "newest_age_s": round(min(live_state_ages), 3) if live_state_ages else None,
+                    "stale_keys": stale_state_keys,
+                    "stale_omitted_keys": stale_omitted_keys,
+                    "by_key": sitrep_state_meta,
+                },
                 "total_chars": total_chars,
                 "approx_tokens": max(1, total_chars // 4),
                 "alerts": alerts,

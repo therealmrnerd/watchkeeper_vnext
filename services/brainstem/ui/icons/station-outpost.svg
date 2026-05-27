@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Outpost">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 32h70l-9 15v19L43 82 28 58 15 55Z" stroke-width="4.8"/>
+    <path d="M24 32V14h18v18M42 25h25v-9h10v16" stroke-width="4.8"/>
+    <path d="M52 25h17M53 36h16" stroke-width="4.8"/>
+    <path d="M58 15V5M71 14V3" stroke-width="4.8"/>
+  </g>
+</svg>

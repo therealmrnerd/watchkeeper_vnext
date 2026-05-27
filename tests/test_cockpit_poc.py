@@ -139,6 +139,30 @@ class EdFileCollectorTests(unittest.TestCase):
         self.assertEqual(result["ed.location.system_address"], 12345)
         self.assertEqual(result["ed.location.station"], "Blackstar's Cove")
 
+    def test_collect_ed_file_state_clears_system_conflict_state_for_clean_location(self) -> None:
+        journal = self.temp_dir / "Journal.0041.log"
+        journal.write_text(
+            json.dumps(
+                {
+                    "event": "Location",
+                    "StarSystem": "Puppis Sector ON-T b3-5",
+                    "SystemFaction": {"Name": "Blackstar", "FactionState": "Expansion"},
+                    "Factions": [{"Name": "Blackstar", "FactionState": "Expansion"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.collector.collect_ed_file_state(
+            status_path=self.temp_dir / "missing-status.json",
+            journal_dir=self.temp_dir,
+        )
+
+        self.assertEqual(result["ed.system.faction_state"], "Expansion")
+        self.assertFalse(result["ed.system.civil_war"])
+        self.assertEqual(result["ed.system.conflicts"], [])
+        self.assertEqual(result["ed.system.conflict_count"], 0)
+
     def test_collect_ed_file_state_tracks_fighter_launch_context(self) -> None:
         journal = self.temp_dir / "Journal.0045.log"
         journal.write_text(

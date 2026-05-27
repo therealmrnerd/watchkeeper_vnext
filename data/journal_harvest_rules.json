@@ -108,7 +108,11 @@
       ]
     },
     "ShipTargeted": {
-      "fields": ["TargetLocked", "PilotName", "PilotRank", "Faction", "LegalStatus", "Subsystem"]
+      "fields": [
+        "timestamp", "TargetLocked", "Ship", "Ship_Localised", "ScanStage",
+        "PilotName", "PilotName_Localised", "PilotRank", "Faction",
+        "LegalStatus", "Power", "Subsystem", "ShieldHealth", "HullHealth"
+      ]
     },
     "DockingRequested": {
       "fields": ["MarketID", "StationName", "StationName_Localised", "StationType", "LandingPads"]

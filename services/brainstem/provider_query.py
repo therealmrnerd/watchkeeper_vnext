@@ -595,8 +595,45 @@ class EdsmSystemLookupAdapter:
             "fetched_at": fetched_at,
         }
 
+    @staticmethod
+    def _normalize_stations(record: dict[str, Any], fetched_at: str) -> dict[str, Any]:
+        stations_raw = record.get("stations") if isinstance(record.get("stations"), list) else []
+        items: list[dict[str, Any]] = []
+        system_address = int(record["id64"]) if record.get("id64") is not None else None
+        system_name = str(record.get("name") or "")
+        for raw in stations_raw:
+            if not isinstance(raw, dict):
+                continue
+            services = raw.get("otherServices") if isinstance(raw.get("otherServices"), list) else []
+            if isinstance(raw.get("economies"), list):
+                services = [*services, *[str(item.get("name") or "") for item in raw["economies"] if isinstance(item, dict)]]
+            items.append(
+                {
+                    "market_id": None,
+                    "station_id64": None,
+                    "system_address": system_address,
+                    "system_name": system_name,
+                    "name": str(raw.get("name") or ""),
+                    "station_type": raw.get("type"),
+                    "distance_to_arrival_ls": raw.get("distanceToArrival"),
+                    "has_docking": True,
+                    "services": [item for item in services if str(item or "").strip()],
+                }
+            )
+        return {
+            "system_address": system_address,
+            "system_name": system_name,
+            "station_count": int(record.get("stationCount") or len(items) or 0),
+            "items": items,
+            "fetched_at": fetched_at,
+        }
+
     def lookup(self, request: ProviderQuery) -> tuple[dict[str, Any], dict[str, Any]]:
-        if request.operation not in {ProviderOperationId.SYSTEM_LOOKUP, ProviderOperationId.BODIES_LOOKUP}:
+        if request.operation not in {
+            ProviderOperationId.SYSTEM_LOOKUP,
+            ProviderOperationId.BODIES_LOOKUP,
+            ProviderOperationId.STATIONS_LOOKUP,
+        }:
             raise ValueError(f"edsm does not implement {request.operation.value}")
         system_name = str(request.params.get("system_name") or "").strip()
         if not system_name:
@@ -612,18 +649,22 @@ class EdsmSystemLookupAdapter:
                 }
             )
             endpoint_url = f"{self.base_url}/api-v1/system?{query}"
-        else:
+        elif request.operation == ProviderOperationId.BODIES_LOOKUP:
             query = urllib.parse.urlencode({"systemName": system_name})
             endpoint_url = f"{self.base_url}/api-system-v1/bodies?{query}"
+        else:
+            query = urllib.parse.urlencode({"systemName": system_name})
+            endpoint_url = f"{self.base_url}/api-system-v1/stations?{query}"
         payload, status_code = self._get_json(endpoint_url)
         if not isinstance(payload, dict) or not str(payload.get("name") or "").strip():
             raise LookupError(f"edsm system not found: {system_name}")
         fetched_at = _utc_now_iso()
-        normalized = (
-            self._normalize_record(payload, fetched_at)
-            if request.operation == ProviderOperationId.SYSTEM_LOOKUP
-            else self._normalize_bodies(payload, fetched_at)
-        )
+        if request.operation == ProviderOperationId.SYSTEM_LOOKUP:
+            normalized = self._normalize_record(payload, fetched_at)
+        elif request.operation == ProviderOperationId.BODIES_LOOKUP:
+            normalized = self._normalize_bodies(payload, fetched_at)
+        else:
+            normalized = self._normalize_stations(payload, fetched_at)
         return normalized, {
             "endpoint": endpoint_url,
             "http_code": status_code,
@@ -1459,11 +1500,15 @@ class ProviderQueryService:
                 if market_id not in (None, ""):
                     try:
                         market_id_value = int(market_id)
+                        if market_id_value <= 0:
+                            market_id_value = None
                     except Exception:
                         market_id_value = None
                 if station_id64 not in (None, ""):
                     try:
                         station_id64_value = int(station_id64)
+                        if station_id64_value <= 0:
+                            station_id64_value = None
                     except Exception:
                         station_id64_value = None
                 services = item.get("services") if isinstance(item.get("services"), list) else []

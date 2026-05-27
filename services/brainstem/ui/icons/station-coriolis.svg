@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Coriolis station">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="18" y="18" width="64" height="64" rx="4" stroke-width="4.8"/>
+    <path d="M18 49 49 18 82 49 51 82Z" stroke-width="4.8"/>
+    <path d="M18 49 34 66M82 49 66 34M49 18 66 34M51 82 34 66" stroke-width="3.4"/>
+    <path d="M42 50h16" stroke-width="4.8"/>
+  </g>
+</svg>

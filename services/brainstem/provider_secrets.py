@@ -247,6 +247,38 @@ def save_inara_secret_entry(
     return entry
 
 
+def save_edsm_secret_entry(
+    *,
+    commander_name: Any,
+    api_key: Any,
+    path: str | Path | None = None,
+    codec: SecretCodec | None = None,
+) -> dict[str, Any]:
+    store = load_provider_secret_store(path, codec=codec)
+    providers = store.setdefault("providers", {})
+    existing = providers.get("edsm") if isinstance(providers.get("edsm"), dict) else {}
+    entry: dict[str, Any] = {}
+
+    commander_text = str(commander_name or "").strip()
+    if commander_text:
+        entry["commander_name"] = commander_text
+
+    api_key_text = str(api_key or "").strip()
+    if api_key_text:
+        entry["api_key"] = api_key_text
+    elif isinstance(existing, dict) and str(existing.get("api_key") or "").strip():
+        entry["api_key"] = str(existing.get("api_key") or "").strip()
+
+    if entry:
+        entry["_updated_at_utc"] = _utc_now_iso()
+        providers["edsm"] = entry
+    else:
+        providers.pop("edsm", None)
+
+    save_provider_secret_store(store, path, codec=codec)
+    return entry
+
+
 def save_openai_secret_entry(
     *,
     api_key: Any,

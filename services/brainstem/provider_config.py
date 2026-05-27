@@ -167,5 +167,20 @@ def load_runtime_provider_config(
                     value = inara_secret.get(key)
                     if value is not None:
                         auth[key] = value
+    edsm_secret = get_provider_secret_entry(
+        "edsm",
+        secrets_path if secrets_path is not None else DEFAULT_PROVIDER_SECRETS_PATH,
+        codec=codec,
+    )
+    if edsm_secret:
+        providers = payload.setdefault("providers", {})
+        edsm_cfg = providers.get("edsm")
+        if isinstance(edsm_cfg, dict):
+            auth = edsm_cfg.setdefault("auth", {})
+            if isinstance(auth, dict):
+                for key in ("commander_name", "api_key"):
+                    value = edsm_secret.get(key)
+                    if value is not None:
+                        auth[key] = value
     validate_provider_config(payload)
     return payload

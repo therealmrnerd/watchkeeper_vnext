@@ -38,6 +38,16 @@ from provider_query import query_provider_health
 from obs_client import fetch_obs_status, OBS_HOST, OBS_PORT, OBS_TIMEOUT_SEC
 from provider_secrets import get_provider_secret_entry
 from settings_store import apply_runtime_settings_overrides, load_runtime_settings, runtime_setting_enabled
+from mfd_layout_store import (
+    BUTTON_REGIONS,
+    CONTEXT_IDS,
+    CONTROL_IDS,
+    PANE_IDS,
+    get_layout,
+    get_output_layout,
+    list_layouts,
+    list_outputs,
+)
 
 try:
     from tools.diag_report import build_diag_report
@@ -47,6 +57,37 @@ except Exception:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def query_mfd_layouts(query: dict[str, list[str]]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "layouts": list_layouts(Path(DB_PATH)),
+        "catalog": {
+            "panes": sorted(PANE_IDS),
+            "controls": sorted(CONTROL_IDS),
+            "contexts": sorted(CONTEXT_IDS),
+            "button_regions": list(BUTTON_REGIONS),
+        },
+    }
+
+
+def query_mfd_layout(layout_id: str) -> dict[str, Any]:
+    layout = get_layout(Path(DB_PATH), layout_id)
+    if not layout:
+        raise ValueError("mfd layout not found")
+    return {"ok": True, "layout": layout}
+
+
+def query_mfd_outputs(query: dict[str, list[str]]) -> dict[str, Any]:
+    return {"ok": True, "outputs": list_outputs(Path(DB_PATH))}
+
+
+def query_mfd_output_layout(output_id: int) -> dict[str, Any]:
+    output = get_output_layout(Path(DB_PATH), output_id)
+    if not output:
+        raise ValueError("mfd output not found")
+    return {"ok": True, "output": output}
 
 
 def _as_json(raw: Any, fallback: Any) -> Any:
@@ -281,6 +322,89 @@ def _provider_unavailable_payload(
     }
 
 
+def _clean_name(value: Any) -> str:
+    return " ".join(str(value or "").replace("$", " ").split()).strip()
+
+
+def _names_match(left: Any, right: Any) -> bool:
+    a = _clean_name(left).casefold()
+    b = _clean_name(right).casefold()
+    if not a or not b:
+        return False
+    return a == b or a.endswith(f" {b}") or b.endswith(f" {a}")
+
+
+def _lookup_edsm_target_context(
+    *,
+    system_name: Any,
+    target_name: Any,
+    target: dict[str, Any],
+    semantic: dict[str, Any],
+) -> dict[str, Any] | None:
+    name = _clean_name(target_name)
+    system = _clean_name(system_name)
+    if not name or not system:
+        return None
+    if target.get("ship") or target.get("ship_localised"):
+        return None
+    target_type = str(semantic.get("target_type") or "").strip().lower()
+    if target_type in {"ship", "vessel", "fighter", "srv"}:
+        return None
+    params = {"system_name": system}
+    common = {
+        "max_age_s": 86400,
+        "allow_stale_if_error": True,
+        "incident_id": None,
+        "reason": "mfd_non_vessel_target_context",
+    }
+    try:
+        stations = ED_PROVIDER_QUERY_SERVICE.execute(
+            ProviderQuery(
+                provider=ProviderId.EDSM,
+                operation=ProviderOperationId.STATIONS_LOOKUP,
+                params=params,
+                **common,
+            )
+        ).to_dict()
+        station_items = ((stations.get("data") or {}).get("items") or []) if isinstance(stations, dict) else []
+        for item in station_items:
+            if isinstance(item, dict) and _names_match(item.get("name"), name):
+                return {
+                    "kind": "station",
+                    "source": "edsm",
+                    "query": {"system_name": system, "target_name": name},
+                    "data": item,
+                    "provider": stations.get("provider"),
+                    "fetched_at": stations.get("fetched_at"),
+                }
+    except Exception:
+        pass
+
+    try:
+        bodies = ED_PROVIDER_QUERY_SERVICE.execute(
+            ProviderQuery(
+                provider=ProviderId.EDSM,
+                operation=ProviderOperationId.BODIES_LOOKUP,
+                params=params,
+                **common,
+            )
+        ).to_dict()
+        body_items = ((bodies.get("data") or {}).get("items") or []) if isinstance(bodies, dict) else []
+        for item in body_items:
+            if isinstance(item, dict) and _names_match(item.get("name"), name):
+                return {
+                    "kind": "body",
+                    "source": "edsm",
+                    "query": {"system_name": system, "target_name": name},
+                    "data": item,
+                    "provider": bodies.get("provider"),
+                    "fetched_at": bodies.get("fetched_at"),
+                }
+    except Exception:
+        pass
+    return None
+
+
 def _query_capabilities() -> list[dict[str, Any]]:
     with connect_db() as con:
         rows = con.execute(
@@ -440,6 +564,50 @@ def query_inara_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
                 "secure_store"
                 if bool(str(secure_auth.get("app_key") or "").strip())
                 else ("config" if bool(str(auth.get("app_key") or "").strip()) else None)
+            ),
+            "last_updated_at": secret_updated_at,
+        },
+    }
+
+
+def query_edsm_credentials(query: dict[str, list[str]]) -> dict[str, Any]:
+    settings = load_runtime_settings(Path(DB_PATH))
+    config = apply_runtime_settings_overrides(
+        load_runtime_provider_config(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH),
+        settings,
+    )
+    providers = config.get("providers", {})
+    edsm_cfg = providers.get("edsm") if isinstance(providers, dict) else {}
+    if not isinstance(edsm_cfg, dict):
+        edsm_cfg = {}
+    auth = edsm_cfg.get("auth") if isinstance(edsm_cfg.get("auth"), dict) else {}
+    secure_auth = get_provider_secret_entry("edsm", PROVIDER_SECRETS_PATH)
+
+    commander_name = str(secure_auth.get("commander_name") or auth.get("commander_name") or "").strip()
+    api_key_present = bool(str(secure_auth.get("api_key") or auth.get("api_key") or "").strip())
+    secret_updated_at = str(secure_auth.get("_updated_at_utc") or "").strip() or None
+
+    return {
+        "ok": True,
+        "provider": "edsm",
+        "enabled": bool(edsm_cfg.get("enabled")),
+        "storage": {
+            "encrypted": True,
+            "path": str(Path(PROVIDER_SECRETS_PATH).resolve()),
+            "exists": Path(PROVIDER_SECRETS_PATH).exists(),
+            "secure_store_present": bool(secure_auth),
+            "last_updated_at": secret_updated_at,
+        },
+        "auth": {
+            "configured": bool(api_key_present and commander_name),
+        },
+        "credentials": {
+            "commander_name": commander_name,
+            "api_key_present": api_key_present,
+            "api_key_source": (
+                "secure_store"
+                if bool(str(secure_auth.get("api_key") or "").strip())
+                else ("config" if bool(str(auth.get("api_key") or "").strip()) else None)
             ),
             "last_updated_at": secret_updated_at,
         },
@@ -697,11 +865,22 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         or _as_bool(state.get("ed.semantic.station.no_fire_zone"))
         or raw_docking_state_for_station in {"requested", "granted", "approaching", "docking", "docked"}
     )
-    station_value = (
-        _state_value_with_fallback(state, "ed.location.station", "ed.telemetry.station_name")
-        if station_context_active
-        else None
-    )
+    station_value = None
+    if station_context_active:
+        for station_key in (
+            "ed.location.station",
+            "ed.telemetry.station_name",
+            "ed.station.docking_target_name",
+            "ed.station.docking_state_station",
+            "ed.station.no_fire_zone_station",
+        ):
+            candidate = state.get(station_key)
+            if isinstance(candidate, str) and candidate.strip():
+                station_value = candidate.strip()
+                break
+            if candidate not in (None, ""):
+                station_value = candidate
+                break
     nav_route_fallback = (
         _read_nav_route_fallback(
             current_system=current_system_name,
@@ -860,6 +1039,13 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         "being_interdicted": _as_bool(state.get("ed.status.being_interdicted")),
         "overheating": _as_bool(state.get("ed.status.overheating")),
         "low_fuel": _as_bool(state.get("ed.status.low_fuel")),
+        "shields_up": _as_bool(
+            _state_value_with_fallback(
+                state,
+                "ed.status.shields_up",
+                "ed.telemetry.shield_up",
+            )
+        ),
         "hardpoints_deployed": _as_bool(state.get("ed.status.hardpoints_deployed")),
         "landing_gear_down": _as_bool(state.get("ed.status.landing_gear_down")),
         "flight_assist_off": _as_bool(state.get("ed.status.flight_assist_off")),
@@ -963,7 +1149,17 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         "docking_landing_pads": system_detail.get("docking_landing_pads"),
         "docking_denied_reason": system_detail.get("docking_denied_reason"),
         "flight_status": state.get("ed.semantic.flight.flight_status"),
+        "fsd_state": state.get("ed.semantic.flight.fsd_state"),
     }
+    target_context = _lookup_edsm_target_context(
+        system_name=current_system_name,
+        target_name=_first_present(
+            state.get("ed.telemetry.destination_name"),
+            system_detail.get("docking_target_name"),
+        ),
+        target=target,
+        semantic=semantic,
+    )
 
     safety = {
         "advice_first": True,
@@ -1105,6 +1301,7 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         "telemetry": telemetry,
         "system_detail": system_detail,
         "target": target,
+        "target_context": target_context,
         "semantic": semantic,
         "suggestions": suggestions,
         "integrations": {

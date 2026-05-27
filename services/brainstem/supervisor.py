@@ -487,6 +487,15 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def _parse_journal_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 def _parse_system_address(raw: Any) -> int | None:
     if raw is None or raw == "":
         return None
@@ -1543,7 +1552,7 @@ def _map_environment(
     docked = bool(flags and flags.get("Docked"))
     landed = bool(flags and flags.get("Landed"))
     supercruise = bool(flags and flags.get("Supercruise"))
-    fsd_jump = bool(flags and flags.get("FsdCharging"))
+    in_hyperspace = bool(flags and flags.get("InHyperspace"))
     has_lat_long = bool(flags and flags.get("HasLatLong"))
 
     if in_srv:
@@ -1552,7 +1561,7 @@ def _map_environment(
         return "Docked"
     if landed:
         return "Planet Surface - Ship"
-    if fsd_jump:
+    if in_hyperspace:
         return "Witch Space"
     if supercruise:
         return "Supercruise"
@@ -2269,12 +2278,14 @@ def collect_ed_state() -> dict[str, Any]:
         if isinstance(body, int):
             destination_body = body
     published = journal_harvest.get("published") if isinstance(journal_harvest, dict) else None
+    status_flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else {}
+    status_flags2 = _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else {}
     if not destination_system and isinstance(published, dict):
         system_address = published.get("j.FSDTarget.SystemAddress")
         if isinstance(system_address, int):
             destination_system = system_address
     if not destination_name and isinstance(published, dict):
-        for key in ("j.FSDTarget.Name", "j.SupercruiseDestinationDrop.Body", "j.SupercruiseDestinationDrop.BodyName"):
+        for key in ("j.SupercruiseDestinationDrop.Body", "j.SupercruiseDestinationDrop.BodyName", "j.FSDTarget.Name"):
             value = published.get(key)
             if isinstance(value, str) and value.strip():
                 destination_name = value.strip()
@@ -2295,6 +2306,31 @@ def collect_ed_state() -> dict[str, Any]:
         jumps = published.get("j.FSDTarget.RemainingJumpsInRoute")
         if isinstance(jumps, (int, float)):
             remaining_jumps = int(jumps)
+    target_locked = None
+    target_updated_at = None
+    target_scan_stage = None
+    target_ship = None
+    target_ship_localised = None
+    target_pilot_name = None
+    target_pilot_rank = None
+    target_faction = None
+    target_legal_status = None
+    target_power = None
+    target_shield_health = None
+    target_hull_health = None
+    if isinstance(published, dict) and "j.ShipTargeted.TargetLocked" in published:
+        target_locked = bool(published.get("j.ShipTargeted.TargetLocked"))
+        target_updated_at = published.get("j.ShipTargeted.timestamp") or journal_harvest.get("timestamp_utc")
+        target_scan_stage = published.get("j.ShipTargeted.ScanStage")
+        target_ship = published.get("j.ShipTargeted.Ship")
+        target_ship_localised = published.get("j.ShipTargeted.Ship_Localised")
+        target_pilot_name = published.get("j.ShipTargeted.PilotName_Localised") or published.get("j.ShipTargeted.PilotName")
+        target_pilot_rank = published.get("j.ShipTargeted.PilotRank")
+        target_faction = published.get("j.ShipTargeted.Faction")
+        target_legal_status = published.get("j.ShipTargeted.LegalStatus")
+        target_power = published.get("j.ShipTargeted.Power")
+        target_shield_health = published.get("j.ShipTargeted.ShieldHealth")
+        target_hull_health = published.get("j.ShipTargeted.HullHealth")
     station_name = None
     station_type = None
     station_market_id = None
@@ -2329,6 +2365,24 @@ def collect_ed_state() -> dict[str, Any]:
         value = published.get("j.DockingGranted.LandingPad")
         if isinstance(value, (int, float)):
             docking_landing_pad = int(value)
+        grant_ts = _parse_journal_time(published.get("j.DockingGranted.timestamp"))
+        reset_events = (
+            "Undocked",
+            "Liftoff",
+            "SupercruiseEntry",
+            "FSDJump",
+            "DockingCancelled",
+            "DockingDenied",
+            "DockingTimeout",
+        )
+        reset_times = [
+            ts
+            for ts in (_parse_journal_time(published.get(f"j.{event_name}.timestamp")) for event_name in reset_events)
+            if ts is not None
+        ]
+        reset_after_grant = bool(grant_ts and any(ts >= grant_ts for ts in reset_times))
+        if reset_after_grant:
+            docking_landing_pad = None
         value = published.get("j.DockingRequested.LandingPads")
         if isinstance(value, dict):
             docking_landing_pads = value
@@ -2353,8 +2407,6 @@ def collect_ed_state() -> dict[str, Any]:
         if running
         else _empty_nav_route_vars()
     )
-    status_flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else {}
-    status_flags2 = _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else {}
     current_star_class = None
     if isinstance(published, dict):
         fsd_jump_star_class = published.get("j.FSDJump.StarClass")
@@ -2412,6 +2464,24 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.telemetry.station_name": station_name,
         "ed.telemetry.station_type": station_type,
         "ed.telemetry.station_market_id": station_market_id,
+        **(
+            {
+                "ed.target.locked": target_locked,
+                "ed.target.updated_at": target_updated_at,
+                "ed.target.scan_stage": target_scan_stage,
+                "ed.target.ship": target_ship if target_locked else None,
+                "ed.target.ship_localised": target_ship_localised if target_locked else None,
+                "ed.target.pilot_name": target_pilot_name if target_locked else None,
+                "ed.target.pilot_rank": target_pilot_rank if target_locked else None,
+                "ed.target.faction": target_faction if target_locked else None,
+                "ed.target.legal_status": target_legal_status if target_locked else None,
+                "ed.target.power": target_power if target_locked else None,
+                "ed.target.shield_health_percent": target_shield_health if target_locked else None,
+                "ed.target.hull_health_percent": target_hull_health if target_locked else None,
+            }
+            if target_locked is not None
+            else {}
+        ),
         "ed.status.available": bool(status),
         "ed.status.flags": status.get("Flags") if isinstance(status, dict) else None,
         "ed.status.flags2": status.get("Flags2") if isinstance(status, dict) else None,

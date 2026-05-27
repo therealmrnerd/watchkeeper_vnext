@@ -18,7 +18,10 @@ from actions import (
     open_external_app,
     record_confirmation,
     record_feedback,
+    save_edsm_credentials,
     save_inara_credentials,
+    save_mfd_layout_action,
+    save_mfd_outputs_action,
     save_openai_credentials,
     save_runtime_settings_action,
     set_mfd_light_sync,
@@ -37,8 +40,13 @@ from queries import (
     query_current_station_detail,
     query_current_system_stations,
     query_cockpit_state,
+    query_edsm_credentials,
     query_inara_credentials,
     query_llm_status,
+    query_mfd_layout,
+    query_mfd_layouts,
+    query_mfd_output_layout,
+    query_mfd_outputs,
     query_openai_credentials,
     query_providers_health,
     query_runtime_settings,
@@ -65,10 +73,13 @@ from runtime import (
 from validators import (
     validate_assist_request,
     validate_confirm,
+    validate_edsm_credentials_update,
     validate_feedback,
     validate_inara_credentials_update,
     validate_intent,
     validate_llm_control_payload,
+    validate_mfd_layout_payload,
+    validate_mfd_outputs_payload,
     validate_openai_credentials_update,
     validate_provider_query,
     validate_runtime_settings_payload,
@@ -247,6 +258,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         try:
+            if parsed.path in {f"/mfd/{index}" for index in range(1, 6)}:
+                self._send_file(Path(UI_DIR) / "mfd.html")
+                return
+            if parsed.path in {"/mfd/layout-editor", "/mfd/layout-editor/"}:
+                self._send_file(Path(UI_DIR) / "mfd-layout-editor.html")
+                return
+
             is_root_asset = parsed.path.startswith("/") and "." in parsed.path.rsplit("/", 1)[-1]
             if parsed.path in {"/", "/ui", "/ui/"} or parsed.path.startswith("/ui/") or is_root_asset:
                 ui_file = self._resolve_ui_path(parsed.path)
@@ -309,12 +327,34 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 self._stream_mfd()
                 return
 
+            if parsed.path == "/mfd/layouts":
+                self._send_json(200, query_mfd_layouts(query))
+                return
+
+            if parsed.path.startswith("/mfd/layouts/"):
+                layout_id = unquote(parsed.path.split("/mfd/layouts/", 1)[1])
+                self._send_json(200, query_mfd_layout(layout_id))
+                return
+
+            if parsed.path == "/mfd/outputs":
+                self._send_json(200, query_mfd_outputs(query))
+                return
+
+            if parsed.path.startswith("/mfd/outputs/"):
+                output_id = int(parsed.path.split("/mfd/outputs/", 1)[1])
+                self._send_json(200, query_mfd_output_layout(output_id))
+                return
+
             if parsed.path == "/providers/health":
                 self._send_json(200, query_providers_health(query))
                 return
 
             if parsed.path == "/providers/inara/credentials":
                 self._send_json(200, query_inara_credentials(query))
+                return
+
+            if parsed.path == "/providers/edsm/credentials":
+                self._send_json(200, query_edsm_credentials(query))
                 return
 
             if parsed.path == "/config/openai/credentials":
@@ -443,6 +483,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 self._send_json(200, result)
                 return
 
+            if parsed.path == "/mfd/layouts":
+                body = self._read_json_body()
+                validate_mfd_layout_payload(body)
+                self._send_json(200, save_mfd_layout_action(body, source=source))
+                return
+
+            if parsed.path == "/mfd/outputs":
+                body = self._read_json_body()
+                validate_mfd_outputs_payload(body)
+                self._send_json(200, save_mfd_outputs_action(body, source=source))
+                return
+
             if parsed.path == "/assist":
                 body = self._read_json_body()
                 validate_assist_request(body)
@@ -461,6 +513,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 validate_inara_credentials_update(body)
                 result = save_inara_credentials(body, source=source)
+                self._send_json(200, result)
+                return
+
+            if parsed.path == "/providers/edsm/credentials":
+                body = self._read_json_body()
+                validate_edsm_credentials_update(body)
+                result = save_edsm_credentials(body, source=source)
                 self._send_json(200, result)
                 return
 

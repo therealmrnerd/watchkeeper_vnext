@@ -88,6 +88,9 @@ class JournalHarvester:
             }
 
         published: dict[str, Any] = {"journal_last_event": event_name}
+        timestamp = ev.get("timestamp")
+        if isinstance(timestamp, str) and timestamp.strip():
+            published[f"j.{event_name}.timestamp"] = timestamp.strip()
         unknown_event_first_seen = False
         unknown_keys: list[str] = []
 

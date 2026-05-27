@@ -5,11 +5,15 @@
     safety: document.getElementById("mfdSafety"),
     system: document.getElementById("mfdSystem"),
     systemPane: document.getElementById("mfdSystemPane"),
+    systemHeroIcon: document.querySelector(".mfd-wire-planet"),
+    stationHeaderIcon: document.getElementById("mfdStationHeaderIcon"),
     systemAddress: document.getElementById("mfdSystemAddress"),
     systemAllegiance: document.getElementById("mfdSystemAllegiance"),
     systemFaction: document.getElementById("mfdSystemFaction"),
     systemPower: document.getElementById("mfdSystemPower"),
-    systemPowerState: document.getElementById("mfdSystemPowerState"),
+    systemPowerPortrait: document.getElementById("mfdSystemPowerPortrait"),
+    systemPowerplayState: document.getElementById("mfdSystemPowerplayState"),
+    systemSecurityState: document.getElementById("mfdSystemSecurityState"),
     systemGovernment: document.getElementById("mfdSystemGovernment"),
     systemEconomy: document.getElementById("mfdSystemEconomy"),
     systemSecurity: document.getElementById("mfdSystemSecurity"),
@@ -18,6 +22,14 @@
     currentStarClass: document.getElementById("mfdCurrentStarClass"),
     station: document.getElementById("mfdStation"),
     body: document.getElementById("mfdBody"),
+    dockingPane: document.getElementById("mfdDockingPane"),
+    dockingStation: document.getElementById("mfdDockingStation"),
+    dockingStationIcon: document.getElementById("mfdDockingStationIcon"),
+    dockingPad: document.getElementById("mfdDockingPad"),
+    dockingType: document.getElementById("mfdDockingType"),
+    dockingDetails: document.getElementById("mfdDockingDetails"),
+    dockingServices: document.getElementById("mfdDockingServices"),
+    dockingMap: document.getElementById("mfdDockingMap"),
     mode: document.getElementById("mfdMode"),
     shipCanvas: document.getElementById("mfdShipCanvas"),
     shipViewTitle: document.getElementById("mfdShipViewTitle"),
@@ -127,13 +139,6 @@
     lampScoop: document.getElementById("mfdLampScoop"),
     lampHardpoints: document.getElementById("mfdLampHardpoints"),
     shipSchematic: document.getElementById("mfdShipSchematic"),
-    shieldImage: document.getElementById("mfdShieldImage"),
-    shieldEnvelope: document.getElementById("mfdShieldEnvelope"),
-    shieldBands: [
-      document.getElementById("mfdShieldBand1"),
-      document.getElementById("mfdShieldBand2"),
-      document.getElementById("mfdShieldBand3"),
-    ],
     fullscreenGate: document.getElementById("mfdFullscreenGate"),
     fullscreenButton: document.getElementById("mfdFullscreenButton"),
     installHint: document.getElementById("mfdInstallHint"),
@@ -150,8 +155,6 @@
   let latestTelemetry = {};
   let shipViewIndex = 0;
   let shipViewManual = false;
-  let currentShieldEnvelope = "";
-  let previousShieldPercent = null;
   let mfdStream = null;
   let lastStreamAt = 0;
   let fallbackPollTimer = null;
@@ -159,6 +162,11 @@
   let hyperspaceGraceUntil = 0;
   let hyperspaceGraceTimer = null;
   let systemScrambleTimer = null;
+  let dockingMapFocusActive = false;
+  let dockingMapPreviousFocus = "";
+  let paneTransitionActive = false;
+  let paneTransitionTimer = null;
+  const missingPowerPortraits = new Set();
   const HYPERSPACE_CANCEL_GRACE_MS = 5000;
   const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
   const LIGHT_SYNC_ID = "jinx_lighting";
@@ -238,10 +246,56 @@
     type9: "type-9-heavy",
   };
   const edsaSchematicVersion = "3";
+  const dockingPadSizes = {
+    1: "s", 2: "l", 3: "m", 4: "s", 5: "m", 6: "s", 7: "m", 8: "m", 9: "l", 10: "l",
+    11: "m", 12: "s", 13: "s", 14: "s", 15: "m", 16: "s", 17: "l", 18: "m", 19: "s", 20: "m",
+    21: "s", 22: "m", 23: "m", 24: "l", 25: "l", 26: "m", 27: "s", 28: "s", 29: "s", 30: "m",
+    31: "s", 32: "l", 33: "m", 34: "s", 35: "m", 36: "s", 37: "m", 38: "m", 39: "l", 40: "l",
+    41: "m", 42: "s", 43: "s", 44: "s", 45: "m",
+  };
+  const dockingPadLayout = [
+    [24, 0, 350, 485, 16], [25, 0, 125, 245, 14],
+    [26, 30, 385, 465, 13], [27, 30, 300, 380, 12], [28, 30, 210, 310, 17], [29, 30, 115, 180, 11], [30, 30, 75, 135, 9],
+    [31, 60, 390, 485, 12], [32, 60, 315, 390, 12], [33, 60, 145, 220, 13], [34, 60, 90, 145, 10],
+    [35, 90, 395, 475, 12], [36, 90, 310, 390, 12], [37, 90, 210, 305, 17], [38, 90, 95, 205, 14],
+    [39, 120, 330, 485, 18], [40, 120, 150, 270, 17],
+    [41, 150, 400, 475, 14], [42, 150, 315, 390, 12], [43, 150, 225, 330, 20], [44, 150, 150, 235, 15], [45, 150, 85, 145, 10],
+    [1, 180, 410, 485, 15], [2, 180, 315, 390, 17], [3, 180, 215, 290, 15], [4, 180, 150, 205, 12],
+    [5, 210, 400, 475, 14], [6, 210, 315, 390, 12], [7, 210, 225, 330, 20], [8, 210, 150, 235, 15],
+    [9, 240, 330, 485, 18], [10, 240, 150, 270, 17],
+    [11, 270, 395, 475, 12], [12, 270, 310, 390, 12], [13, 270, 210, 305, 17], [14, 270, 140, 205, 11], [15, 270, 85, 140, 9],
+    [16, 300, 315, 390, 12], [17, 300, 390, 485, 12], [18, 300, 145, 220, 13], [19, 300, 90, 145, 10],
+    [20, 330, 385, 465, 13], [21, 330, 300, 380, 12], [22, 330, 210, 310, 17], [23, 330, 115, 205, 13],
+  ];
+  const stationTypeIcons = [
+    { test: /fleet\s*carrier|carrier/i, key: "fleet-carrier", icon: "icons/station-fleet-carrier.svg", label: "Fleet Carrier" },
+    { test: /asteroid/i, key: "asteroid-base", icon: "icons/station-asteroid-base.svg", label: "Asteroid Base" },
+    { test: /coriolis/i, key: "coriolis", icon: "icons/station-coriolis.svg", label: "Coriolis" },
+    { test: /ocellus|oculus/i, key: "ocellus", icon: "icons/station-ocellus.svg", label: "Ocellus" },
+    { test: /orbis/i, key: "orbis", icon: "icons/station-orbis.svg", label: "Orbis" },
+    { test: /dodec/i, key: "dodec", icon: "icons/station-dodec.svg", label: "Dodec" },
+    { test: /outpost/i, key: "outpost", icon: "icons/station-outpost.svg", label: "Outpost" },
+    { test: /planetary|surface|port/i, key: "planetary-port", icon: "icons/station-planetary-port.svg", label: "Planetary Port" },
+    { test: /settlement/i, key: "settlement", icon: "icons/station-settlement.svg", label: "Settlement" },
+  ];
+  const powerPortraits = [
+    { test: /yuri\s+grom|grom/i, src: "icons/powers/yuri-grom.png", label: "Yuri Grom" },
+    { test: /aisling\s+duval/i, src: "icons/powers/aisling-duval.svg", label: "Aisling Duval" },
+    { test: /arissa|lavigny/i, src: "icons/powers/arissa-lavigny-duval.svg", label: "Arissa Lavigny-Duval" },
+    { test: /edmund\s+mahon|mahon/i, src: "icons/powers/edmund-mahon.svg", label: "Edmund Mahon" },
+    { test: /felicia\s+winters|winters/i, src: "icons/powers/felicia-winters.svg", label: "Felicia Winters" },
+    { test: /zachary\s+hudson|hudson/i, src: "icons/powers/jerome-archer.svg", label: "Jerome Archer" },
+    { test: /jerome\s+archer|archer/i, src: "icons/powers/jerome-archer.svg", label: "Jerome Archer" },
+    { test: /li\s+yong[\s-]*rui|yong/i, src: "icons/powers/li-yong-rui.svg", label: "Li Yong-Rui" },
+    { test: /zemina\s+torval|torval/i, src: "icons/powers/zemina-torval.svg", label: "Zemina Torval" },
+    { test: /denton\s+patreus|patreus/i, src: "icons/powers/denton-patreus.svg", label: "Denton Patreus" },
+    { test: /pranav\s+antal|antal/i, src: "icons/powers/pranav-antal.svg", label: "Pranav Antal" },
+    { test: /archon\s+delaine|delaine/i, src: "icons/powers/archon-delaine.svg", label: "Archon Delaine" },
+    { test: /nakato\s+kaine|kaine/i, src: "icons/powers/nakato-kaine.svg", label: "Nakato Kaine" },
+  ];
   const pairedSchematicVersion = "4";
-  const shieldEnvelopeVersion = "7";
+  // Shield overlays are intentionally disabled until reliable live shield-health telemetry is available.
   const pairedSchematicShips = new Set(["anaconda"]);
-  const shipsWithoutShieldEnvelope = new Set(["caspian-explorer"]);
   const edsaSchematics = new Set([
     "adder",
     "alliance-challenger",
@@ -366,11 +420,10 @@
   };
   const shipViews = [
     {
-      title: "Weapons",
+      title: "Hardpoints",
       moduleGroup: "weapons",
       rows: [
         { label: "Mode", type: "mode", value: (t) => t.analysis_mode ? "Analysis" : "Combat" },
-        { label: "Shield", type: "percent", value: (t) => t.shields_up === false ? 0 : 100 },
         { label: "Hull", type: "percent", value: (t) => t.hull_percent ?? t.hull ?? 100 },
         { label: "Pips", type: "pips", value: (t) => t.pips },
         { label: "Weapons", type: "modules", value: (t) => ({ modules: t.modules, hardpoints: t.hardpoints, group: "weapons" }) },
@@ -381,10 +434,17 @@
       moduleGroup: "modules",
       rows: [
         { label: "Mode", type: "mode", value: (t) => t.analysis_mode ? "Analysis" : "Combat" },
-        { label: "Shield", type: "percent", value: (t) => t.shields_up === false ? 0 : 100 },
         { label: "Hull", type: "percent", value: (t) => t.hull_percent ?? t.hull ?? 100 },
         { label: "Pips", type: "pips", value: (t) => t.pips },
         { label: "Modules", type: "modules", value: (t) => ({ modules: t.modules, group: "modules" }) },
+      ],
+    },
+    {
+      title: "Cargo",
+      moduleGroup: "cargo",
+      requiresCargo: true,
+      rows: [
+        { label: "Cargo", type: "cargo", value: (t) => ({ count: t.cargo, items: t.cargo_inventory }) },
       ],
     },
   ];
@@ -445,6 +505,211 @@
       systemScrambleTimer = setInterval(() => {
         setField(el.system, label, scrambleText(value));
       }, 95);
+    }
+  }
+
+  function polarPoint(cx, cy, radius, degrees) {
+    const rad = (degrees - 90) * Math.PI / 180;
+    return [cx + Math.cos(rad) * radius, cy + Math.sin(rad) * radius];
+  }
+
+  function padPath(angle, innerRadius, outerRadius, span) {
+    const cx = 500;
+    const cy = 500;
+    const start = angle - span / 2;
+    const end = angle + span / 2;
+    const outerA = polarPoint(cx, cy, outerRadius, start);
+    const outerB = polarPoint(cx, cy, outerRadius, end);
+    const innerB = polarPoint(cx, cy, innerRadius, end);
+    const innerA = polarPoint(cx, cy, innerRadius, start);
+    const largeArc = span > 180 ? 1 : 0;
+    return [
+      `M ${outerA[0].toFixed(1)} ${outerA[1].toFixed(1)}`,
+      `A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerB[0].toFixed(1)} ${outerB[1].toFixed(1)}`,
+      `L ${innerB[0].toFixed(1)} ${innerB[1].toFixed(1)}`,
+      `A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerA[0].toFixed(1)} ${innerA[1].toFixed(1)}`,
+      "Z",
+    ].join(" ");
+  }
+
+  function padCenter(angle, innerRadius, outerRadius) {
+    const radius = (innerRadius + outerRadius) / 2;
+    return polarPoint(500, 500, radius, angle);
+  }
+
+  function renderDockingMap(padNumber, stationName) {
+    if (!el.dockingMap) {
+      return;
+    }
+    const assignedPad = Number(padNumber);
+    const assignedEntry = dockingPadLayout.find((entry) => entry[0] === assignedPad);
+    const labelRight = !assignedEntry || assignedEntry[1] <= 180;
+    const labelX = labelRight ? 870 : 130;
+    const labelY = assignedEntry ? Math.max(120, Math.min(880, padCenter(assignedEntry[1], assignedEntry[2], assignedEntry[3])[1])) : 500;
+    const labelAnchorX = labelRight ? labelX - 8 : labelX + 8;
+    const labelTextX = labelRight ? labelX : labelX;
+    const labelAnchor = labelRight ? "start" : "end";
+    const leaderStart = assignedEntry ? padCenter(assignedEntry[1], assignedEntry[2], assignedEntry[3]) : [500, 500];
+    const leaderEnd = [labelAnchorX, labelY];
+    const pads = dockingPadLayout.map(([pad, angle, inner, outer, span]) => {
+      const size = dockingPadSizes[pad] || "m";
+      const active = pad === assignedPad;
+      return `<path class="mfd-docking-pad${active ? " is-assigned" : ""}" data-pad="${pad}" data-size="${size}" d="${padPath(angle, inner, outer, span)}"></path>`;
+    }).join("");
+    const leader = Number.isFinite(assignedPad) && assignedPad >= 1 && assignedPad <= 45
+      ? `
+        <path class="mfd-docking-leader" d="M ${leaderStart[0].toFixed(1)} ${leaderStart[1].toFixed(1)} L ${leaderEnd[0].toFixed(1)} ${leaderEnd[1].toFixed(1)}"></path>
+        <circle class="mfd-docking-leader-dot" cx="${leaderStart[0].toFixed(1)}" cy="${leaderStart[1].toFixed(1)}" r="9"></circle>
+        <g class="mfd-docking-label">
+          <path d="M ${labelRight ? labelX - 20 : labelX + 20} ${labelY - 33} H ${labelRight ? labelX + 158 : labelX - 158} V ${labelY + 33} H ${labelRight ? labelX - 20 : labelX + 20} Z"></path>
+          <text x="${labelTextX}" y="${labelY - 6}" text-anchor="${labelAnchor}">PAD ${assignedPad}</text>
+          <text x="${labelTextX}" y="${labelY + 20}" text-anchor="${labelAnchor}">${text(stationName || "DOCKING")}</text>
+        </g>
+      `
+      : "";
+    el.dockingMap.innerHTML = `
+      <svg viewBox="-90 -90 1180 1180" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Assigned landing pad ${assignedPad || ""}">
+        <defs>
+          <filter id="mfdDockGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="4" result="blur"></feGaussianBlur>
+            <feMerge>
+              <feMergeNode in="blur"></feMergeNode>
+              <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+          </filter>
+        </defs>
+        <circle class="mfd-docking-ring" cx="500" cy="500" r="110"></circle>
+        <circle class="mfd-docking-ring" cx="500" cy="500" r="250"></circle>
+        <circle class="mfd-docking-ring" cx="500" cy="500" r="365"></circle>
+        <circle class="mfd-docking-ring" cx="500" cy="500" r="490"></circle>
+        ${pads}
+        ${leader}
+      </svg>
+    `;
+  }
+
+  function dockingMapActive(t, semantic = {}) {
+    const state = String(semantic.docking_state || "").toLowerCase();
+    const pad = Number(semantic.docking_granted_pad);
+    const inactiveDockingState = (
+      !state
+      || state === "not_docking"
+      || state === "can_request"
+      || state === "unknown"
+      || state === "docked"
+      || state.includes("denied")
+      || state.includes("cancel")
+      || state.includes("timeout")
+    );
+    return Boolean(
+      !t.docked
+      && !t.landed
+      && !inactiveDockingState
+      && Number.isFinite(pad)
+      && pad >= 1
+      && pad <= 45
+    );
+  }
+
+  function setDockingMapFocus(active) {
+    if (!el.core) {
+      return;
+    }
+    const systemDisplay = document.querySelector('.mfd-display[data-panel-id="system"]');
+    if (active && !dockingMapFocusActive) {
+      dockingMapPreviousFocus = el.core.dataset.focusedPanel || "";
+      focusPane(systemDisplay, { haptic: false });
+      dockingMapFocusActive = true;
+      return;
+    }
+    if (!active && dockingMapFocusActive) {
+      dockingMapPreviousFocus = "";
+      dockingMapFocusActive = false;
+      minimizeFocusedPane({ haptic: false });
+    }
+  }
+
+  function paneDisplays() {
+    return Array.from(document.querySelectorAll(".mfd-display"));
+  }
+
+  function clearPaneTransitionClasses() {
+    if (!el.core) {
+      return;
+    }
+    window.clearTimeout(paneTransitionTimer);
+    delete el.core.dataset.paneTransition;
+    for (const display of paneDisplays()) {
+      display.classList.remove("mfd-pane-enter", "mfd-pane-exit");
+    }
+    paneTransitionActive = false;
+  }
+
+  function finishPaneTransition(delay = 760) {
+    window.clearTimeout(paneTransitionTimer);
+    paneTransitionTimer = window.setTimeout(clearPaneTransitionClasses, delay);
+  }
+
+  function setFocusedPane(pane) {
+    for (const display of paneDisplays()) {
+      display.dataset.focused = "false";
+    }
+    if (pane) {
+      el.core.dataset.focusedPanel = pane.dataset.panelId || "pane";
+      pane.dataset.focused = "true";
+    } else {
+      delete el.core.dataset.focusedPanel;
+    }
+  }
+
+  function focusPane(pane, options = {}) {
+    if (!el.core || !pane || paneTransitionActive) {
+      return;
+    }
+    paneTransitionActive = true;
+    clearPaneTransitionClasses();
+    paneTransitionActive = true;
+    el.core.dataset.paneTransition = "maximizing";
+    for (const display of paneDisplays()) {
+      if (display !== pane) {
+        display.classList.add("mfd-pane-exit");
+      }
+    }
+    window.setTimeout(() => {
+      setFocusedPane(pane);
+      pane.classList.remove("mfd-pane-exit");
+      pane.classList.add("mfd-pane-enter");
+      finishPaneTransition();
+    }, 260);
+    if (options.haptic !== false) {
+      hapticTap(12);
+    }
+  }
+
+  function minimizeFocusedPane(options = {}) {
+    if (!el.core || paneTransitionActive) {
+      return;
+    }
+    const pane = document.querySelector('.mfd-display[data-focused="true"]');
+    if (!pane) {
+      setFocusedPane(null);
+      return;
+    }
+    paneTransitionActive = true;
+    clearPaneTransitionClasses();
+    paneTransitionActive = true;
+    el.core.dataset.paneTransition = "minimizing";
+    pane.classList.add("mfd-pane-exit");
+    window.setTimeout(() => {
+      setFocusedPane(null);
+      for (const display of paneDisplays()) {
+        display.classList.remove("mfd-pane-exit");
+        display.classList.add("mfd-pane-enter");
+      }
+      finishPaneTransition();
+    }, 260);
+    if (options.haptic !== false) {
+      hapticTap(8);
     }
   }
 
@@ -598,8 +863,16 @@
   function setControlState(t, semantic = {}) {
     const now = Date.now();
     const guiFocus = Number(t.gui_focus);
-    const inHyperspace = Boolean(t.in_hyperspace || t.fsd_jump || semantic.flight_status === "hyperspace");
-    const jumpInitiated = Boolean(t.fsd_hyperdrive_charging || t.fsd_jump || inHyperspace);
+    const semanticFlight = String(semantic.flight_status || "").toLowerCase();
+    const semanticFsd = String(semantic.fsd_state || "").toLowerCase();
+    const inHyperspace = Boolean(
+      t.in_hyperspace ||
+      semanticFlight === "witch_space" ||
+      semanticFlight === "hyperspace" ||
+      semanticFsd === "hyperspace"
+    );
+    const hyperspaceCharging = Boolean(t.fsd_hyperdrive_charging && !t.supercruise);
+    const jumpInitiated = Boolean(hyperspaceCharging || inHyperspace);
     const hyperspaceCancelWindow = Boolean(now < hyperspaceGraceUntil);
     const massLocked = Boolean(t.fsd_mass_locked);
     const docked = Boolean(t.docked);
@@ -637,7 +910,7 @@
       cargo_scoop: cargoScoopOpen,
       flight_assist: Boolean(t.flight_assist_off),
       supercruise: Boolean(t.supercruise),
-      hyperspace: inHyperspace || jumpInitiated,
+      hyperspace: inHyperspace || hyperspaceCharging,
       flight_control: guiFocus === 0,
       management_panel: guiFocus === 1,
       nav_panel: guiFocus === 2,
@@ -648,8 +921,8 @@
       repair_refuel: Boolean(t.docked && semantic.station_services_available),
     };
     const unavailableByAction = {
-      supercruise: fsdBlocked || inHyperspace || jumpInitiated,
-      hyperspace: !hyperspaceCancelWindow && (fsdBlocked || inHyperspace || jumpInitiated || !hasHyperspaceTarget),
+      supercruise: fsdBlocked || inHyperspace || hyperspaceCharging,
+      hyperspace: !hyperspaceCancelWindow && (fsdBlocked || inHyperspace || hyperspaceCharging || !hasHyperspaceTarget),
       fss: docked || !t.supercruise,
       hardpoints: Boolean(docked || t.supercruise || inHyperspace),
       flight_assist: Boolean(docked),
@@ -733,21 +1006,15 @@
     if (el.shipCanvas) {
       el.shipCanvas.dataset.ship = name;
     }
-    if (name === "sidewinder" && el.shipCanvas) {
-      el.shipCanvas.dataset.shieldImage = "true";
-    }
-    setShieldEnvelope(name);
     if (el.shipSchematic.getAttribute("src") === next) {
       return;
     }
     el.shipSchematic.onerror = () => {
       el.shipSchematic.onerror = null;
-      currentShieldEnvelope = "";
       if (el.shipCanvas) {
         el.shipCanvas.dataset.ship = "sidewinder";
       }
       el.shipSchematic.src = schematicSrc("sidewinder");
-      setShieldEnvelope("sidewinder");
     };
     el.shipSchematic.src = next;
   }
@@ -886,6 +1153,99 @@
     return items.length ? items.join(" / ") : "Local";
   }
 
+  function normalizeStationType(raw) {
+    const value = String(raw || "").replace(/[_-]+/g, " ").trim();
+    if (!value) {
+      return "";
+    }
+    const match = stationTypeIcons.find((item) => item.test.test(value));
+    return match ? match.label : value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function stationIconForType(raw) {
+    const value = String(raw || "").replace(/[_-]+/g, " ").trim();
+    const match = stationTypeIcons.find((item) => item.test.test(value));
+    return match ? match.icon : "icons/system-map.png";
+  }
+
+  function powerPortraitFor(raw) {
+    const value = String(raw || "").trim();
+    if (!value || value === "-") {
+      return null;
+    }
+    return powerPortraits.find((item) => item.test.test(value)) || null;
+  }
+
+  function setPowerPortrait(powerName, showAsDockedBackground = false) {
+    if (!el.systemPowerPortrait) {
+      return;
+    }
+    const portrait = powerPortraitFor(powerName);
+    if (!showAsDockedBackground || !portrait || missingPowerPortraits.has(portrait.src)) {
+      el.systemPowerPortrait.hidden = true;
+      el.systemPowerPortrait.removeAttribute("src");
+      el.systemPowerPortrait.alt = "";
+      return;
+    }
+    el.systemPowerPortrait.alt = portrait.label;
+    el.systemPowerPortrait.onerror = () => {
+      missingPowerPortraits.add(portrait.src);
+      el.systemPowerPortrait.hidden = true;
+      el.systemPowerPortrait.removeAttribute("src");
+    };
+    el.systemPowerPortrait.hidden = false;
+    if (!el.systemPowerPortrait.src.endsWith(portrait.src)) {
+      el.systemPowerPortrait.src = portrait.src;
+    }
+  }
+
+  function setSystemHeroBackground(context, stationType) {
+    if (!el.systemHeroIcon) {
+      return;
+    }
+    if (context === "station") {
+      el.systemHeroIcon.dataset.kind = "station";
+      el.systemHeroIcon.innerHTML = `<img class="mfd-station-bg-icon" src="${stationIconForType(stationType)}" alt="" aria-hidden="true">`;
+    } else {
+      el.systemHeroIcon.dataset.kind = "system";
+      el.systemHeroIcon.innerHTML = "<span></span>";
+    }
+  }
+
+  function setStationHeaderIcon(stationContext, stationType) {
+    if (!el.stationHeaderIcon) {
+      return;
+    }
+    el.stationHeaderIcon.hidden = !stationContext;
+    if (stationContext) {
+      el.stationHeaderIcon.src = stationIconForType(stationType);
+      el.stationHeaderIcon.alt = normalizeStationType(stationType) || "Station";
+    }
+  }
+
+  function dockingServicesText(semantic = {}, system = {}) {
+    const pads = semantic.docking_landing_pads;
+    const items = [];
+    if (semantic.station_services_available) {
+      items.push("Station services");
+    }
+    if (semantic.market_access_available) {
+      items.push("Market");
+    }
+    if (system.has_docking || semantic.can_request_docking || semantic.no_fire_zone) {
+      items.push("Docking");
+    }
+    if (pads && typeof pads === "object") {
+      const padSummary = Object.entries(pads)
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => `${String(key).slice(0, 1).toUpperCase()}${Number(value)}`);
+      if (padSummary.length) {
+        items.push(`Pads ${padSummary.join(" ")}`);
+      }
+    }
+    return items.length ? items.join(" / ") : "-";
+  }
+
   function renderSlfPane(t) {
     const fighter = t.fighter || {};
     const model = fighter.model || "taipan";
@@ -996,10 +1356,12 @@
     return "";
   }
 
-  function renderPlanetPane(t) {
+  function renderPlanetPane(t, targetContext = null) {
+    const targetBody = targetContext && targetContext.kind === "body" && targetContext.data ? targetContext.data : null;
+    const bodyExtras = targetBody && targetBody.extras && typeof targetBody.extras === "object" ? targetBody.extras : {};
     if (el.planetPane) {
-      el.planetPane.dataset.landable = planetIsLandable(t) ? "true" : "false";
-      el.planetPane.dataset.atmosphere = planetHasAtmosphere(t) ? "true" : "false";
+      el.planetPane.dataset.landable = targetBody ? (bodyExtras.is_landable ? "true" : "false") : (planetIsLandable(t) ? "true" : "false");
+      el.planetPane.dataset.atmosphere = targetBody ? (targetBody.atmosphere ? "true" : "false") : (planetHasAtmosphere(t) ? "true" : "false");
       const surfaceSite = planetSurfaceSiteType(t);
       if (surfaceSite) {
         el.planetPane.dataset.surfaceSite = surfaceSite;
@@ -1007,12 +1369,12 @@
         delete el.planetPane.dataset.surfaceSite;
       }
     }
-    setText(el.planetBody, t.body || "Planetary body");
-    setText(el.planetStatus, t.planetary_status || "-");
+    setText(el.planetBody, targetBody ? targetBody.name : (t.body || "Planetary body"));
+    setText(el.planetStatus, targetBody ? (targetBody.subtype || targetBody.body_type || "Body target") : (t.planetary_status || "-"));
     setText(el.planetSystem, t.system || "-");
-    setText(el.planetFlightStatus, t.planetary_status || "-");
-    setText(el.planetPosition, formatPosition(t));
-    setText(el.planetAltitude, formatAltitude(t.altitude));
+    setText(el.planetFlightStatus, targetBody ? "EDSM target" : (t.planetary_status || "-"));
+    setText(el.planetPosition, targetBody && targetBody.distance_to_arrival_ls != null ? `${formatInteger(targetBody.distance_to_arrival_ls)} ls` : formatPosition(t));
+    setText(el.planetAltitude, targetBody && targetBody.gravity != null ? `${Number(targetBody.gravity).toFixed(2)} g` : formatAltitude(t.altitude));
     setText(el.planetHeading, formatHeading(t.heading));
     setText(el.planetTemp, Number.isFinite(Number(t.temperature)) ? `${Math.round(Number(t.temperature) * 100)}%` : "-");
     setText(el.planetMode, t.analysis_mode ? "Analysis" : "Combat/Nav");
@@ -1050,6 +1412,7 @@
   function stationContextName(t, semantic = {}) {
     const targetType = String(semantic.target_type || "").toLowerCase();
     const dockingState = String(semantic.docking_state || "").toLowerCase();
+    const stationishTarget = ["station", "outpost", "fleet_carrier"].includes(targetType);
     const activeStationContext = Boolean(
       t.docked
       || t.on_foot_in_station
@@ -1058,13 +1421,18 @@
       || semantic.station_services_available
       || semantic.can_request_docking
       || semantic.no_fire_zone
+      || stationishTarget
       || ["requested", "granted", "approaching", "docking", "docked"].includes(dockingState)
     );
     if (activeStationContext && t.station) {
       return t.station;
     }
-    if (["station", "outpost", "fleet_carrier"].includes(targetType) || semantic.can_request_docking || semantic.no_fire_zone) {
-      return t.destination_name || t.target || "";
+    const dockingTargetName = text(semantic.docking_target_name);
+    if (activeStationContext && dockingTargetName) {
+      return dockingTargetName;
+    }
+    if (stationishTarget || semantic.can_request_docking || semantic.no_fire_zone) {
+      return t.destination_name || t.target || dockingTargetName || "";
     }
     const destinationName = String(t.destination_name || "").trim();
     const destinationType = String(t.destination_body_type || semantic.destination_body_type || "").toLowerCase();
@@ -1097,11 +1465,14 @@
     );
   }
 
-  function renderSystemContext(t, system, semantic = {}) {
+  function renderSystemContext(t, system, semantic = {}, targetContext = null) {
     const showSlf = Boolean(t.in_fighter || (t.fighter && t.fighter.active));
     const showFootPlanet = Boolean(t.on_foot_on_planet);
-    const showRoute = hasHyperspaceDestination(t, semantic || {});
-    const stationName = stationContextName(t, semantic);
+    const showDockingMap = dockingMapActive(t, semantic || {});
+    setDockingMapFocus(showDockingMap);
+    const showRoute = Boolean(!showDockingMap && hasHyperspaceDestination(t, semantic || {}));
+    const targetStation = targetContext && targetContext.kind === "station" && targetContext.data ? targetContext.data : null;
+    const stationName = targetStation ? targetStation.name : stationContextName(t, semantic);
     const stationContext = Boolean(
       t.docked
       || t.on_foot_in_station
@@ -1112,20 +1483,47 @@
       || semantic.no_fire_zone
       || stationName
     );
+    const stationType = (targetStation && targetStation.station_type) || semantic.docking_target_type || system.docking_target_type || system.station_type || t.station_type || "";
+    if (el.systemPane) {
+      el.systemPane.dataset.context = stationContext && t.docked ? "station-docked" : "system";
+    }
+    setSystemHeroBackground(stationContext ? "station" : "system", stationType);
+    setStationHeaderIcon(stationContext && t.docked, stationType);
     const activeVehicle = String(t.active_vehicle || "").toLowerCase();
     const activeShip = !showSlf && activeVehicle !== "fighter" && activeVehicle !== "srv" && activeVehicle !== "foot";
-    const showPlanet = Boolean(!showRoute && !stationContext && !showSlf && !showFootPlanet && activeShip && isActivePlanetaryContext(t));
+    const showTargetBody = Boolean(targetContext && targetContext.kind === "body");
+    const showPlanet = Boolean(!showDockingMap && !showRoute && !stationContext && !showSlf && !showFootPlanet && activeShip && (isActivePlanetaryContext(t) || showTargetBody));
     if (el.systemPane) {
-      el.systemPane.hidden = showSlf || showFootPlanet || showPlanet;
+      el.systemPane.hidden = showDockingMap || showSlf || showFootPlanet || showPlanet;
+    }
+    if (el.dockingPane) {
+      el.dockingPane.hidden = !showDockingMap;
     }
     if (el.slfPane) {
-      el.slfPane.hidden = !showSlf;
+      el.slfPane.hidden = showDockingMap || !showSlf;
     }
     if (el.footPlanetPane) {
-      el.footPlanetPane.hidden = !showFootPlanet;
+      el.footPlanetPane.hidden = showDockingMap || !showFootPlanet;
     }
     if (el.planetPane) {
-      el.planetPane.hidden = !showPlanet;
+      el.planetPane.hidden = showDockingMap || !showPlanet;
+    }
+    if (showDockingMap) {
+      const pad = Number(semantic.docking_granted_pad);
+      const dockingStation = stationName || semantic.docking_target_name || t.station || t.destination_name || "Docking target";
+      const stationTypeLabel = normalizeStationType(stationType);
+      const stationMarketId = semantic.docking_target_market_id || system.docking_target_market_id || system.station_market_id || t.station_market_id;
+      setText(el.dockingStation, dockingStation);
+      setText(el.dockingPad, Number.isFinite(pad) ? `Pad ${pad}` : "-");
+      setText(el.dockingType, stationTypeLabel || "Station");
+      setText(el.dockingDetails, stationMarketId ? `Market ${stationMarketId}` : (system.station_faction || system.faction || "-"));
+      setText(el.dockingServices, dockingServicesText(semantic, system));
+      if (el.dockingStationIcon) {
+        el.dockingStationIcon.src = stationIconForType(stationType);
+        el.dockingStationIcon.alt = stationTypeLabel || "Station";
+      }
+      renderDockingMap(pad, dockingStation);
+      return;
     }
     if (showSlf) {
       renderSlfPane(t);
@@ -1136,18 +1534,35 @@
       return;
     }
     if (showPlanet) {
-      renderPlanetPane(t);
+      renderPlanetPane(t, targetContext);
       return;
     }
-    const jumpTextActive = Boolean(t.in_hyperspace || t.fsd_hyperdrive_charging || t.fsd_jump || semantic.flight_status === "hyperspace");
-    setSystemNameField(stationContext ? "Station System" : "Current System", t.system, jumpTextActive);
-    setText(el.systemAddress, t.system_address ? `ADDR ${t.system_address}` : "-");
+    const semanticFlight = String(semantic.flight_status || "").toLowerCase();
+    const semanticFsd = String(semantic.fsd_state || "").toLowerCase();
+    const jumpTextActive = Boolean(
+      t.in_hyperspace ||
+      (t.fsd_hyperdrive_charging && !t.supercruise) ||
+      semanticFlight === "witch_space" ||
+      semanticFlight === "hyperspace" ||
+      semanticFsd === "hyperspace"
+    );
+    const dockedStationContext = Boolean(stationContext && t.docked);
+    const stationTypeLabel = normalizeStationType(stationType);
+    setSystemNameField(dockedStationContext ? "Connected To" : (stationContext ? "Station System" : "Current System"), dockedStationContext ? stationName : t.system, jumpTextActive);
+    setText(
+      el.systemAddress,
+      dockedStationContext
+        ? `${t.system || "-"} system${system.region ? ` | ${system.region}` : (stationTypeLabel ? ` | ${stationTypeLabel}` : "")}`
+        : (t.system_address ? `ADDR ${t.system_address}` : "-")
+    );
     setField(el.station, stationContext ? "Station" : "Station", stationContext ? stationName : "");
-    setField(el.body, stationContext ? "Local Body" : "Body", t.body);
+    setField(el.body, stationContext ? "Local Body" : "Body", showTargetBody ? targetContext.data?.name : t.body);
     setField(el.systemAllegiance, "Allegiance", system.allegiance);
     setField(el.systemFaction, stationContext ? "Faction" : "Control", system.station_faction || system.faction);
     setField(el.systemPower, "Power", system.controlling_power);
-    setField(el.systemPowerState, "State", system.civil_war ? "Civil War" : (system.powerplay_state || system.faction_state));
+    setPowerPortrait(system.controlling_power, dockedStationContext);
+    setField(el.systemPowerplayState, "Powerplay State", system.powerplay_state);
+    setField(el.systemSecurityState, "Security State", system.faction_state || (system.civil_war ? "Civil War" : ""));
     setField(el.systemGovernment, "Government", system.station_government || system.government);
     setField(el.systemEconomy, "Economy", system.station_economy || system.economy);
     setField(el.systemSecurity, "Security", system.security);
@@ -1226,70 +1641,16 @@
     setField(el.targetRank, "Rank", target.pilot_rank);
     setField(el.targetFaction, "Faction", target.faction);
     setField(el.targetPower, "Power", target.power);
-    setField(el.targetShield, "Shield", formatPercent(target.shield_health_percent));
-    setField(el.targetHull, "Hull", formatPercent(target.hull_health_percent));
-    setMeter(el.targetShieldBar, target.shield_health_percent);
-    setMeter(el.targetHullBar, target.hull_health_percent);
+    setText(el.targetShield, "-");
+    setText(el.targetHull, "-");
+    if (el.targetShieldBar) {
+      el.targetShieldBar.style.width = "0%";
+    }
+    if (el.targetHullBar) {
+      el.targetHullBar.style.width = "0%";
+    }
     setTargetSchematic(target.ship || target.ship_localised || t.target, targetLocked);
     setText(el.targetStatus, t.in_danger ? "Danger" : (t.being_interdicted ? "Interdicted" : (targetLocked ? (targetHostility === "enemy" ? "Hostile power" : "Contact locked") : "Clear")));
-  }
-
-  async function setShieldEnvelope(name) {
-    const ship = slug(name) || "sidewinder";
-    if (currentShieldEnvelope === ship) {
-      return;
-    }
-    currentShieldEnvelope = ship;
-    if (shipsWithoutShieldEnvelope.has(ship)) {
-      if (el.shipCanvas) {
-        el.shipCanvas.dataset.shieldImage = "false";
-      }
-      if (el.shieldImage) {
-        el.shieldImage.removeAttribute("src");
-      }
-      el.shieldBands.forEach((node) => node?.removeAttribute("points"));
-      return;
-    }
-    const hasPairedShield = pairedSchematicShips.has(ship);
-    if (el.shipCanvas) {
-      el.shipCanvas.dataset.shieldImage = hasPairedShield ? "true" : "false";
-    }
-    if (el.shieldImage) {
-      if (hasPairedShield) {
-        el.shieldImage.src = `Schematics/paired/${ship}-shield-outline.png?v=${pairedSchematicVersion}`;
-      } else {
-        el.shieldImage.removeAttribute("src");
-      }
-    }
-    if (hasPairedShield) {
-      el.shieldBands.forEach((node) => node?.removeAttribute("points"));
-      return;
-    }
-    try {
-      const data = await apiGet(`/Schematics/shields/${ship}.json?v=${shieldEnvelopeVersion}`);
-      const width = Number(data.width) || 100;
-      const height = Number(data.height) || 100;
-      if (el.shieldEnvelope) {
-        el.shieldEnvelope.setAttribute("viewBox", `0 0 ${width} ${height}`);
-      }
-      const bands = Array.isArray(data.bands) ? data.bands : [];
-      bands.forEach((band, index) => {
-        const node = el.shieldBands[index];
-        const points = Array.isArray(band.points) ? band.points : [];
-        if (!node || !points.length) {
-          return;
-        }
-        node.setAttribute(
-          "points",
-          points.map((p) => `${(Number(p.x) / 100) * width},${(Number(p.y) / 100) * height}`).join(" "),
-        );
-      });
-    } catch {
-      if (ship !== "sidewinder") {
-        currentShieldEnvelope = "";
-        setShieldEnvelope("sidewinder");
-      }
-    }
   }
 
   function pct(value, max) {
@@ -1355,9 +1716,16 @@
       return false;
     }
     const type = String(t.destination_body_type || semantic.destination_body_type || "").toLowerCase();
-    const stationish = /\b(station|outpost|fleet|carrier|settlement|port|base)\b/.test(type);
     const destinationName = String(t.destination_name || semantic.destination_name || "").trim();
     const destinationKey = destinationName.toLowerCase();
+    const stationishType = /\b(station|outpost|fleet|carrier|settlement|port|base)\b/.test(type);
+    const stationishName = /\b(station|outpost|fleet|carrier|settlement|port|base|dock|terminal|cove|hub)\b/.test(destinationKey);
+    const targetType = String(semantic.target_type || "").toLowerCase();
+    const stationishTarget = ["station", "outpost", "fleet_carrier", "settlement"].includes(targetType);
+    const stationish = Boolean(stationishType || stationishName || stationishTarget || semantic.no_fire_zone || semantic.can_request_docking);
+    if (stationish) {
+      return false;
+    }
     const destinationSystem = String(t.destination_system || semantic.destination_system || "").trim();
     const currentSystemAddress = String(t.system_address || semantic.system_address || "").trim();
     const localNames = [
@@ -1368,7 +1736,6 @@
       semantic.station,
       semantic.body
     ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
-    const remoteNamedTarget = Boolean(destinationKey && !localNames.includes(destinationKey));
     const routeJumps = Number(t.nav_route_remaining_jumps ?? semantic.nav_route_remaining_jumps ?? NaN);
     const remainingJumps = Number(t.destination_remaining_jumps ?? semantic.remaining_jumps ?? NaN);
     const routeActive = Boolean(
@@ -1390,7 +1757,6 @@
       && !t.nav_route_next_jump
       && (!Number.isFinite(routeJumps) || routeJumps <= 0)
       && (!Number.isFinite(remainingJumps) || remainingJumps <= 0)
-      && !remoteNamedTarget
     );
     if (arrivedAtRouteDestination) {
       return false;
@@ -1399,17 +1765,13 @@
       return false;
     }
     return Boolean(
-      !stationish &&
-      (
-        (routeActive && (t.nav_route_destination || semantic.nav_route_destination)) ||
-        (t.destination_system && !t.destination_body) ||
-        t.destination_star_class ||
-        t.destination_remaining_jumps ||
-        t.nav_route_next_jump ||
-        t.nav_route_remaining_jumps ||
-        type.includes("hyperspace") ||
-        remoteNamedTarget
-      )
+      (routeActive && (t.nav_route_destination || semantic.nav_route_destination)) ||
+      (destinationSystem && !t.destination_body) ||
+      t.destination_star_class ||
+      t.destination_remaining_jumps ||
+      t.nav_route_next_jump ||
+      t.nav_route_remaining_jumps ||
+      type.includes("hyperspace")
     );
   }
 
@@ -1577,6 +1939,18 @@
       .slice(0, 3)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ") || "Module";
+  }
+
+  function moduleAmmoText(module) {
+    const clip = Number(module.ammo_in_clip);
+    const hopper = Number(module.ammo_in_hopper);
+    if (Number.isFinite(clip) && Number.isFinite(hopper)) {
+      return `${clip}/${hopper}`;
+    }
+    if (Number.isFinite(hopper)) {
+      return `${hopper}`;
+    }
+    return "";
   }
 
   function isWeaponModule(module) {
@@ -1886,13 +2260,17 @@
       }
       header.className = "mfd-module-header";
       label.className = "mfd-module-slot";
-      label.textContent = group === "weapons" ? `${hardpointSize ? `${hardpointSize} ` : ""}HP ${position}` : shortModuleName(module);
+      label.textContent = group === "weapons" ? (hardpointSize || "HP") : shortModuleName(module);
       name.className = "mfd-module-name";
       name.textContent = moduleItemName(module);
       meter.className = "mfd-module-meter";
       fill.style.width = `${pctValue}%`;
       value.className = "mfd-module-value";
-      value.textContent = Number.isFinite(health) ? `${Math.round(pctValue)}%` : "-";
+      const ammo = group === "weapons" ? moduleAmmoText(module) : "";
+      value.textContent = [
+        Number.isFinite(health) ? `${Math.round(pctValue)}%` : "-",
+        ammo,
+      ].filter(Boolean).join(" ");
       header.appendChild(label);
       header.appendChild(value);
       meter.appendChild(fill);
@@ -1908,6 +2286,36 @@
         window.setTimeout(() => renderHardpointLeaders(wrap), 120);
       });
     }
+    return wrap;
+  }
+
+  function renderCargoHold(raw) {
+    const payload = raw && typeof raw === "object" ? raw : {};
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const count = Number(payload.count ?? items.reduce((sum, item) => sum + Number(item.count || 0), 0));
+    const wrap = document.createElement("div");
+    wrap.className = "mfd-cargo-list";
+    if (!Number.isFinite(count) || count <= 0 || !items.length) {
+      const empty = document.createElement("span");
+      empty.className = "mfd-module-empty";
+      empty.textContent = "Cargo hold empty";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+    items
+      .filter((item) => Number(item.count || 0) > 0)
+      .slice(0, 12)
+      .forEach((item) => {
+        const row = document.createElement("span");
+        const name = document.createElement("strong");
+        const qty = document.createElement("span");
+        row.className = "mfd-cargo-row";
+        name.textContent = item.name_localised || item.name || "Cargo";
+        qty.textContent = `x${Number(item.count || 0)}`;
+        row.appendChild(name);
+        row.appendChild(qty);
+        wrap.appendChild(row);
+      });
     return wrap;
   }
 
@@ -1998,6 +2406,9 @@
     if (row.type === "modules") {
       return renderModuleHealth(raw);
     }
+    if (row.type === "cargo") {
+      return renderCargoHold(raw);
+    }
     const value = document.createElement("span");
     value.className = "mfd-ship-readout-value";
     value.textContent = text(raw);
@@ -2005,9 +2416,16 @@
   }
 
   function renderShipView() {
-    const view = shipViews[shipViewIndex] || shipViews[0];
+    const views = availableShipViews(latestTelemetry || {});
+    if (shipViewIndex >= views.length) {
+      shipViewIndex = 0;
+    }
+    const view = views[shipViewIndex] || views[0];
     setText(el.shipViewTitle, view.title);
     setText(el.shipName, latestTelemetry.ship_name || latestTelemetry.ship_model || "Vessel");
+    if (el.shipCanvas) {
+      el.shipCanvas.dataset.view = view.moduleGroup || "weapons";
+    }
     if (!el.shipReadouts) {
       return;
     }
@@ -2029,7 +2447,8 @@
 
   function cycleShipView(delta) {
     shipViewManual = true;
-    shipViewIndex = (shipViewIndex + delta + shipViews.length) % shipViews.length;
+    const views = availableShipViews(latestTelemetry || {});
+    shipViewIndex = (shipViewIndex + delta + views.length) % views.length;
     renderShipView();
   }
 
@@ -2040,43 +2459,14 @@
     shipViewIndex = t.analysis_mode ? 1 : 0;
   }
 
-  function setShieldBands(t) {
-    if (!el.shipCanvas) {
-      return;
-    }
-    const raw = Number(t.shield_percent ?? t.shields_percent ?? (t.shields_up === false ? 0 : 100));
-    const value = Number.isFinite(raw) ? raw : 100;
-    let bands = 0;
-    if (value > 66) {
-      bands = 3;
-    } else if (value > 33) {
-      bands = 2;
-    } else if (value > 0) {
-      bands = 1;
-    }
-    el.shipCanvas.dataset.shieldBands = String(bands);
+  function hasCargo(t) {
+    const count = Number(t.cargo);
+    const items = Array.isArray(t.cargo_inventory) ? t.cargo_inventory : [];
+    return (Number.isFinite(count) && count > 0) || items.some((item) => Number(item.count || 0) > 0);
   }
 
-  function shieldPercent(t) {
-    const raw = Number(t.shield_percent ?? t.shields_percent ?? (t.shields_up === false ? 0 : 100));
-    return Number.isFinite(raw) ? raw : 100;
-  }
-
-  function setShieldTrend(t) {
-    if (!el.shipCanvas) {
-      return;
-    }
-    const value = shieldPercent(t);
-    let trend = "stable";
-    if (previousShieldPercent !== null) {
-      if (value < previousShieldPercent) {
-        trend = "down";
-      } else if (value > previousShieldPercent) {
-        trend = "up";
-      }
-    }
-    previousShieldPercent = value;
-    el.shipCanvas.dataset.shieldTrend = trend;
+  function availableShipViews(t) {
+    return shipViews.filter((view) => !view.requiresCargo || hasCargo(t));
   }
 
   function setShipTemperatureColor(t) {
@@ -2263,16 +2653,18 @@
     const safety = data.safety || {};
     const system = data.system_detail || {};
     const target = data.target || {};
+    const targetContext = data.target_context || null;
     latestTelemetry = t;
     latestSafety = safety;
     if (el.core) {
-      el.core.dataset.routeLayout = hasHyperspaceDestination(t, data.semantic || {}) ? "true" : "false";
+      const semantic = data.semantic || {};
+      el.core.dataset.routeLayout = (!dockingMapActive(t, semantic) && hasHyperspaceDestination(t, semantic)) ? "true" : "false";
     }
     setText(el.updated, `Updated: ${text(data.updated_at_utc)}`);
     setSafetyMessage(safety.input_locked ? "Controls locked" : "Controls ready");
-    renderSystemContext(t, system, data.semantic || {});
+    renderSystemContext(t, system, data.semantic || {}, targetContext);
     setText(el.mode, t.supercruise ? "Supercruise" : (t.docked ? "Docked" : "Normal"));
-    setText(el.shield, t.shields_up === false ? "Down" : "Nominal");
+    setText(el.shield, "-");
     setText(el.fuel, t.fuel_main);
     setText(el.cargo, t.cargo);
     setText(el.pips, formatPips(t.pips));
@@ -2283,8 +2675,6 @@
     setText(el.guiFocus, t.gui_focus);
     setText(el.analysisMode, t.analysis_mode ? "Analysis" : "Combat/Nav");
     setShipSchematic(t.ship_model);
-    setShieldBands(t);
-    setShieldTrend(t);
     setShipTemperatureColor(t);
     renderFuelStrip(t);
     renderStatusIcons(t);
@@ -2359,11 +2749,18 @@
     );
   }
 
+  function isTouchDeviceLayout() {
+    return Boolean(
+      window.matchMedia("(hover: none)").matches ||
+      window.matchMedia("(pointer: coarse)").matches
+    );
+  }
+
   function updateFullscreenGate() {
     if (!el.fullscreenGate) {
       return;
     }
-    el.fullscreenGate.hidden = isAppDisplayMode();
+    el.fullscreenGate.hidden = !isTouchDeviceLayout() || isAppDisplayMode();
   }
 
   async function requestWakeLock() {
@@ -2423,16 +2820,10 @@
       return;
     }
     const focused = el.core.dataset.focusedPanel === pane.dataset.panelId;
-    delete el.core.dataset.focusedPanel;
-    for (const display of document.querySelectorAll(".mfd-display")) {
-      display.dataset.focused = "false";
-    }
-    if (!focused) {
-      el.core.dataset.focusedPanel = pane.dataset.panelId || "pane";
-      pane.dataset.focused = "true";
-      hapticTap(12);
+    if (focused) {
+      minimizeFocusedPane();
     } else {
-      hapticTap(8);
+      focusPane(pane);
     }
   }
 

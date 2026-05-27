@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Planetary port">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 86h84M14 86V61h18v25M32 61h33v25M65 86V29h23v57" stroke-width="4.8"/>
+    <path d="M72 40h10M72 52h10M72 64h10" stroke-width="4.8"/>
+    <path d="M22 70h9M75 72h16V62H75Z" stroke-width="4.8"/>
+  </g>
+</svg>

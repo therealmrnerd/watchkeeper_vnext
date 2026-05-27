@@ -15,6 +15,9 @@ build/
 logs/
 tmp/
 *.log
+output/
+test-results/
+.playwright-cli/
 
 # Local data
 data/*

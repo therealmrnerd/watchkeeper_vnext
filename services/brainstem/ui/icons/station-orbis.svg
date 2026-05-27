@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Orbis starport">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="50" cy="50" r="37" stroke-width="4.8"/>
+    <circle cx="50" cy="50" r="16" stroke-width="4.8"/>
+    <path d="M50 13v21M31 64 18 71M69 64l13 7" stroke-width="4.8"/>
+    <path d="M42 50h16" stroke-width="4.8"/>
+  </g>
+</svg>

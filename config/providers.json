@@ -59,7 +59,7 @@
       },
       "features": {
         "system_lookup": true,
-        "stations_lookup": false,
+        "stations_lookup": true,
         "bodies_lookup": true,
         "journal_submit": false,
         "logs_private": false,

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Fleet carrier">
+  <g fill="none" stroke="#ff8f00" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 23h70M20 23v54M80 23v54M20 77h60" stroke-width="4.8"/>
+    <path d="M30 23 45 50 30 77M70 23 55 50 70 77M45 50h10" stroke-width="4.8"/>
+    <path d="M44 60h12" stroke-width="4.8"/>
+  </g>
+</svg>

@@ -55,8 +55,9 @@ from runtime import (
 )
 from core.ed_provider_types import ProviderId, ProviderOperationId, ProviderQuery
 from provider_health import build_provider_health_probes
-from provider_secrets import clear_provider_secret_entry, save_inara_secret_entry, save_openai_secret_entry
+from provider_secrets import clear_provider_secret_entry, save_edsm_secret_entry, save_inara_secret_entry, save_openai_secret_entry
 from settings_store import load_runtime_settings, runtime_setting_enabled, save_runtime_settings
+from mfd_layout_store import save_layout, save_outputs
 
 NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 ADVISORY_LLM_CONTROL_TIMEOUT_SEC = float(os.getenv("WKV_ADVISORY_LLM_CONTROL_TIMEOUT_SEC", "180"))
@@ -1580,6 +1581,47 @@ def save_inara_credentials(payload: dict[str, Any], source: str) -> dict[str, An
     return result
 
 
+def save_edsm_credentials(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    clear_requested = bool(payload.get("clear"))
+    if clear_requested:
+        clear_provider_secret_entry("edsm", path=PROVIDER_SECRETS_PATH)
+        entry: dict[str, Any] = {}
+    else:
+        entry = save_edsm_secret_entry(
+            commander_name=payload.get("commander_name"),
+            api_key=payload.get("api_key"),
+            path=PROVIDER_SECRETS_PATH,
+        )
+
+    if hasattr(ED_PROVIDER_QUERY_SERVICE, "reload_config"):
+        ED_PROVIDER_QUERY_SERVICE.reload_config()
+    if PROVIDER_HEALTH_ENABLED and hasattr(runtime, "ED_PROVIDER_HEALTH_SCHEDULER"):
+        runtime.ED_PROVIDER_HEALTH_SCHEDULER.update_probes(
+            build_provider_health_probes(PROVIDER_CONFIG_PATH, PROVIDER_SECRETS_PATH, DB_PATH)
+        )
+
+    emit_event(
+        con=None,
+        event_type="PROVIDER_CREDENTIALS_UPDATED",
+        source=source,
+        payload={
+            "provider": "edsm",
+            "cleared": clear_requested,
+            "commander_name_present": bool(str(entry.get("commander_name") or "").strip()),
+            "api_key_present": bool(str(entry.get("api_key") or "").strip()),
+            "storage_path": str(PROVIDER_SECRETS_PATH),
+        },
+        tags=["provider", "edsm", "credentials"],
+    )
+
+    from queries import query_edsm_credentials
+
+    result = query_edsm_credentials({})
+    result["saved_securely"] = not clear_requested
+    result["cleared_securely"] = clear_requested
+    return result
+
+
 def save_openai_credentials(payload: dict[str, Any], source: str) -> dict[str, Any]:
     clear_requested = bool(payload.get("clear"))
     if clear_requested:
@@ -1630,6 +1672,32 @@ def save_runtime_settings_action(payload: dict[str, Any], source: str) -> dict[s
         tags=["settings", "runtime"],
     )
     return {"ok": True, "settings": settings}
+
+
+def save_mfd_layout_action(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    layout = save_layout(Path(DB_PATH), payload)
+    DB_SERVICE.append_event(
+        event_id=f"mfd-layout-{uuid.uuid4().hex[:12]}",
+        timestamp_utc=utc_now_iso(),
+        event_type="MFD_LAYOUT_SAVED",
+        source=source,
+        payload={"layout_id": layout["layout_id"], "name": layout["name"]},
+        tags=["mfd", "layout"],
+    )
+    return {"ok": True, "layout": layout}
+
+
+def save_mfd_outputs_action(payload: dict[str, Any], source: str) -> dict[str, Any]:
+    outputs = save_outputs(Path(DB_PATH), payload)
+    DB_SERVICE.append_event(
+        event_id=f"mfd-outputs-{uuid.uuid4().hex[:12]}",
+        timestamp_utc=utc_now_iso(),
+        event_type="MFD_OUTPUTS_SAVED",
+        source=source,
+        payload={"outputs": [{"output_id": item["output_id"], "layout_id": item["layout_id"]} for item in outputs]},
+        tags=["mfd", "layout", "outputs"],
+    )
+    return {"ok": True, "outputs": outputs}
 
 
 def _normalize_jinx_mode_arg(value: Any) -> str:
