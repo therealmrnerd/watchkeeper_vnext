@@ -1,189 +1,153 @@
-﻿# Watchkeeper vNext
+# WATCHKEEPER vNEXT
 
-Watchkeeper is a local-first "ship AI" for **Elite Dangerous** and streaming ops: it ingests live game + system signals, reasons over them with an LLM, and can trigger tools/actions (OBS/SAMMI/lighting/automation) in a way that is **deterministic, auditable, and safe**.
+**Your ship already produces the data. Watchkeeper turns it into command presence.**
 
-**Why this exists:** modern PC + stream + game setups are a spaghetti monster of windows, macros, overlays, and "why is nothing responding?" Watchkeeper is an attempt to turn that chaos into a system: **sensors -> state -> policy -> decisions -> actions**, with a UI that tells you what it is doing and why.
+Watchkeeper is a real-time cockpit and immersion platform for **Elite Dangerous**: adaptive MFDs, live telemetry, command panels, touch displays, lighting hooks, streaming support and external data bridges, all built around the idea that your ship should feel like a live operational system.
 
----
+This is not an autopilot.
 
-## The story so far
+This is not automation playing the game for you.
 
-Watchkeeper did not start as a clean architecture project. It started as a practical survival stack: scripts, adapters, and glue code built to keep a live game + stream environment stable under pressure.
+This is the bridge computer Elite Dangerous keeps hinting at.
 
-The early prototype proved the hard part first: local models could run on constrained hardware, game/system/music signals could be ingested, and real automation could be triggered in-session.
+![Watchkeeper MFD station and vessel view](artifacts/mfd-source-screenshots-2026-05-27/Screenshot-2026-05-27-180809.png)
 
-That prototype also exposed the real pain:
+## Fly With A Command Deck
 
-- duplicated state
-- unclear ownership between services
-- fragile integrations when dependencies dropped
-- too much "it works, but why does it work?"
+Watchkeeper reads the pulse of your ship and projects it onto cockpit-grade displays. Jump, dock, fight, scan, mine, deploy, land: the interface reconfigures around the moment like a proper shipboard computer.
 
-vNext is the response to those lessons. Same mission, higher engineering bar.
+- Adaptive multi-function displays
+- Live Elite Dangerous journal and status ingestion
+- Station, body, target, route and vessel panes
+- Docking workflows and assigned-pad visual planning
+- SRV, SLF and on-foot mode switching
+- Supercruise and hyperspace context separation
+- Touchscreen-first button rails for common cockpit actions
+- Multi-display output routing for tablets, side monitors and bridge panels
 
-## Why vNext is different
+![Watchkeeper full MFD output](artifacts/mfd-checkpoint-2026-05-27/mfd-output-1.png)
 
-Watchkeeper vNext is opinionated:
+## The Second Screen Stops Being A Second Screen
 
-- AI proposes, core decides
-- policy gates before action
-- every important decision is traceable
-- dependency loss should degrade behavior, not collapse it
+Put Watchkeeper on a tablet, cockpit side monitor, browser source, stream deck station or full bridge panel and it behaves like an onboard tactical surface, not another pile of windows.
 
-If the internet is down, or a local model fails, or an external tool disappears, the system should still behave like a disciplined bridge crew, not a random macro chain.
+The goal is not more UI.
 
----
+The goal is presence.
 
-## What we're aiming for
+Your ship knows when it is docked, mass locked, in supercruise, landing, launching, low on fuel, carrying cargo, routing through hyperspace or staring down a hostile target. Watchkeeper turns that telemetry into a bridge display that reacts.
 
-A modular, local-first assistant that can:
+![Maximized Watchkeeper vessel pane](artifacts/mfd-source-screenshots-2026-05-27/Screenshot-2026-05-27-180834.png)
 
-- **Understand context** (game state, UI focus, ship status, events, chat/redeems/bits, system health)
-- **Decide safely** (policy gating, confirmations where needed, rate-limits, dependency awareness)
-- **Act reliably** (tool calls for streaming, automation, and "ship" functions)
-- **Explain itself** (traceable events, deterministic state transitions, operator-friendly UI)
-- **Stay resilient** (continues functioning when dependencies go down; degrades gracefully)
+## Guided Layouts, Not Freehand Chaos
 
-This is not "an AI that does whatever it wants." It is closer to a well-behaved bridge officer: helpful, cautious, and accountable.
+The layout editor is guided so commanders can build useful bridge stations without breaking the cockpit geometry.
 
----
+- Outputs 1-5
+- Landscape or portrait orientation
+- Four-pane command layout or single-pane dedicated display
+- Show or hide button rails
+- Drag reusable buttons from the bank into numbered slots
+- Create custom controls with names, icons, keypresses and macros
+- Assign context rules for docking, docked, jumping and other flight states
 
-## Where we are now
+![Watchkeeper guided layout editor](artifacts/mfd-checkpoint-2026-05-27/guided-layout-editor.png)
 
-vNext is the architecture reset: a cleaner spine, better boundaries, stronger operational discipline.
+## Bridge Calibration
 
-### Core spine: Brainstem + contracts + runtime discipline
+Credentials, providers, runtime toggles and advisory systems live in the same control stack. Tune the bridge once, then let the MFDs and external channels pull from the same command memory.
 
-- Clear separation between ingestion, state, policy, and tool execution
-- Contract-driven API surface (stable JSON shapes over ad-hoc internal structures)
-- Deterministic runtime patterns (no mystery background loops)
+- EDSM, Inara and provider credentials
+- Spansh and external data hooks
+- OpenAI and Major Tom advisory setup
+- OBS/runtime checks
+- Secure local credential storage
 
-### Twitch/SAMMI integration checkpoint (recent milestone)
+![Watchkeeper settings and providers](artifacts/github-landing-2026-05-29/settings.png)
 
-- **Two-way comms between SAMMI and Watchkeeper**
-- UDP "doorbell" event notification: `category|timestamp`
-- Twitch ingest is **hard-gated** by SAMMI runtime state (`app.sammi.running`)
-  - Listener binds only when SAMMI is running
-  - Clean unbind/close when SAMMI drops
-  - Automatic rebind when SAMMI returns
-- UI polish pass for the bridge panel workflow and visual consistency
+## Flight Deck Systems
 
-In short: the "nervous system" is working and stable. Next is filling the database with real, useful memory.
+Watchkeeper currently focuses first on in-game cockpit use:
 
-## UI Snapshot
+- Real-time Elite Dangerous telemetry ingestion
+- Adaptive cockpit UI
+- Multi-pane contextual interfaces
+- Ship, SRV, SLF and on-foot mode switching
+- Station and powerplay visual identity
+- Vessel schematics and hardpoint overlays
+- Target and route panes
+- Local memory database for useful ED reference data
+- Policy-gated actions and Major Tom advisory workflow
 
-![Watchkeeper vNext UI Snapshot](docs/assets/watchkeeper-ui-snapshot-2026-02-20.png)
+Streaming and third-party apps are secondary support systems, not the main event:
 
----
+- OBS overlays and browser-source panels
+- Twitch/chat event awareness
+- SAMMI and macro bridge hooks
+- Jinx/light-sync launch control
+- YTMD/process detection
+- External provider enrichment
 
-## What we've done (high-level)
+## Major Tom
 
-- Built the vNext foundation around a **deterministic core**
-- Implemented early **operator console/UI** for visibility and control
-- Proved **SAMMI <-> Watchkeeper** messaging is reliable enough for production use
-- Added safety gates so external dependencies do not cause runaway background work
-- Moved key behavior into documented contracts so future rewrites are ports, not redesigns
+Major Tom is the advisory layer: useful when it has enough context, gated when actions are involved, and tied into Watchkeeper's local memory instead of guessing from stale state. The long-term goal is a shipboard officer that can explain what it knows, what it does not know, and what it recommends.
 
----
+## Philosophy
 
-## Where we're going next
+Most Elite Dangerous tools reduce telemetry into tables and efficiency stats.
 
-### 1) Twitch user modelling + SQLite persistence
+Watchkeeper goes the other way:
 
-We want Watchkeeper to recognize people and patterns without hoarding data.
+**What would an actual shipboard operations system feel like?**
 
-- One entry per user (Twitch user_id as primary key)
-- Store **last 5 chat messages** for short-term context
-- Track roles and signals: VIP/mod/broadcaster/subscriber
-- Track aggregates: bits totals, redeems claimed, hype activity
-- "Usual behaviour" prompts (e.g. "Want the usual redeem?") with policy limits
+A cockpit that reacts.
 
-### 2) Twitch policy framework (what we do / ask / don't)
+A ship that communicates.
 
-A rules layer that makes behaviour consistent and non-annoying:
-
-- What we do: contextual replies, lightweight personalization, good operator hygiene
-- What we ask: confirmation before spammy/disruptive actions
-- What we do not: store full chat logs, infer sensitive traits, pester users relentlessly
-
-### 3) Endpoints + UI expansion
-
-Once the base is solid:
-
-- Add a **Twitch frame** in the UI (live events, user card, stats, policy decisions)
-- Expose clean endpoints for user context and recent events
-- Add operator tooling for debugging ("why did it say that?")
-
-### 4) External Elite Dangerous providers
-
-The next integration slice is external ED world data:
-
-- `spansh` for primary topology lookups
-- `edsm` as read-only fallback
-- `inara` as opt-in commander/location sync
-- `edsy` as static ship-build reference data
-
-This is being built contract-first:
-
-- normalized provider health for the UI
-- policy-gated provider tool calls for the LLM
-- local world-model caching so Watchkeeper does not depend on live requests for every answer
-
----
-
-## Design principles
-
-- **Local-first**: work offline, degrade gracefully, minimal cloud dependence
-- **Deterministic by default**: predictable loops, explicit state, no hidden magic
-- **Policy before action**: anything potentially disruptive gets gated
-- **Human operable**: UI and logs make it obvious what is happening
-- **Small, composable services**: each subsystem does one job well
-- **Build for handover**: another engineer should be able to understand "what happened and why" quickly
-
----
-
-## Repository map (conceptual)
-
-- `services/brainstem/` - the core state + policy + tool orchestration layer
-- `contracts/` - API contracts and payload shapes
-- `docs/` - architecture, operations, policy notes
-- `ui/` - operator console / bridge panel
-- `db/` - persistence utilities and schema/migrations
-
-(Exact paths may evolve as vNext matures.)
-
----
+A bridge that feels alive.
 
 ## Status
 
-Current status: **Usable (developer alpha)**.
+Current status: **developer alpha**.
 
 Working now:
 
-- Brainstem runtime, policy gate, and event/state pipeline
-- ED/music/system ingestion loops
-- SAMMI <-> Watchkeeper Twitch bridge with gating and dedupe
-- Web UI for operator workflows, diagnostics, and policy previews
+- Brainstem runtime, policy gate and event/state pipeline
+- ED journal/status ingestion
+- Browser MFD outputs
+- Guided layout editor
+- Provider configuration
+- Station, system, vessel, route and target UI experiments
+- SAMMI, OBS, Jinx/light sync and supporting app integration work
 
-Next short-form steps:
+Still active / in progress:
 
-- deepen Twitch user memory and behavior modelling
-- expand policy-guided chat/redeem response quality
-- continue hardening recovery paths and degraded-mode behavior
+- Deeper target/station/body detection
+- More condition-specific MFD states
+- More robust live combat and scan telemetry handling
+- Better docking map alignment and station-type visuals
+- Multi-output layout assignment UX
+- Major Tom local knowledge quality
 
----
+## Repository Map
 
-## Contributing / dev notes
+- `services/brainstem/` - core state, policy, provider and UI server logic
+- `services/brainstem/ui/` - cockpit console, MFD outputs and guided layout editor
+- `services/adapters/` - journal/status ingestion and collectors
+- `schemas/sqlite/` - local memory and layout database migrations
+- `artifacts/` - UI screenshots, MFD references and design checkpoints
+- `tests/` - focused unit and migration checks
 
-This is a "build the bridge while flying the ship" repo. If you are contributing:
+## Development Notes
 
-- keep changes scoped
-- update docs/contracts when you add behaviour
-- prefer deterministic state transitions to clever hacks
-- never add background loops without explicit gating and lifecycle management
+This is a build-the-bridge-while-flying-the-ship project.
 
----
+- Keep changes scoped.
+- Preserve deterministic state transitions.
+- Gate anything that can affect the game, stream or desktop.
+- Prefer live telemetry and local memory over guesswork.
+- Commit stable checkpoints with screenshots when the MFD changes.
 
 ## License
 
-TBD (add license once the architecture settles and we are happy with the public surface).
+TBD.
