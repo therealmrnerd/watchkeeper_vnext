@@ -80,6 +80,26 @@ RUNTIME_SETTINGS_KEY = "runtime_settings"
 ED_GAME_YEAR_OFFSET = int(os.getenv("WKV_ED_GAME_YEAR_OFFSET", "1286"))
 _runtime_settings_cache: dict[str, Any] = {"loaded_at": 0.0, "syncs": None}
 _RUNTIME_SETTINGS_CACHE_SEC = float(os.getenv("WKV_RUNTIME_SETTINGS_CACHE_SEC", "5"))
+JOURNAL_EVENT_PROJECTION_NAMES = (
+    "StartJump",
+    "FSDJump",
+    "FSDTarget",
+    "NavRoute",
+    "NavRouteClear",
+    "SupercruiseEntry",
+    "SupercruiseExit",
+    "SupercruiseDestinationDrop",
+    "DockingRequested",
+    "DockingGranted",
+    "DockingDenied",
+    "DockingCancelled",
+    "DockingTimeout",
+    "Docked",
+    "Undocked",
+    "Touchdown",
+    "Liftoff",
+    "ShipTargeted",
+)
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -185,6 +205,60 @@ def _last_journal_event(path: Path, event_name: str) -> dict[str, Any] | None:
         if str(payload.get("event") or "").strip().lower() == wanted:
             return payload
     return None
+
+
+def _journal_timestamp_ms(value: Any) -> int | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _project_latest_journal_events(
+    path: Path | None,
+    event_names: tuple[str, ...] = JOURNAL_EVENT_PROJECTION_NAMES,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if path is None:
+        return out
+    wanted = {name: False for name in event_names}
+    wanted_lower = {name.lower(): name for name in event_names}
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return out
+    for line in reversed(lines):
+        if all(wanted.values()):
+            break
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        raw_name = str(payload.get("event") or "").strip()
+        event_name = wanted_lower.get(raw_name.lower())
+        if not event_name or wanted[event_name]:
+            continue
+        prefix = f"ed.event.{event_name}"
+        timestamp = payload.get("timestamp")
+        out[f"{prefix}.last_seen_at"] = timestamp
+        out[f"{prefix}.timestamp_ms"] = _journal_timestamp_ms(timestamp)
+        out[f"{prefix}.source_path"] = str(path)
+        out[f"{prefix}.payload"] = payload
+        wanted[event_name] = True
+    return out
 
 
 def _latest_journal_location_context(path: Path) -> dict[str, Any]:
@@ -326,10 +400,12 @@ def _latest_docking_state(path: Path | None) -> dict[str, Any]:
         "DockingGranted": "granted",
         "DockingDenied": "denied",
         "DockingCancelled": "not_docking",
+        "DockingTimeout": "not_docking",
         "Docked": "docked",
         "Undocked": "not_docking",
         "FSDJump": "not_docking",
         "SupercruiseEntry": "not_docking",
+        "Liftoff": "not_docking",
     }
     for line in reversed(lines):
         text = line.strip()
@@ -398,6 +474,16 @@ def _latest_journal_operational_context(path: Path | None) -> dict[str, Any]:
     system_done = False
     powerplay_done = False
     commander_power = None
+    target_clear_events = {
+        "Docked",
+        "Undocked",
+        "FSDJump",
+        "SupercruiseEntry",
+        "SupercruiseExit",
+        "NavRouteClear",
+        "DockFighter",
+        "LaunchFighter",
+    }
     for line in reversed(lines):
         text = line.strip()
         if not text:
@@ -415,12 +501,33 @@ def _latest_journal_operational_context(path: Path | None) -> dict[str, Any]:
             out["ed.commander.power"] = commander_power
             powerplay_done = True
 
+        if not target_done and event_name in target_clear_events:
+            out.update(
+                {
+                    "ed.target.locked": False,
+                    "ed.target.updated_at": payload.get("timestamp"),
+                    "ed.target.clear_event": event_name,
+                    "ed.target.ship": None,
+                    "ed.target.ship_localised": None,
+                    "ed.target.pilot_name": None,
+                    "ed.target.pilot_rank": None,
+                    "ed.target.faction": None,
+                    "ed.target.legal_status": None,
+                    "ed.target.power": None,
+                    "ed.target.hostility": None,
+                    "ed.target.shield_health_percent": None,
+                    "ed.target.hull_health_percent": None,
+                }
+            )
+            target_done = True
+
         if not target_done and event_name == "ShipTargeted":
             locked = bool(payload.get("TargetLocked"))
             out.update(
                 {
                     "ed.target.locked": locked,
                     "ed.target.updated_at": payload.get("timestamp"),
+                    "ed.target.clear_event": None,
                     "ed.target.scan_stage": payload.get("ScanStage"),
                     "ed.target.ship": payload.get("Ship"),
                     "ed.target.ship_localised": payload.get("Ship_Localised"),
@@ -854,6 +961,7 @@ def collect_ed_file_state(
     no_fire_zone = _latest_no_fire_zone_state(latest_journal)
     docking_state = _latest_docking_state(latest_journal)
     journal_context = _latest_journal_operational_context(latest_journal)
+    event_projection = _project_latest_journal_events(latest_journal)
 
     out: dict[str, Any] = {
         "ed.status.source_path": str(status_path),
@@ -876,6 +984,7 @@ def collect_ed_file_state(
         "ed.station.docking_state_source_path": docking_state.get("source"),
     }
     out.update(journal_context)
+    out.update(event_projection)
     out.update(_collect_modules_state(latest_journal=latest_journal, modules_path=modules_path))
     out.update(_collect_cargo_state(cargo_path))
 

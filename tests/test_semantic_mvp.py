@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from core.semantic import create_semantic_engine
+from core.semantic.runtime import compute_ed_semantic_records
 from core.semantic.types import SemanticStateRecord
 
 
@@ -383,6 +384,130 @@ class SemanticMvpTest(unittest.TestCase):
         )
         engine.update(["Status.$fresh", "Status.Flags", "Status.Destination"], t0)
         self.assertEqual(sem.get("ed.semantic.target.target_type").value, "station")
+
+    def test_runtime_uses_status_flags_to_separate_supercruise_and_hyperspace(self) -> None:
+        t0 = 6_000_000
+
+        supercruise = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.status.supercruise": True,
+                    "ed.status.in_hyperspace": False,
+                    "ed.status.fsd_charging": False,
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(supercruise["ed.semantic.flight.fsd_state"].value, "supercruise")
+        self.assertEqual(supercruise["ed.semantic.flight.flight_status"].value, "supercruise")
+
+        hyperspace = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.status.supercruise": False,
+                    "ed.status.in_hyperspace": True,
+                },
+                now_ms=t0 + 1000,
+            )
+        )
+        self.assertEqual(hyperspace["ed.semantic.flight.fsd_state"].value, "hyperspace")
+        self.assertEqual(hyperspace["ed.semantic.flight.flight_status"].value, "witch_space")
+
+    def test_runtime_uses_projected_journal_startjump_without_sticky_jump_mode(self) -> None:
+        t0 = 7_000_000
+
+        charging = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.event.StartJump.timestamp_ms": t0 - 1000,
+                    "ed.event.StartJump.payload": {
+                        "event": "StartJump",
+                        "timestamp": "2026-05-11T10:00:00Z",
+                        "JumpType": "Hyperspace",
+                        "StarSystem": "LP 903-2 1",
+                    },
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(charging["ed.semantic.flight.fsd_state"].value, "charging")
+
+        completed = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.event.StartJump.timestamp_ms": t0 - 2000,
+                    "ed.event.StartJump.payload": {"event": "StartJump", "timestamp": "2026-05-11T10:00:00Z"},
+                    "ed.event.FSDJump.timestamp_ms": t0 - 1000,
+                    "ed.event.FSDJump.payload": {"event": "FSDJump", "timestamp": "2026-05-11T10:00:01Z"},
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(completed["ed.semantic.flight.fsd_state"].value, "cooldown")
+
+        settled = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.event.StartJump.timestamp_ms": t0 - 30_000,
+                    "ed.event.StartJump.payload": {"event": "StartJump", "timestamp": "2026-05-11T10:00:00Z"},
+                    "ed.event.FSDJump.timestamp_ms": t0 - 29_000,
+                    "ed.event.FSDJump.payload": {"event": "FSDJump", "timestamp": "2026-05-11T10:00:01Z"},
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(settled["ed.semantic.flight.fsd_state"].value, "idle")
+
+    def test_runtime_uses_projected_docking_events_and_reset_state(self) -> None:
+        t0 = 8_000_000
+
+        granted = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.event.DockingGranted.timestamp_ms": t0 - 1000,
+                    "ed.event.DockingGranted.payload": {
+                        "event": "DockingGranted",
+                        "timestamp": "2026-05-11T10:00:00Z",
+                        "LandingPad": 24,
+                        "StationName": "Blackstar's Cove",
+                    },
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(granted["ed.semantic.docking.docking_state"].value, "granted")
+
+        reset = _records_by_key(
+            compute_ed_semantic_records(
+                {
+                    "ed.running": True,
+                    "ed.status.available": True,
+                    "ed.station.docking_state": "not_docking",
+                    "ed.event.DockingGranted.timestamp_ms": t0 - 2000,
+                    "ed.event.DockingGranted.payload": {"event": "DockingGranted", "timestamp": "2026-05-11T10:00:00Z"},
+                    "ed.event.Docked.timestamp_ms": t0 - 1000,
+                    "ed.event.Docked.payload": {"event": "Docked", "timestamp": "2026-05-11T10:00:01Z"},
+                },
+                now_ms=t0,
+            )
+        )
+        self.assertEqual(reset["ed.semantic.docking.docking_state"].value, "not_docking")
+
+
+def _records_by_key(records: list[SemanticStateRecord]) -> dict[str, SemanticStateRecord]:
+    return {record.key: record for record in records}
 
 
 if __name__ == "__main__":

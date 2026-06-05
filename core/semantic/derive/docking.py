@@ -9,6 +9,10 @@ def derive_docking_state(raw, _sem, now_ms: int):
     if truthy(get_path(status, "Flags.Docked")):
         return _out("docked", ["Status.Flags.Docked"])
 
+    collector_state = str(raw.get_raw_value("ed.station.docking_state") or "").strip().lower()
+    if collector_state in {"requested", "granted", "denied", "timeout", "not_docking"}:
+        return {"type": "enum", "value": collector_state, "confidence": "event_derived", "derived_from": ["ed.station.docking_state"]}
+
     denied = raw.get_last_journal_event("DockingDenied")
     if denied and ms_since(now_ms, denied["timestampMs"]) <= SEMANTIC_CONFIG["DOCK_DENY_COOLDOWN_MS"]:
         return {"type": "enum", "value": "denied", "confidence": "certain", "derived_from": ["Journal.DockingDenied"]}

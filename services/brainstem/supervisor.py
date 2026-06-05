@@ -496,6 +496,55 @@ def _parse_journal_time(value: Any) -> datetime | None:
         return None
 
 
+def _journal_time_ms(value: Any) -> int | None:
+    parsed = _parse_journal_time(value)
+    if parsed is None:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
+def _project_published_journal_events(published: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(published, dict):
+        return {}
+    event_names = (
+        "StartJump",
+        "FSDJump",
+        "FSDTarget",
+        "NavRoute",
+        "NavRouteClear",
+        "SupercruiseEntry",
+        "SupercruiseExit",
+        "SupercruiseDestinationDrop",
+        "DockingRequested",
+        "DockingGranted",
+        "DockingDenied",
+        "DockingCancelled",
+        "DockingTimeout",
+        "Docked",
+        "Undocked",
+        "Touchdown",
+        "Liftoff",
+        "ShipTargeted",
+    )
+    out: dict[str, Any] = {}
+    for event_name in event_names:
+        prefix = f"j.{event_name}."
+        payload = {
+            key.removeprefix(prefix): value
+            for key, value in published.items()
+            if key.startswith(prefix)
+        }
+        if not payload:
+            continue
+        payload["event"] = event_name
+        timestamp = payload.get("timestamp")
+        event_prefix = f"ed.event.{event_name}"
+        out[f"{event_prefix}.last_seen_at"] = timestamp
+        out[f"{event_prefix}.timestamp_ms"] = _journal_time_ms(timestamp)
+        out[f"{event_prefix}.payload"] = payload
+    return out
+
+
 def _parse_system_address(raw: Any) -> int | None:
     if raw is None or raw == "":
         return None
@@ -2278,6 +2327,7 @@ def collect_ed_state() -> dict[str, Any]:
         if isinstance(body, int):
             destination_body = body
     published = journal_harvest.get("published") if isinstance(journal_harvest, dict) else None
+    event_projection = _project_published_journal_events(published if isinstance(published, dict) else None)
     status_flags = _decode_flags(int(status.get("Flags"))) if isinstance(status.get("Flags"), int) else {}
     status_flags2 = _decode_flags2(int(status.get("Flags2"))) if isinstance(status.get("Flags2"), int) else {}
     if not destination_system and isinstance(published, dict):
@@ -2331,6 +2381,33 @@ def collect_ed_state() -> dict[str, Any]:
         target_power = published.get("j.ShipTargeted.Power")
         target_shield_health = published.get("j.ShipTargeted.ShieldHealth")
         target_hull_health = published.get("j.ShipTargeted.HullHealth")
+        target_ts = _parse_journal_time(published.get("j.ShipTargeted.timestamp"))
+        target_reset_events = (
+            "Docked",
+            "Undocked",
+            "FSDJump",
+            "SupercruiseEntry",
+            "SupercruiseExit",
+            "NavRouteClear",
+            "DockFighter",
+            "LaunchFighter",
+        )
+        target_reset_times = [
+            ts
+            for ts in (_parse_journal_time(published.get(f"j.{event_name}.timestamp")) for event_name in target_reset_events)
+            if ts is not None
+        ]
+        if target_ts and any(ts >= target_ts for ts in target_reset_times):
+            target_locked = False
+            target_ship = None
+            target_ship_localised = None
+            target_pilot_name = None
+            target_pilot_rank = None
+            target_faction = None
+            target_legal_status = None
+            target_power = None
+            target_shield_health = None
+            target_hull_health = None
     station_name = None
     station_type = None
     station_market_id = None
@@ -2367,6 +2444,7 @@ def collect_ed_state() -> dict[str, Any]:
             docking_landing_pad = int(value)
         grant_ts = _parse_journal_time(published.get("j.DockingGranted.timestamp"))
         reset_events = (
+            "Docked",
             "Undocked",
             "Liftoff",
             "SupercruiseEntry",
@@ -2485,6 +2563,49 @@ def collect_ed_state() -> dict[str, Any]:
         "ed.status.available": bool(status),
         "ed.status.flags": status.get("Flags") if isinstance(status, dict) else None,
         "ed.status.flags2": status.get("Flags2") if isinstance(status, dict) else None,
+        "ed.status.docked": bool(status_flags.get("Docked")),
+        "ed.status.landed": bool(status_flags.get("Landed")),
+        "ed.status.landing_gear_down": bool(status_flags.get("LandingGearDown")),
+        "ed.status.shields_up": bool(status_flags.get("ShieldsUp")),
+        "ed.status.supercruise": bool(status_flags.get("Supercruise")),
+        "ed.status.flight_assist_off": bool(status_flags.get("FlightAssistOff")),
+        "ed.status.hardpoints_deployed": bool(status_flags.get("HardpointsDeployed")),
+        "ed.status.lights_on": bool(status_flags.get("LightsOn")),
+        "ed.status.cargo_scoop_deployed": bool(status_flags.get("CargoScoopDeployed")),
+        "ed.status.silent_running": bool(status_flags.get("SilentRunning")),
+        "ed.status.scooping_fuel": bool(status_flags.get("ScoopingFuel")),
+        "ed.status.fsd_mass_locked": bool(status_flags.get("FsdMassLocked")),
+        "ed.status.fsd_charging": bool(status_flags.get("FsdCharging")),
+        "ed.status.fsd_cooldown": bool(status_flags.get("FsdCooldown")),
+        "ed.status.low_fuel": bool(status_flags.get("LowFuel")),
+        "ed.status.overheating": bool(status_flags.get("Overheating")),
+        "ed.status.has_lat_long": bool(status_flags.get("HasLatLong")),
+        "ed.status.in_danger": bool(status_flags.get("IsInDanger")),
+        "ed.status.being_interdicted": bool(status_flags.get("BeingInterdicted")),
+        "ed.status.in_main_ship": bool(status_flags.get("InMainShip")),
+        "ed.status.in_fighter": bool(status_flags.get("InFighter")),
+        "ed.status.in_srv": bool(status_flags.get("InSRV")),
+        "ed.status.analysis_mode": bool(status_flags.get("HudAnalysisMode")),
+        "ed.status.night_vision": bool(status_flags.get("NightVision")),
+        "ed.status.altitude_from_average_radius": bool(status_flags.get("AltitudeFromAverageRadius")),
+        "ed.status.in_hyperspace": bool(status_flags.get("FsdJump")),
+        "ed.status.on_foot": bool(status_flags2.get("OnFoot")),
+        "ed.status.in_taxi": bool(status_flags2.get("InTaxi")),
+        "ed.status.in_multicrew": bool(status_flags2.get("InMulticrew")),
+        "ed.status.on_foot_in_station": bool(status_flags2.get("OnFootInStation")),
+        "ed.status.on_foot_on_planet": bool(status_flags2.get("OnFootOnPlanet")),
+        "ed.status.aim_down_sight": bool(status_flags2.get("AimDownSight")),
+        "ed.status.low_oxygen": bool(status_flags2.get("LowOxygen")),
+        "ed.status.low_health": bool(status_flags2.get("LowHealth")),
+        "ed.status.cold": bool(status_flags2.get("Cold")),
+        "ed.status.hot": bool(status_flags2.get("Hot")),
+        "ed.status.very_cold": bool(status_flags2.get("VeryCold")),
+        "ed.status.very_hot": bool(status_flags2.get("VeryHot")),
+        "ed.status.glide_mode": bool(status_flags2.get("GlideMode")),
+        "ed.status.on_foot_in_hangar": bool(status_flags2.get("OnFootInHangar")),
+        "ed.status.on_foot_social_space": bool(status_flags2.get("OnFootSocialSpace")),
+        "ed.status.on_foot_exterior": bool(status_flags2.get("OnFootExterior")),
+        "ed.status.breathable_atmosphere": bool(status_flags2.get("BreathableAtmosphere")),
         "ed.status.fsd_hyperdrive_charging": bool(status_flags2.get("FsdHyperdriveCharging")),
         "ed.status.gui_focus": status.get("GuiFocus") if isinstance(status, dict) else None,
         "ed.status.pips": status.get("Pips") if isinstance(status.get("Pips"), list) else None,
@@ -2507,6 +2628,7 @@ def collect_ed_state() -> dict[str, Any]:
         "nav_route_upcoming_jumps": nav_route_vars.get("nav_route_upcoming_jumps"),
         "nav_route_remaining_jumps": nav_route_vars.get("nav_route_remaining_jumps"),
         "nav_route_distance_ly": nav_route_vars.get("nav_route_distance_ly"),
+        **event_projection,
     }
 
 

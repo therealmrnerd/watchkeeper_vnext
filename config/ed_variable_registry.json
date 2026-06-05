@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "notes": "Initial variable provenance registry for high-risk ED/MFD state. This is intentionally compact: add entries as variables become UI or Major Tom dependencies.",
+  "classes": {
+    "live": "Current value from a frequently rewritten game file such as Status.json.",
+    "latched": "Last known fact from a journal event; must have explicit clear conditions.",
+    "snapshot": "Point-in-time data from a scan, lookup, or event payload; not live telemetry.",
+    "semantic": "Derived value computed from raw/live/latched inputs."
+  },
+  "variables": [
+    {
+      "key": "ed.status.docked",
+      "class": "live",
+      "source": "Status.json Flags bit 0",
+      "type": "boolean",
+      "update": ["Status.json changed"],
+      "clear": ["Status.json Flags bit 0 false"],
+      "confidence": "certain"
+    },
+    {
+      "key": "ed.status.supercruise",
+      "class": "live",
+      "source": "Status.json Flags bit 4",
+      "type": "boolean",
+      "update": ["Status.json changed"],
+      "clear": ["Status.json Flags bit 4 false"],
+      "confidence": "certain"
+    },
+    {
+      "key": "ed.status.in_hyperspace",
+      "class": "live",
+      "source": "Status.json Flags bit 30",
+      "type": "boolean",
+      "update": ["Status.json changed"],
+      "clear": ["Status.json Flags bit 30 false"],
+      "confidence": "certain"
+    },
+    {
+      "key": "ed.status.shields_up",
+      "class": "live",
+      "source": "Status.json Flags bit 3",
+      "type": "boolean",
+      "update": ["Status.json changed"],
+      "clear": ["Status.json Flags bit 3 false"],
+      "confidence": "certain",
+      "warning": "This is shield presence, not shield health."
+    },
+    {
+      "key": "ed.station.docking_state",
+      "class": "latched",
+      "source": "latest docking-related journal event",
+      "type": "enum",
+      "update": ["DockingRequested", "DockingGranted", "DockingDenied", "Docked"],
+      "clear": ["DockingCancelled", "DockingTimeout", "Undocked", "FSDJump", "SupercruiseEntry", "Liftoff"],
+      "confidence": "event_derived"
+    },
+    {
+      "key": "ed.station.docking_state_landing_pad",
+      "class": "latched",
+      "source": "DockingGranted.LandingPad",
+      "type": "integer|null",
+      "update": ["DockingGranted"],
+      "clear": ["Docked", "Undocked", "Launch", "Liftoff", "FSDJump", "SupercruiseEntry", "DockingCancelled", "DockingTimeout", "DockingDenied"],
+      "confidence": "event_derived"
+    },
+    {
+      "key": "ed.target.*",
+      "class": "snapshot",
+      "source": "ShipTargeted journal event",
+      "type": "object fields",
+      "update": ["ShipTargeted TargetLocked=true"],
+      "clear": ["ShipTargeted TargetLocked=false", "FSDJump", "SupercruiseEntry", "Docked", "Undocked"],
+      "confidence": "scan_snapshot",
+      "warning": "Target shield/hull values are scan snapshots, not live health telemetry."
+    },
+    {
+      "key": "ed.telemetry.destination_*",
+      "class": "latched",
+      "source": "Status.json Destination plus travel/docking journal events",
+      "type": "mixed",
+      "update": ["Status.json Destination", "SupercruiseDestinationDrop", "Docked", "FSDTarget"],
+      "clear": ["NavRouteClear", "FSDJump at route destination", "Docked when destination is not current station"],
+      "confidence": "best_effort"
+    },
+    {
+      "key": "ed.event.StartJump.*",
+      "class": "latched",
+      "source": "StartJump journal event projection",
+      "type": "event payload",
+      "update": ["StartJump"],
+      "clear": ["replaced by newer projected event or TTL"],
+      "ttl_ms": 30000,
+      "confidence": "event_derived"
+    },
+    {
+      "key": "ed.semantic.flight.fsd_state",
+      "class": "semantic",
+      "source": "Status flags plus projected StartJump/FSDJump/SupercruiseEntry events",
+      "type": "enum",
+      "update": ["Status.json changed", "StartJump", "FSDJump", "SupercruiseEntry", "SupercruiseExit"],
+      "clear": ["derived each cycle"],
+      "confidence": "mixed"
+    },
+    {
+      "key": "ed.semantic.target.target_type",
+      "class": "semantic",
+      "source": "explicit target/destination data, docking target data, and name heuristics",
+      "type": "enum",
+      "update": ["Status target/destination changed", "docking target changed", "provider target context lookup"],
+      "clear": ["no target/destination/docking target"],
+      "confidence": "best_effort"
+    }
+  ]
+}

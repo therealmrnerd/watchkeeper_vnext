@@ -59,6 +59,13 @@ def derive_fsd_state(raw, _sem, now_ms: int):
         return _out("hyperspace", ["Status.Flags.InHyperspace"])
     if truthy(get_path(status, "Flags.Supercruise")):
         return _out("supercruise", ["Status.Flags.Supercruise"])
+    if truthy(get_path(status, "Flags.FsdCharging")) or truthy(get_path(status, "Flags.FsdHyperdriveCharging")):
+        deps = ["Status.Flags.FsdCharging"]
+        if truthy(get_path(status, "Flags.FsdHyperdriveCharging")):
+            deps.append("Status.Flags.FsdHyperdriveCharging")
+        return _out("charging", deps)
+    if truthy(get_path(status, "Flags.FsdCooldown")):
+        return _out("cooldown", ["Status.Flags.FsdCooldown"])
 
     start_jump = raw.get_last_journal_event("StartJump")
     if start_jump and ms_since(now_ms, start_jump["timestampMs"]) <= SEMANTIC_CONFIG["FSD_CHARGE_WINDOW_MS"]:
