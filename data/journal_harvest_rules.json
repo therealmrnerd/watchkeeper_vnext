@@ -107,6 +107,35 @@
         "StationEconomy", "StationEconomy_Localised", "StationEconomies"
       ]
     },
+    "SAASignalsFound": {
+      "fields": ["BodyName", "SystemAddress", "BodyID", "Signals", "Genuses"]
+    },
+    "ScanOrganic": {
+      "fields": [
+        "ScanType", "Genus", "Genus_Localised", "Species", "Species_Localised",
+        "Variant", "Variant_Localised", "WasLogged", "SystemAddress", "Body"
+      ]
+    },
+    "CodexEntry": {
+      "fields": [
+        "EntryID", "Name", "Name_Localised", "SubCategory", "SubCategory_Localised",
+        "Category", "Category_Localised", "Region", "Region_Localised", "System",
+        "SystemAddress", "BodyID", "Latitude", "Longitude", "VoucherAmount",
+        "NearestDestination", "NearestDestination_Localised", "IsNewEntry",
+        "NewTraitsDiscovered", "Traits"
+      ]
+    },
+    "FSSSignalDiscovered": {
+      "fields": [
+        "SystemAddress", "SignalName", "SignalName_Localised", "SignalType",
+        "IsStation", "USSType", "USSType_Localised", "SpawningState",
+        "SpawningState_Localised", "SpawningFaction", "SpawningFaction_Localised",
+        "SpawningPower", "OpposingPower", "ThreatLevel", "TimeRemaining"
+      ]
+    },
+    "USSDrop": {
+      "fields": ["USSType", "USSType_Localised", "USSThreat"]
+    },
     "ShipTargeted": {
       "fields": [
         "timestamp", "TargetLocked", "Ship", "Ship_Localised", "ScanStage",
@@ -142,6 +171,93 @@
     },
     "Undocked": {
       "fields": ["StationName", "StationName_Localised", "StationType", "MarketID", "Taxi", "Multicrew"]
+    },
+    "Market": {
+      "fields": [
+        "MarketID", "StationName", "StationName_Localised", "StationType",
+        "CarrierDockingAccess", "StarSystem", "Items"
+      ]
+    },
+    "MarketBuy": {
+      "fields": ["MarketID", "Type", "Type_Localised", "Count", "BuyPrice", "TotalCost"]
+    },
+    "MarketSell": {
+      "fields": [
+        "MarketID", "Type", "Type_Localised", "Count", "SellPrice", "TotalSale",
+        "AvgPricePaid", "StolenGoods", "IllegalGoods", "BlackMarket"
+      ]
+    },
+    "Cargo": {
+      "fields": ["Vessel", "Count", "Inventory"]
+    },
+    "CargoDepot": {
+      "fields": [
+        "MissionID", "UpdateType", "CargoType", "CargoType_Localised", "Count",
+        "StartMarketID", "EndMarketID", "ItemsCollected", "ItemsDelivered",
+        "TotalItemsToDeliver", "Progress"
+      ]
+    },
+    "CollectCargo": {
+      "fields": ["Type", "Type_Localised", "Stolen", "MissionID"]
+    },
+    "EjectCargo": {
+      "fields": ["Type", "Type_Localised", "Count", "Abandoned", "MissionID", "PowerplayOrigin"]
+    },
+    "MissionAccepted": {
+      "fields": [
+        "Faction", "Name", "LocalisedName", "Commodity", "Commodity_Localised",
+        "Count", "Expiry", "Wing", "Influence", "Reputation", "Reward",
+        "MissionID", "TargetType", "TargetType_Localised", "TargetFaction",
+        "DestinationSystem", "DestinationStation", "NewDestinationSystem",
+        "NewDestinationStation", "Target", "Target_Localised", "Donation",
+        "DestinationSettlement", "KillCount", "PassengerCount", "PassengerVIPs",
+        "PassengerWanted", "PassengerType"
+      ]
+    },
+    "MissionCompleted": {
+      "fields": [
+        "Faction", "Name", "LocalisedName", "MissionID", "Commodity",
+        "Commodity_Localised", "Count", "Reward", "PermitsAwarded",
+        "CommodityReward", "MaterialsReward", "FactionEffects", "Donation",
+        "Donated", "TargetFaction", "DestinationSystem", "DestinationStation",
+        "Target", "Target_Localised", "DestinationSettlement", "TargetType",
+        "TargetType_Localised", "KillCount", "NewDestinationSystem",
+        "NewDestinationStation"
+      ]
+    },
+    "MissionFailed": {
+      "fields": ["Name", "LocalisedName", "MissionID", "Fine"]
+    },
+    "Bounty": {
+      "fields": [
+        "Rewards", "PilotName", "PilotName_Localised", "Target", "Target_Localised",
+        "TotalReward", "VictimFaction", "VictimFaction_Localised",
+        "SharedWithOthers", "Reward", "Faction"
+      ]
+    },
+    "FactionKillBond": {
+      "fields": [
+        "Reward", "AwardingFaction", "AwardingFaction_Localised",
+        "VictimFaction", "VictimFaction_Localised"
+      ]
+    },
+    "RedeemVoucher": {
+      "fields": ["Type", "Faction", "Amount", "Factions", "BrokerPercentage"]
+    },
+    "CommitCrime": {
+      "fields": ["CrimeType", "Faction", "Victim", "Victim_Localised", "Bounty", "Fine"]
+    },
+    "Interdicted": {
+      "fields": [
+        "Submitted", "Interdictor", "Interdictor_Localised", "IsPlayer",
+        "IsThargoid", "CombatRank", "Faction", "Power"
+      ]
+    },
+    "Died": {
+      "fields": ["KillerName", "KillerName_Localised", "KillerShip", "KillerRank", "Killers"]
+    },
+    "SearchAndRescue": {
+      "fields": ["MarketID", "Name", "Name_Localised", "Count", "Reward"]
     }
   }
 }
