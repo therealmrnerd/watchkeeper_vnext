@@ -68,6 +68,7 @@ ED_STATUS_PATH = Path(os.getenv("WKV_ED_STATUS_PATH", str(ED_DEFAULT_JOURNAL_DIR
 ED_JOURNAL_DIR = Path(os.getenv("WKV_ED_JOURNAL_DIR", str(ED_DEFAULT_JOURNAL_DIR)))
 ED_MODULES_PATH = Path(os.getenv("WKV_ED_MODULES_PATH", str(ED_DEFAULT_JOURNAL_DIR / "ModulesInfo.json")))
 ED_CARGO_PATH = Path(os.getenv("WKV_ED_CARGO_PATH", str(ED_DEFAULT_JOURNAL_DIR / "Cargo.json")))
+ED_MARKET_PATH = Path(os.getenv("WKV_ED_MARKET_PATH", str(ED_DEFAULT_JOURNAL_DIR / "Market.json")))
 ED_POWER_CAPACITY_MW_RAW = os.getenv("WKV_ED_POWER_CAPACITY_MW", "").strip()
 LOOP_SLEEP_SEC = float(os.getenv("WKV_COLLECTOR_LOOP_SLEEP_SEC", "0.5"))
 SYSTEM_INTERVAL_SEC = float(os.getenv("WKV_SYSTEM_INTERVAL_SEC", "15"))
@@ -894,6 +895,7 @@ def _collect_modules_state(
         "ed.modules.ship_id": ship_payload.get("ShipID") if isinstance(ship_payload, dict) else None,
         "ed.modules.ship_name": ship_payload.get("ShipName") if isinstance(ship_payload, dict) else None,
         "ed.modules.ship_ident": ship_payload.get("ShipIdent") if isinstance(ship_payload, dict) else None,
+        "ed.modules.cargo_capacity": ship_payload.get("CargoCapacity") if isinstance(ship_payload, dict) else None,
         "ed.modules.hull_health_percent": _health_percent(
             ship_payload.get("HullHealth") if isinstance(ship_payload, dict) else None
         ),
@@ -945,12 +947,69 @@ def _collect_cargo_state(cargo_path: Path) -> dict[str, Any]:
     }
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _normalize_market_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    name = str(item.get("Name") or "").strip()
+    localised = str(item.get("Name_Localised") or "").strip()
+    if not name and not localised:
+        return None
+    return {
+        "name": name or None,
+        "name_localised": localised or None,
+        "category": item.get("Category_Localised") or item.get("Category"),
+        "buy_price": _as_int(item.get("BuyPrice")),
+        "sell_price": _as_int(item.get("SellPrice")),
+        "mean_price": _as_int(item.get("MeanPrice")),
+        "stock": _as_int(item.get("Stock")),
+        "demand": _as_int(item.get("Demand")),
+        "stock_bracket": item.get("StockBracket"),
+        "demand_bracket": item.get("DemandBracket"),
+        "consumer": bool(item.get("Consumer")) if "Consumer" in item else None,
+        "producer": bool(item.get("Producer")) if "Producer" in item else None,
+        "rare": bool(item.get("Rare")) if "Rare" in item else None,
+    }
+
+
+def _collect_market_state(market_path: Path) -> dict[str, Any]:
+    payload = _read_json_file(market_path)
+    items_raw = payload.get("Items") if isinstance(payload, dict) else None
+    items: list[dict[str, Any]] = []
+    if isinstance(items_raw, list):
+        for item in items_raw:
+            if isinstance(item, dict):
+                normalized = _normalize_market_item(item)
+                if normalized is not None:
+                    items.append(normalized)
+    sellable = [item for item in items if _as_int(item.get("stock")) > 0 and _as_int(item.get("buy_price")) > 0]
+    demanded = [item for item in items if _as_int(item.get("demand")) > 0 and _as_int(item.get("sell_price")) > 0]
+    return {
+        "ed.market.available": isinstance(payload, dict),
+        "ed.market.source_path": str(market_path),
+        "ed.market.updated_at": payload.get("timestamp") if isinstance(payload, dict) else None,
+        "ed.market.market_id": payload.get("MarketID") if isinstance(payload, dict) else None,
+        "ed.market.station_name": payload.get("StationName") if isinstance(payload, dict) else None,
+        "ed.market.station_type": payload.get("StationType") if isinstance(payload, dict) else None,
+        "ed.market.system_name": payload.get("StarSystem") if isinstance(payload, dict) else None,
+        "ed.market.item_count": len(items),
+        "ed.market.sellable_count": len(sellable),
+        "ed.market.demanded_count": len(demanded),
+        "ed.market.items": items,
+    }
+
+
 def collect_ed_file_state(
     *,
     status_path: Path = ED_STATUS_PATH,
     journal_dir: Path = ED_JOURNAL_DIR,
     modules_path: Path = ED_MODULES_PATH,
     cargo_path: Path = ED_CARGO_PATH,
+    market_path: Path = ED_MARKET_PATH,
 ) -> dict[str, Any]:
     status = _read_json_file(status_path)
     latest_journal = _latest_journal_path(journal_dir)
@@ -987,6 +1046,7 @@ def collect_ed_file_state(
     out.update(event_projection)
     out.update(_collect_modules_state(latest_journal=latest_journal, modules_path=modules_path))
     out.update(_collect_cargo_state(cargo_path))
+    out.update(_collect_market_state(market_path))
 
     if status is not None:
         flags = int(status.get("Flags") or 0)

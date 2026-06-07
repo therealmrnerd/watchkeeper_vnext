@@ -38,6 +38,7 @@ class MigrationApplyTests(unittest.TestCase):
                 "ed_systems",
                 "ed_bodies",
                 "ed_stations",
+                "ed_market_commodities",
                 "ed_powerplay_powers",
                 "mfd_layouts",
                 "mfd_outputs",
@@ -56,13 +57,14 @@ class MigrationApplyTests(unittest.TestCase):
             migration_rows = con.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
-            self.assertGreaterEqual(len(migration_rows), 6)
+            self.assertGreaterEqual(len(migration_rows), 7)
             self.assertEqual(migration_rows[0][0], "001")
             self.assertEqual(migration_rows[1][0], "002")
             self.assertEqual(migration_rows[2][0], "003")
             self.assertEqual(migration_rows[3][0], "004")
             self.assertEqual(migration_rows[4][0], "005")
             self.assertEqual(migration_rows[5][0], "006")
+            self.assertEqual(migration_rows[6][0], "007")
 
             power_row = con.execute(
                 """

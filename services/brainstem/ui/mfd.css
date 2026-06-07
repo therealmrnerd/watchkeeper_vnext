@@ -504,6 +504,98 @@ button {
   min-width: 0;
 }
 
+.mfd-conditional-display {
+  grid-template-rows: minmax(0, 0.95fr) minmax(48px, 0.28fr) auto;
+}
+
+.mfd-trade-pane {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(5px, 0.85vmin, 9px);
+  border: 1px solid rgba(53, 83, 109, 0.86);
+  background:
+    linear-gradient(rgba(85, 223, 255, 0.054) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(85, 223, 255, 0.044) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(13, 27, 34, 0.86), rgba(7, 11, 15, 0.42));
+  background-size: clamp(14px, 2vmin, 20px) clamp(14px, 2vmin, 20px), clamp(14px, 2vmin, 20px) clamp(14px, 2vmin, 20px), auto;
+  padding: var(--tile-pad);
+  overflow: hidden;
+}
+
+.mfd-trade-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(82px, 0.25fr);
+  align-items: end;
+  gap: clamp(6px, 1vmin, 12px);
+  border-bottom: 1px solid rgba(255, 159, 26, 0.36);
+  padding-bottom: clamp(5px, 0.8vmin, 8px);
+}
+
+.mfd-trade-header small {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: clamp(9px, 1.15vmin, 12px);
+}
+
+.mfd-trade-capacity {
+  text-align: right;
+  min-width: 0;
+}
+
+.mfd-trade-capacity strong {
+  color: var(--active-blue);
+  font-size: clamp(14px, 1.9vmin, 22px);
+}
+
+.mfd-trade-table {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+  gap: clamp(3px, 0.5vmin, 6px);
+}
+
+.mfd-trade-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1.05fr) minmax(120px, 1.24fr) minmax(74px, 0.58fr) minmax(78px, 0.64fr) minmax(96px, 0.78fr);
+  gap: clamp(4px, 0.75vmin, 8px);
+  align-items: center;
+  min-width: 0;
+  border-left: 1px solid rgba(255, 159, 26, 0.7);
+  background: linear-gradient(90deg, rgba(255, 159, 26, 0.08), rgba(10, 18, 24, 0.76));
+  padding: clamp(4px, 0.7vmin, 7px);
+  color: var(--text);
+  font-size: clamp(10px, 1.32vmin, 13px);
+}
+
+.mfd-trade-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mfd-trade-row strong {
+  color: var(--text);
+  font-size: clamp(11px, 1.45vmin, 15px);
+}
+
+.mfd-trade-row-head {
+  color: var(--amber);
+  text-transform: uppercase;
+  font-weight: 700;
+  background: rgba(255, 159, 26, 0.06);
+}
+
+.mfd-trade-empty {
+  border: 1px solid rgba(53, 83, 109, 0.74);
+  background: rgba(10, 18, 24, 0.74);
+  color: var(--muted);
+  padding: clamp(8px, 1.1vmin, 12px);
+  font-size: clamp(12px, 1.6vmin, 16px);
+}
+
 .mfd-data-grid,
 .mfd-target-box,
 .mfd-ship-readouts {

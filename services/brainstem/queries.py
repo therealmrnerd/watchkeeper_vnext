@@ -48,6 +48,7 @@ from mfd_layout_store import (
     list_layouts,
     list_outputs,
 )
+from trade_officer import build_trade_officer_payload
 
 try:
     from tools.diag_report import build_diag_report
@@ -1021,12 +1022,25 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         "module_power_percent_basis": state.get("ed.modules.power_percent_basis"),
         "module_source": state.get("ed.modules.source"),
         "module_count": state.get("ed.modules.count"),
+        "cargo_capacity": state.get("ed.modules.cargo_capacity"),
         "modules": module_items,
         "hardpoints": hardpoints,
         "has_limpet_controller": has_limpet_controller,
         "has_cargo_rack": has_cargo_rack,
         "cargo_inventory": state.get("ed.cargo.items") if isinstance(state.get("ed.cargo.items"), list) else [],
         "limpet_count": state.get("ed.cargo.limpet_count"),
+        "market": {
+            "available": _as_bool(state.get("ed.market.available")),
+            "market_id": state.get("ed.market.market_id"),
+            "station_name": state.get("ed.market.station_name"),
+            "station_type": state.get("ed.market.station_type"),
+            "system_name": state.get("ed.market.system_name"),
+            "updated_at": state.get("ed.market.updated_at"),
+            "item_count": state.get("ed.market.item_count"),
+            "sellable_count": state.get("ed.market.sellable_count"),
+            "demanded_count": state.get("ed.market.demanded_count"),
+            "items": state.get("ed.market.items") if isinstance(state.get("ed.market.items"), list) else [],
+        },
         "docked": _as_bool(state.get("ed.status.docked")),
         "landed": landed,
         "supercruise": supercruise,
@@ -1054,6 +1068,8 @@ def query_cockpit_state(query: dict[str, list[str]]) -> dict[str, Any]:
         "night_vision": _as_bool(state.get("ed.status.night_vision")),
         "analysis_mode": _as_bool(state.get("ed.status.analysis_mode")),
     }
+    trade = build_trade_officer_payload(state=state, db_path=Path(DB_PATH))
+    telemetry["trade"] = trade
     system_detail = {
         "allegiance": state.get("ed.system.allegiance"),
         "government": state.get("ed.system.government"),

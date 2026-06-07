@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -453,6 +454,57 @@ class EdFileCollectorTests(unittest.TestCase):
         self.assertEqual(result["ed.cargo.count"], 4)
         self.assertEqual(result["ed.cargo.limpet_count"], 4)
 
+    def test_collect_ed_file_state_reads_market_json(self) -> None:
+        market_path = self.temp_dir / "Market.json"
+        market_path.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-06-07T10:00:00Z",
+                    "event": "Market",
+                    "MarketID": 123456,
+                    "StationName": "Galileo",
+                    "StationType": "Coriolis",
+                    "StarSystem": "Sol",
+                    "Items": [
+                        {
+                            "Name": "$gold_name;",
+                            "Name_Localised": "Gold",
+                            "Category_Localised": "Metals",
+                            "BuyPrice": 42400,
+                            "SellPrice": 40500,
+                            "MeanPrice": 41000,
+                            "Stock": 642,
+                            "Demand": 0,
+                        },
+                        {
+                            "Name": "$tritium_name;",
+                            "Name_Localised": "Tritium",
+                            "BuyPrice": 0,
+                            "SellPrice": 52000,
+                            "Stock": 0,
+                            "Demand": 1200,
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.collector.collect_ed_file_state(
+            status_path=self.temp_dir / "missing-status.json",
+            journal_dir=self.temp_dir,
+            market_path=market_path,
+        )
+
+        self.assertTrue(result["ed.market.available"])
+        self.assertEqual(result["ed.market.market_id"], 123456)
+        self.assertEqual(result["ed.market.station_name"], "Galileo")
+        self.assertEqual(result["ed.market.item_count"], 2)
+        self.assertEqual(result["ed.market.sellable_count"], 1)
+        self.assertEqual(result["ed.market.demanded_count"], 1)
+        self.assertEqual(result["ed.market.items"][0]["name_localised"], "Gold")
+        self.assertEqual(result["ed.market.items"][0]["buy_price"], 42400)
+
 
 class CockpitStateQueryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -554,6 +606,60 @@ class CockpitStateQueryTests(unittest.TestCase):
         self.assertEqual(result["telemetry"]["module_count"], 1)
         self.assertEqual(result["telemetry"]["hull_percent"], 91)
         self.assertEqual(result["telemetry"]["modules"], modules)
+
+    def test_query_cockpit_state_includes_trade_opportunities(self) -> None:
+        self._set_state("ed.location.system", "Sol")
+        self._set_state("ed.location.system_address", 10477373803)
+        self._set_state("ed.market.available", True)
+        self._set_state("ed.market.market_id", 1001)
+        self._set_state("ed.market.station_name", "Galileo")
+        self._set_state("ed.market.system_name", "Sol")
+        self._set_state("ed.market.items", [
+            {
+                "name": "$gold_name;",
+                "name_localised": "Gold",
+                "buy_price": 42000,
+                "stock": 200,
+            }
+        ])
+        self._set_state("ed.modules.cargo_capacity", 120)
+        self._set_state("ed.cargo.count", 20)
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """
+                INSERT INTO ed_systems(system_address,name,coords_x,coords_y,coords_z,last_refreshed_at,expires_at,primary_source)
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (10477373803, "Sol", 0, 0, 0, "2026-06-07T10:00:00Z", "2026-06-08T10:00:00Z", "test"),
+            )
+            con.execute(
+                """
+                INSERT INTO ed_systems(system_address,name,coords_x,coords_y,coords_z,last_refreshed_at,expires_at,primary_source)
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (42, "Alpha Trade", 12, 0, 0, "2026-06-07T10:00:00Z", "2026-06-08T10:00:00Z", "test"),
+            )
+            con.execute(
+                """
+                INSERT INTO ed_market_commodities(
+                  market_id,station_name,system_address,system_name,commodity_name,commodity_localised,
+                  sell_price,demand,source,last_refreshed_at,expires_at
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (2002, "Profit Dock", 42, "Alpha Trade", "$gold_name;", "Gold", 47000, 500, "test", "2026-06-07T10:00:00Z", "2026-06-08T10:00:00Z"),
+            )
+            con.commit()
+
+        result = self.queries.query_cockpit_state({})
+        trade = result["telemetry"]["trade"]
+
+        self.assertEqual(trade["status"], "ready")
+        self.assertEqual(trade["ship"]["free_capacity_t"], 100)
+        self.assertEqual(trade["opportunities"][0]["commodity"], "Gold")
+        self.assertEqual(trade["opportunities"][0]["profit_per_t"], 5000)
+        self.assertEqual(trade["opportunities"][0]["profit_per_100t"], 500000)
+        self.assertEqual(trade["opportunities"][0]["profit_for_vessel"], 500000)
 
     def test_query_cockpit_state_uses_journal_fighter_active_as_vehicle_fallback(self) -> None:
         self._set_state("ed.running", True)

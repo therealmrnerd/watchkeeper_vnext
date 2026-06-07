@@ -134,6 +134,11 @@
     targetHullBar: document.getElementById("mfdTargetHullBar"),
     targetSchematic: document.getElementById("mfdTargetSchematic"),
     adviceList: document.getElementById("mfdAdviceList"),
+    tradePane: document.getElementById("mfdTradePane"),
+    tradeTitle: document.getElementById("mfdTradeTitle"),
+    tradeStatus: document.getElementById("mfdTradeStatus"),
+    tradeCapacity: document.getElementById("mfdTradeCapacity"),
+    tradeTable: document.getElementById("mfdTradeTable"),
     lampLights: document.getElementById("mfdLampLights"),
     lampGear: document.getElementById("mfdLampGear"),
     lampScoop: document.getElementById("mfdLampScoop"),
@@ -2648,6 +2653,83 @@
     }
   }
 
+  function credits(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "-";
+    }
+    return `${Math.round(number).toLocaleString()} cr`;
+  }
+
+  function tons(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "-";
+    }
+    return `${Math.max(0, Math.round(number)).toLocaleString()} t`;
+  }
+
+  function ly(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "-";
+    }
+    return `${number.toFixed(number >= 10 ? 1 : 2)} ly`;
+  }
+
+  function renderTradePane(t) {
+    const trade = t.trade && typeof t.trade === "object" ? t.trade : {};
+    const local = trade.local_market && typeof trade.local_market === "object" ? trade.local_market : {};
+    const ship = trade.ship && typeof trade.ship === "object" ? trade.ship : {};
+    const opportunities = Array.isArray(trade.opportunities) ? trade.opportunities : [];
+    if (!el.tradePane || !el.tradeTable) {
+      return;
+    }
+    const status = String(trade.status || "no_local_market");
+    el.tradePane.dataset.status = status;
+    setText(el.tradeTitle, local.station || "Space Trucking");
+    setText(el.tradeStatus, status.replace(/_/g, " "));
+    setText(el.tradeCapacity, ship.free_capacity_t === null || ship.free_capacity_t === undefined ? "Unknown" : tons(ship.free_capacity_t));
+    el.tradeTable.innerHTML = "";
+    if (!opportunities.length) {
+      const empty = document.createElement("div");
+      empty.className = "mfd-trade-empty";
+      const notes = Array.isArray(trade.notes) && trade.notes.length ? trade.notes : ["No trade routes available yet."];
+      empty.textContent = notes[0];
+      el.tradeTable.appendChild(empty);
+      return;
+    }
+    const header = document.createElement("div");
+    header.className = "mfd-trade-row mfd-trade-row-head";
+    ["Commodity", "Sell To", "Jump", "Profit/100t", "Vessel"].forEach((label) => {
+      const cell = document.createElement("span");
+      cell.textContent = label;
+      header.appendChild(cell);
+    });
+    el.tradeTable.appendChild(header);
+    opportunities.slice(0, 7).forEach((item) => {
+      const sell = item.sell && typeof item.sell === "object" ? item.sell : {};
+      const row = document.createElement("div");
+      row.className = "mfd-trade-row";
+      const commodity = document.createElement("strong");
+      const dest = document.createElement("span");
+      const jump = document.createElement("span");
+      const per100 = document.createElement("span");
+      const vessel = document.createElement("span");
+      commodity.textContent = text(item.commodity);
+      dest.textContent = [sell.station, sell.system].filter(Boolean).join(" / ") || "-";
+      jump.textContent = `${text(item.jump_bucket).toUpperCase()} ${ly(item.distance_ly)}`;
+      per100.textContent = credits(item.profit_per_100t);
+      vessel.textContent = item.capacity_known ? `${credits(item.profit_for_vessel)} / ${tons(item.trade_tons)}` : "capacity ?";
+      row.appendChild(commodity);
+      row.appendChild(dest);
+      row.appendChild(jump);
+      row.appendChild(per100);
+      row.appendChild(vessel);
+      el.tradeTable.appendChild(row);
+    });
+  }
+
   function render(data) {
     const t = data.telemetry || {};
     const safety = data.safety || {};
@@ -2681,6 +2763,7 @@
     syncShipViewToMode(t);
     renderShipView();
     setControlState(t, data.semantic || {});
+    renderTradePane(t);
     renderInfoPane(data);
   }
 

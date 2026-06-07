@@ -13,7 +13,7 @@
   <link rel="icon" type="image/x-icon" href="icons/favicon.ico">
   <link rel="manifest" href="mfd.webmanifest?v=54">
   <link rel="apple-touch-icon" href="icons/watchkeeper_logo.png">
-  <link rel="stylesheet" href="mfd.css?v=156">
+  <link rel="stylesheet" href="mfd.css?v=157">
 </head>
 <body>
   <div id="mfdFullscreenGate" class="mfd-fullscreen-gate">
@@ -285,6 +285,20 @@
         </article>
 
         <article class="mfd-display mfd-conditional-display" data-panel-id="conditional">
+          <section class="mfd-trade-pane" id="mfdTradePane" aria-label="Space trucking">
+            <header class="mfd-trade-header">
+              <div>
+                <span class="mfd-label">Trade Officer</span>
+                <strong id="mfdTradeTitle">Space Trucking</strong>
+                <small id="mfdTradeStatus">Awaiting market data</small>
+              </div>
+              <div class="mfd-trade-capacity">
+                <span class="mfd-label">Free Tons</span>
+                <strong id="mfdTradeCapacity">-</strong>
+              </div>
+            </header>
+            <div class="mfd-trade-table" id="mfdTradeTable"></div>
+          </section>
           <div id="mfdAdviceList" class="mfd-advice-list"></div>
           <footer>
             <span id="mfdClock">-</span>
@@ -459,7 +473,7 @@
       </aside>
     </section>
   </main>
-  <script src="mfd.js?v=160"></script>
+  <script src="mfd.js?v=161"></script>
 </body>
 </html>
 
