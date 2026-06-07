@@ -42,6 +42,7 @@ LOG_DIR = Path(os.getenv("WKV_LOG_DIR", ROOT_DIR / "logs"))
 SNAPSHOT_DIR = Path(os.getenv("WKV_SNAPSHOT_DIR", ROOT_DIR / "snapshots"))
 ENABLE_ACTUATORS = os.getenv("WKV_ENABLE_ACTUATORS", "1").strip().lower() in {"1", "true", "yes"}
 ENABLE_KEYPRESS = os.getenv("WKV_ENABLE_KEYPRESS", "0").strip().lower() in {"1", "true", "yes"}
+TESTING_MODE = os.getenv("WKV_TESTING_MODE", "0").strip().lower() in {"1", "true", "yes"}
 LIGHTS_WEBHOOK_URL = os.getenv("WKV_LIGHTS_WEBHOOK_URL", "").strip()
 LIGHTS_WEBHOOK_URL_TEMPLATE = os.getenv("WKV_LIGHTS_WEBHOOK_URL_TEMPLATE", "").strip()
 LIGHTS_WEBHOOK_TIMEOUT_SEC = float(os.getenv("WKV_LIGHTS_WEBHOOK_TIMEOUT_SEC", "5"))

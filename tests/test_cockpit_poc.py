@@ -465,6 +465,8 @@ class CockpitStateQueryTests(unittest.TestCase):
         os.environ["WKV_PROVIDER_SECRETS_PATH"] = str(self.temp_dir / "provider_secrets.dpapi")
         os.environ["WKV_ENABLE_KEYPRESS"] = "0"
         os.environ["WKV_ENABLE_ACTUATORS"] = "0"
+        os.environ["WKV_TESTING_MODE"] = "1"
+        os.environ["WKV_KEYPRESS_TEST_LOG"] = str(self.temp_dir / "keypress_test_log.txt")
         for name in ("runtime", "queries", "handlers", "actions", "validators"):
             sys.modules.pop(name, None)
         self.runtime = importlib.import_module("runtime")
@@ -485,6 +487,15 @@ class CockpitStateQueryTests(unittest.TestCase):
             confidence=1.0,
             emit_event=False,
         )
+
+    def _keypress_log_entries(self) -> list[dict[str, object]]:
+        log_path = Path(os.environ["WKV_KEYPRESS_TEST_LOG"])
+        self.assertTrue(log_path.exists(), f"Expected keypress test log at {log_path}")
+        entries: list[dict[str, object]] = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                entries.append(json.loads(line))
+        return entries
 
     def test_query_cockpit_state_includes_action_intent(self) -> None:
         self._set_state("ed.running", True)
@@ -704,7 +715,7 @@ class CockpitStateQueryTests(unittest.TestCase):
             ):
                 req = urllib.request.Request(
                     f"http://127.0.0.1:{port}/cockpit/control",
-                    data=json.dumps({"action": "landing_gear", "dry_run": True}).encode("utf-8"),
+                    data=json.dumps({"action": "landing_gear", "dry_run": False}).encode("utf-8"),
                     method="POST",
                     headers={"Content-Type": "application/json"},
                 )
@@ -717,6 +728,7 @@ class CockpitStateQueryTests(unittest.TestCase):
         self.assertEqual(payload["action"], "landing_gear")
         self.assertEqual(payload["key"], "l")
         self.assertEqual(payload["execute"]["results"][0]["status"], "success")
+        self.assertEqual(self._keypress_log_entries()[-1]["parameters"]["sequence"][0]["key"], "l")
 
     def test_cockpit_lights_control_uses_alt_t_binding(self) -> None:
         with mock.patch.object(
@@ -725,12 +737,13 @@ class CockpitStateQueryTests(unittest.TestCase):
             return_value="EliteDangerous64.exe",
         ):
             payload = self.actions.cockpit_control_action(
-                {"action": "lights", "dry_run": True},
+                {"action": "lights", "dry_run": False},
                 source="test",
             )
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["key"], "alt+t")
         self.assertEqual(payload["execute"]["results"][0]["status"], "success")
+        self.assertEqual(self._keypress_log_entries()[-1]["parameters"]["sequence"][0]["key"], "alt+t")
 
     def test_cockpit_panel_controls_use_number_bindings(self) -> None:
         expected = {
@@ -756,12 +769,13 @@ class CockpitStateQueryTests(unittest.TestCase):
             for action, key in expected.items():
                 with self.subTest(action=action):
                     payload = self.actions.cockpit_control_action(
-                        {"action": action, "dry_run": True},
+                        {"action": action, "dry_run": False},
                         source="test",
                     )
                     self.assertTrue(payload["ok"])
                     self.assertEqual(payload["key"], key)
                     self.assertEqual(payload["execute"]["results"][0]["status"], "success")
+                    self.assertEqual(self._keypress_log_entries()[-1]["parameters"]["sequence"][0]["key"], key)
 
     def test_cockpit_auto_dock_dry_run_exposes_macro_sequence(self) -> None:
         payload = self.actions.cockpit_control_action(

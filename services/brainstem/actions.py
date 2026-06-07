@@ -32,6 +32,7 @@ from runtime import (
     LIGHTS_WEBHOOK_TIMEOUT_SEC,
     LIGHTS_WEBHOOK_URL,
     LIGHTS_WEBHOOK_URL_TEMPLATE,
+    LOG_DIR,
     LOGBOOK,
     PROVIDER_CONFIG_PATH,
     PROVIDER_HEALTH_ENABLED,
@@ -39,6 +40,7 @@ from runtime import (
     SAMMI_CLIENT,
     SPECIAL_VK_MAP,
     TOOL_ROUTER,
+    TESTING_MODE,
     TWITCH_DEV_INGEST_ENABLED,
     TWITCH_CHAT_SEND_BUTTON,
     TWITCH_CHAT_STRICT_CONFIRM,
@@ -470,6 +472,8 @@ def _execute_music(tool_name: str) -> dict[str, Any]:
 
 
 def _execute_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
+    if TESTING_MODE:
+        return _record_test_keypress(parameters)
     if not ENABLE_KEYPRESS:
         raise ValueError("keypress actuator is disabled (set WKV_ENABLE_KEYPRESS=1)")
     if not _any_process_running(KEYPRESS_ALLOWED_PROCESSES):
@@ -483,6 +487,25 @@ def _execute_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
     key_name = str(parameters.get("key", "")).strip()
     backend = str(parameters.get("backend") or KEYPRESS_BACKEND).strip().lower()
     return _send_key_combo_backend(key_name, backend=backend)
+
+
+def _record_test_keypress(parameters: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "timestamp_utc": utc_now_iso(),
+        "parameters": parameters,
+    }
+    log_path = Path(os.getenv("WKV_KEYPRESS_TEST_LOG", str(Path(LOG_DIR) / "keypress_test_log.txt")))
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    return {
+        "status": "success",
+        "testing_mode": True,
+        "stub_execution": True,
+        "log_path": str(log_path),
+        "parameters": parameters,
+        "result": "Testing mode keypress gate recorded the input; no actuator call executed.",
+    }
 
 
 def _state_bool(state_key: str) -> bool:
